@@ -546,8 +546,9 @@ type PredictiveCodec struct {
 	cx   []*complexStage
 	rl   []*realStage
 
-	res []int32
-	hdr []byte // scratch for DecodeBody
+	res   []int32
+	zeros []int16 // AdvanceSilence's block input; never written
+	hdr   []byte  // scratch for DecodeBody
 }
 
 // NewPredictiveCodec builds a codec for the given profile id, rejecting one it
@@ -650,6 +651,18 @@ func (c *PredictiveCodec) AdvanceSilence(count int) error {
 		return fmt.Errorf("predictive codec: %d samples is not a whole number of %d-channel frames", count, step)
 	}
 	c.beginPacket(count / step)
+	if c.block16() {
+		// The block path reads samples and writes residuals; both are
+		// scratch here.
+		if cap(c.zeros) < count {
+			c.zeros = make([]int16, count)
+		}
+		if cap(c.res) < count {
+			c.res = make([]int32, count)
+		}
+		c.cx[0].forwardBlock16(c.zeros[:count], c.res[:count])
+		return nil
+	}
 	for i := 0; i < count; i += step {
 		c.forward(0, 0)
 	}
@@ -686,6 +699,13 @@ func (c *PredictiveCodec) Decode(payload []byte, count int) ([]int16, error) {
 		// Advance the filters over these samples exactly as the encoder did,
 		// discarding the residuals it produced.
 		c.beginPacket(count / step)
+		if c.block16() {
+			if cap(c.res) < count {
+				c.res = make([]int32, count)
+			}
+			c.cx[0].forwardBlock16(out, c.res[:count])
+			return out, nil
+		}
 		for i := 0; i < count; i += step {
 			a := int64(int32(out[i]))
 			var b int64
@@ -706,6 +726,10 @@ func (c *PredictiveCodec) Decode(payload []byte, count int) ([]int16, error) {
 	}
 
 	c.beginPacket(count / step)
+	if c.block16() {
+		c.cx[0].inverseBlock16(c.res, out)
+		return out, nil
+	}
 	if c.prof.Complex {
 		for i := 0; i < count; i += 2 {
 			a, b := int64(c.res[i]), int64(c.res[i+1])

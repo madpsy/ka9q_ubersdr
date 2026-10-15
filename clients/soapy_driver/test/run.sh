@@ -32,6 +32,16 @@ cmake --build "$BUILD" >/dev/null || { echo "driver build failed"; exit 1; }
 g++ -O0 -o "$BUILD/probe_range" probe_range.cpp -lSoapySDR || { echo "probe build failed"; exit 1; }
 g++ -std=c++11 -O2 -Wall -Wextra -o "$BUILD/pcmv4_conformance" pcmv4_conformance.cpp \
     || { echo "conformance build failed"; exit 1; }
+g++ -std=c++11 -O2 -Wall -Wextra -DUBERSDR_PCMV4_NO_SIMD -o "$BUILD/pcmv4_conformance_nosimd" pcmv4_conformance.cpp \
+    || { echo "conformance (no SIMD) build failed"; exit 1; }
+# The order-16 IQ block against the decoder as it was before it, with the SIMD
+# kernel this machine has and without; and once more under ASan and UBSan.
+g++ -std=c++11 -O2 -Wall -Wextra -o "$BUILD/pcmv4_block_test" pcmv4_block_test.cpp \
+    || { echo "block test build failed"; exit 1; }
+g++ -std=c++11 -O2 -Wall -Wextra -DUBERSDR_PCMV4_NO_SIMD -o "$BUILD/pcmv4_block_test_nosimd" pcmv4_block_test.cpp \
+    || { echo "block test (no SIMD) build failed"; exit 1; }
+g++ -std=c++11 -O1 -g -fsanitize=address,undefined -fno-sanitize-recover -o "$BUILD/pcmv4_block_test_san" \
+    pcmv4_block_test.cpp || { echo "block test (sanitizers) build failed"; exit 1; }
 
 pass=0; fail=0
 server_pid=""
@@ -130,6 +140,25 @@ if [ "$got" = "$PCMV4_SCALED_SHA256" ]; then
 else
     echo "FAIL pcmv4-scaled: decoded samples hash to $got, want $PCMV4_SCALED_SHA256"; fail=$((fail+1))
 fi
+
+# The same fixtures decoded without the SIMD kernel must hash the same.
+for fx in pcmv4_stream:PCMV4_SHA256 pcmv4_rice_edge:PCMV4_RICE_EDGE_SHA256 pcmv4_scaled:PCMV4_SCALED_SHA256; do
+    name=${fx%%:*}; var=${fx##*:}; want=${!var}
+    got=$("$BUILD/pcmv4_conformance_nosimd" testdata/$name.bin 2>/dev/null | sha256sum | cut -d" " -f1)
+    if [ "$got" = "$want" ]; then
+        echo "PASS $name (no SIMD)"; pass=$((pass+1))
+    else
+        echo "FAIL $name (no SIMD): decoded samples hash to $got, want $want"; fail=$((fail+1))
+    fi
+done
+
+for bt in pcmv4_block_test pcmv4_block_test_nosimd pcmv4_block_test_san; do
+    if out=$("$BUILD/$bt" 2>&1); then
+        echo "PASS $bt: $out"; pass=$((pass+1))
+    else
+        echo "FAIL $bt: $out"; fail=$((fail+1))
+    fi
+done
 
 # Unreachable server: nothing is listening on this port at all. The driver must still
 # load and must advertise the pre-span range rather than refusing to construct.

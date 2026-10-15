@@ -60,6 +60,39 @@
 #include <string>
 #include <vector>
 
+// The order-16 IQ block runs in SIMD registers: AVX2 on x86-64 with GCC or
+// Clang, chosen at run time (see ComplexStage::haveAVX2), so a build for any
+// x86-64 uses it where the CPU has it; NEON on arm64, which every core has.
+// Elsewhere, or with UBERSDR_PCMV4_NO_SIMD defined, the per-frame path runs
+// with the same output.
+#if !defined(UBERSDR_PCMV4_NO_SIMD)
+#if defined(__x86_64__) || defined(_M_X64)
+#define UBERSDR_PCMV4_AVX2 1
+#include <immintrin.h>
+#if defined(_MSC_VER) && defined(__clang__)
+// clang-cl's <immintrin.h> leaves out the SSE4.1 and AVX headers unless the
+// whole build targets them, which a build for any x86-64 does not. Included
+// directly, as simdjson does: their guard only asks that <immintrin.h> came
+// first, and each intrinsic carries its own target, so they are usable from
+// the AVX2-targeted kernel and nowhere else.
+#include <smmintrin.h>
+#include <avxintrin.h>
+#include <avx2intrin.h>
+#endif
+#if defined(_MSC_VER) && !defined(__clang__)
+#include <intrin.h>
+// MSVC compiles AVX2 intrinsics whatever /arch says; GCC and Clang (clang-cl
+// included) need the function marked.
+#define UBERSDR_PCMV4_TARGET_AVX2
+#else
+#define UBERSDR_PCMV4_TARGET_AVX2 __attribute__((target("avx2")))
+#endif
+#elif defined(__aarch64__) && defined(__ARM_NEON)
+#define UBERSDR_PCMV4_NEON 1
+#include <arm_neon.h>
+#endif
+#endif
+
 namespace ubersdr {
 
 // ---------------------------------------------------------------------------
@@ -237,14 +270,12 @@ static inline float pcmQualityToFloat(int16_t q) {
 class ComplexStage {
 public:
     ComplexStage(int order, int64_t mu)
-        : _order(order), _mu(mu), _fast(false), _idx(order) {
+        : _order(order), _mu(mu), _fast(false), _idx(order), _wide(false) {
         const int n = predHistoryLen(order);
         _wr.assign(order, 0);
         _wi.assign(order, 0);
         _hr.assign(n, 0);
         _hi.assign(n, 0);
-        _sr.assign(n, 0);
-        _si.assign(n, 0);
     }
 
     // Decide once per packet whether adapt may skip the tap clamp.
@@ -256,13 +287,17 @@ public:
     // taps, so the two take the same path; the clamped loop produces identical
     // values anyway when it does run.
     void beginPacket(int steps) {
+        if (_wide) {
+            _wideStage.beginPacket(steps);
+            return;
+        }
         int64_t maxAbs = 0;
         for (size_t j = 0; j < _wr.size(); ++j) {
-            int64_t w = _wr[j] < 0 ? -_wr[j] : _wr[j];
+            int64_t w = _wr[j] < 0 ? -(int64_t)_wr[j] : _wr[j];
             if (w > maxAbs) maxAbs = w;
         }
         for (size_t j = 0; j < _wi.size(); ++j) {
-            int64_t w = _wi[j] < 0 ? -_wi[j] : _wi[j];
+            int64_t w = _wi[j] < 0 ? -(int64_t)_wi[j] : _wi[j];
             if (w > maxAbs) maxAbs = w;
         }
         _fast = maxAbs + 2 * _mu * (int64_t)steps <= kTapLimit;
@@ -272,6 +307,10 @@ public:
     // to advance the filters across an escaped or silent packet exactly as the
     // encoder did.
     void forward(int64_t xr, int64_t xi, int64_t &er, int64_t &ei) {
+        if (_wide) {
+            _wideStage.forward(xr, xi, er, ei);
+            return;
+        }
         int64_t pr, pi;
         predict(pr, pi);
         er = xr - pr;
@@ -283,6 +322,10 @@ public:
     // Decoder direction: reconstruct a sample from its residual, performing the
     // same prediction, adaptation and history update as forward.
     void inverse(int64_t er, int64_t ei, int64_t &xr, int64_t &xi) {
+        if (_wide) {
+            _wideStage.inverse(er, ei, xr, xi);
+            return;
+        }
         int64_t pr, pi;
         predict(pr, pi);
         xr = er + pr;
@@ -291,67 +334,476 @@ public:
         push(xr, xi);
     }
 
+    // A whole packet of inverse() at once, for the order-16 filter every IQ
+    // profile uses: taps and history stay in vector registers (AVX2, or NEON
+    // on arm64) from the first frame to the last, the history window sliding
+    // a lane a frame. Exactly inverse()'s arithmetic (see predict and adapt):
+    // the products in int64 lanes, the update in int32 lanes, and the clamp
+    // always applied, which the fast path may skip only because there it
+    // changes nothing. False when this cannot run (another order, a stage gone
+    // wide, neither instruction set): call inverse() per frame instead.
+    bool inverseBlock(const int32_t *res, int16_t *out, int frames) {
+        if (_order != 16 || _wide) return false;
+#if defined(UBERSDR_PCMV4_AVX2)
+        if (!haveAVX2()) return false;
+        inverseBlockAVX2(res, out, frames);
+        return true;
+#elif defined(UBERSDR_PCMV4_NEON)
+        inverseBlockNEON(res, out, frames);
+        return true;
+#else
+        (void)res;
+        (void)out;
+        (void)frames;
+        return false;
+#endif
+    }
+
+#if defined(UBERSDR_PCMV4_AVX2)
+    // Whether this CPU runs AVX2, asked once. The kernel below is compiled
+    // for AVX2 whatever flags the build used -- a SoapySDR module or an SDR++
+    // plugin is built for any x86-64 -- so it must not run on one without.
+    //
+    // Read straight from CPUID and XCR0 rather than __builtin_cpu_supports,
+    // which needs a runtime library symbol clang-cl's Windows builds do not
+    // link: leaf 7 present, AVX and OSXSAVE (leaf 1 ECX bits 28 and 27), the
+    // OS saving YMM state (XCR0 bits 1 and 2), and AVX2 (leaf 7 EBX bit 5).
+    static bool haveAVX2() {
+        static const bool have = [] {
+            unsigned r[4];
+            cpuid(0, 0, r);
+            if (r[0] < 7) return false;
+            cpuid(1, 0, r);
+            const unsigned osxsaveAVX = (1u << 27) | (1u << 28);
+            if ((r[2] & osxsaveAVX) != osxsaveAVX) return false;
+            if ((xcr0() & 6) != 6) return false;
+            cpuid(7, 0, r);
+            return (r[1] & (1u << 5)) != 0;
+        }();
+        return have;
+    }
+
+    static void cpuid(unsigned leaf, unsigned sub, unsigned r[4]) {
+#if defined(_MSC_VER) && !defined(__clang__)
+        int v[4];
+        __cpuidex(v, (int)leaf, (int)sub);
+        for (int i = 0; i < 4; ++i) r[i] = (unsigned)v[i];
+#else
+        __asm__ volatile("cpuid" : "=a"(r[0]), "=b"(r[1]), "=c"(r[2]), "=d"(r[3]) : "a"(leaf), "c"(sub));
+#endif
+    }
+
+    // Only called once OSXSAVE is known set, so xgetbv cannot fault.
+    static uint64_t xcr0() {
+#if defined(_MSC_VER) && !defined(__clang__)
+        return _xgetbv(0);
+#else
+        unsigned lo, hi;
+        __asm__ volatile("xgetbv" : "=a"(lo), "=d"(hi) : "c"(0));
+        return ((uint64_t)hi << 32) | lo;
+#endif
+    }
+
+    UBERSDR_PCMV4_TARGET_AVX2 void inverseBlockAVX2(const int32_t *res, int16_t *out, int frames) {
+        const size_t lo = (size_t)(_idx - 16);
+        __m256i hr0 = _mm256_loadu_si256((const __m256i *)&_hr[lo]);
+        __m256i hr1 = _mm256_loadu_si256((const __m256i *)&_hr[lo + 8]);
+        __m256i hi0 = _mm256_loadu_si256((const __m256i *)&_hi[lo]);
+        __m256i hi1 = _mm256_loadu_si256((const __m256i *)&_hi[lo + 8]);
+        __m256i wr0 = _mm256_loadu_si256((const __m256i *)&_wr[0]);
+        __m256i wr1 = _mm256_loadu_si256((const __m256i *)&_wr[8]);
+        __m256i wi0 = _mm256_loadu_si256((const __m256i *)&_wi[0]);
+        __m256i wi1 = _mm256_loadu_si256((const __m256i *)&_wi[8]);
+        const __m256i rot = _mm256_setr_epi32(1, 2, 3, 4, 5, 6, 7, 0);
+        const __m256i lim = _mm256_set1_epi32((int32_t)kTapLimit);
+        const __m256i nlim = _mm256_set1_epi32(-(int32_t)kTapLimit);
+        const int64_t half = (int64_t)1 << (kTapShift - 1);
+        int f = 0;
+        for (; f < frames; ++f) {
+            const int64_t er = res[2 * f], ei = res[2 * f + 1];
+
+            // Even lanes multiply directly; the odd ones once shifted down.
+            const __m256i wr0o = _mm256_srli_epi64(wr0, 32), wr1o = _mm256_srli_epi64(wr1, 32);
+            const __m256i wi0o = _mm256_srli_epi64(wi0, 32), wi1o = _mm256_srli_epi64(wi1, 32);
+            const __m256i hr0o = _mm256_srli_epi64(hr0, 32), hr1o = _mm256_srli_epi64(hr1, 32);
+            const __m256i hi0o = _mm256_srli_epi64(hi0, 32), hi1o = _mm256_srli_epi64(hi1, 32);
+            __m256i accR = _mm256_add_epi64(
+                _mm256_add_epi64(_mm256_mul_epi32(wr0, hr0), _mm256_mul_epi32(wr0o, hr0o)),
+                _mm256_add_epi64(_mm256_mul_epi32(wr1, hr1), _mm256_mul_epi32(wr1o, hr1o)));
+            accR = _mm256_sub_epi64(accR, _mm256_add_epi64(
+                _mm256_add_epi64(_mm256_mul_epi32(wi0, hi0), _mm256_mul_epi32(wi0o, hi0o)),
+                _mm256_add_epi64(_mm256_mul_epi32(wi1, hi1), _mm256_mul_epi32(wi1o, hi1o))));
+            __m256i accI = _mm256_add_epi64(
+                _mm256_add_epi64(_mm256_mul_epi32(wr0, hi0), _mm256_mul_epi32(wr0o, hi0o)),
+                _mm256_add_epi64(_mm256_mul_epi32(wr1, hi1), _mm256_mul_epi32(wr1o, hi1o)));
+            accI = _mm256_add_epi64(accI, _mm256_add_epi64(
+                _mm256_add_epi64(_mm256_mul_epi32(wi0, hr0), _mm256_mul_epi32(wi0o, hr0o)),
+                _mm256_add_epi64(_mm256_mul_epi32(wi1, hr1), _mm256_mul_epi32(wi1o, hr1o))));
+            const __m128i sR = _mm_add_epi64(_mm256_castsi256_si128(accR), _mm256_extracti128_si256(accR, 1));
+            const __m128i sI = _mm_add_epi64(_mm256_castsi256_si128(accI), _mm256_extracti128_si256(accI, 1));
+            const __m128i sum = _mm_add_epi64(_mm_unpacklo_epi64(sR, sI), _mm_unpackhi_epi64(sR, sI));
+            const int64_t pr = _mm_cvtsi128_si64(sum);
+            const int64_t pi = _mm_extract_epi64(sum, 1);
+            // predRoundShift without a branch: |v| rounded, its sign put back.
+            const int64_t sgr = pr >> 63, sgi = pi >> 63;
+            const int64_t qr = (int64_t)((((uint64_t)((pr ^ sgr) - sgr) + (uint64_t)half) >> kTapShift) ^ (uint64_t)sgr) - sgr;
+            const int64_t qi = (int64_t)((((uint64_t)((pi ^ sgi) - sgi) + (uint64_t)half) >> kTapShift) ^ (uint64_t)sgi) - sgi;
+            const int64_t xr = er + qr, xi = ei + qi;
+            if (xr < INT32_MIN || xr > INT32_MAX || xi < INT32_MIN || xi > INT32_MAX) break;
+
+            if (er != 0 || ei != 0) {
+                const __m256i mr = _mm256_set1_epi32((int32_t)(_mu * predSign(er)));
+                const __m256i mi = _mm256_set1_epi32((int32_t)(_mu * predSign(ei)));
+#define UBERSDR_ADAPT(wr, wi, hr, hi)                                                                  \
+                {                                                                                      \
+                    const __m256i lr = _mm256_sign_epi32(                                              \
+                        _mm256_srli_epi32(_mm256_abs_epi32(wr), kLeakShiftComplex), wr);               \
+                    const __m256i li = _mm256_sign_epi32(                                              \
+                        _mm256_srli_epi32(_mm256_abs_epi32(wi), kLeakShiftComplex), wi);               \
+                    const __m256i nr = _mm256_sub_epi32(_mm256_add_epi32(wr, _mm256_add_epi32(         \
+                        _mm256_sign_epi32(mr, hr), _mm256_sign_epi32(mi, hi))), lr);                   \
+                    const __m256i ni = _mm256_sub_epi32(_mm256_add_epi32(wi, _mm256_sub_epi32(         \
+                        _mm256_sign_epi32(mi, hr), _mm256_sign_epi32(mr, hi))), li);                   \
+                    wr = _mm256_max_epi32(_mm256_min_epi32(nr, lim), nlim);                            \
+                    wi = _mm256_max_epi32(_mm256_min_epi32(ni, lim), nlim);                            \
+                }
+                UBERSDR_ADAPT(wr0, wi0, hr0, hi0)
+                UBERSDR_ADAPT(wr1, wi1, hr1, hi1)
+#undef UBERSDR_ADAPT
+            }
+
+            out[2 * f] = (int16_t)xr;
+            out[2 * f + 1] = (int16_t)xi;
+            // Slide the window a lane: the oldest out, this frame in at the top.
+            const __m256i r0 = _mm256_permutevar8x32_epi32(hr0, rot), r1 = _mm256_permutevar8x32_epi32(hr1, rot);
+            const __m256i i0 = _mm256_permutevar8x32_epi32(hi0, rot), i1 = _mm256_permutevar8x32_epi32(hi1, rot);
+            hr0 = _mm256_blend_epi32(r0, r1, 0x80);
+            hi0 = _mm256_blend_epi32(i0, i1, 0x80);
+            hr1 = _mm256_blend_epi32(r1, _mm256_set1_epi32((int32_t)xr), 0x80);
+            hi1 = _mm256_blend_epi32(i1, _mm256_set1_epi32((int32_t)xi), 0x80);
+        }
+        _mm256_storeu_si256((__m256i *)&_wr[0], wr0);
+        _mm256_storeu_si256((__m256i *)&_wr[8], wr1);
+        _mm256_storeu_si256((__m256i *)&_wi[0], wi0);
+        _mm256_storeu_si256((__m256i *)&_wi[8], wi1);
+        _mm256_storeu_si256((__m256i *)&_hr[0], hr0);
+        _mm256_storeu_si256((__m256i *)&_hr[8], hr1);
+        _mm256_storeu_si256((__m256i *)&_hi[0], hi0);
+        _mm256_storeu_si256((__m256i *)&_hi[8], hi1);
+        _idx = 16;
+        // A sample past int32 (never, from int16 samples): the rest frame by
+        // frame, which takes this one again from its prediction and goes wide.
+        for (; f < frames; ++f) {
+            int64_t xr, xi;
+            inverse(res[2 * f], res[2 * f + 1], xr, xi);
+            out[2 * f] = (int16_t)xr;
+            out[2 * f + 1] = (int16_t)xi;
+        }
+    }
+#endif
+
+#if defined(UBERSDR_PCMV4_NEON)
+    void inverseBlockNEON(const int32_t *res, int16_t *out, int frames) {
+        const size_t lo = (size_t)(_idx - 16);
+        int32x4_t hr[4], hi[4], wr[4], wi[4];
+        for (int k = 0; k < 4; ++k) {
+            hr[k] = vld1q_s32(&_hr[lo + 4 * (size_t)k]);
+            hi[k] = vld1q_s32(&_hi[lo + 4 * (size_t)k]);
+            wr[k] = vld1q_s32(&_wr[4 * (size_t)k]);
+            wi[k] = vld1q_s32(&_wi[4 * (size_t)k]);
+        }
+        const int32x4_t lim = vdupq_n_s32((int32_t)kTapLimit);
+        const int32x4_t nlim = vdupq_n_s32(-(int32_t)kTapLimit);
+        const uint64_t half = (uint64_t)1 << (kTapShift - 1);
+        int f = 0;
+        for (; f < frames; ++f) {
+            const int64_t er = res[2 * f], ei = res[2 * f + 1];
+
+            // Two accumulators a part, each a pair of int64 lanes, so the
+            // multiply-accumulates are not all one chain.
+            int64x2_t ar0 = vmull_s32(vget_low_s32(wr[0]), vget_low_s32(hr[0]));
+            int64x2_t ar1 = vmull_high_s32(wr[0], hr[0]);
+            int64x2_t ai0 = vmull_s32(vget_low_s32(wr[0]), vget_low_s32(hi[0]));
+            int64x2_t ai1 = vmull_high_s32(wr[0], hi[0]);
+            ar0 = vmlsl_s32(ar0, vget_low_s32(wi[0]), vget_low_s32(hi[0]));
+            ar1 = vmlsl_high_s32(ar1, wi[0], hi[0]);
+            ai0 = vmlal_s32(ai0, vget_low_s32(wi[0]), vget_low_s32(hr[0]));
+            ai1 = vmlal_high_s32(ai1, wi[0], hr[0]);
+            for (int k = 1; k < 4; ++k) {
+                ar0 = vmlal_s32(ar0, vget_low_s32(wr[k]), vget_low_s32(hr[k]));
+                ar1 = vmlal_high_s32(ar1, wr[k], hr[k]);
+                ai0 = vmlal_s32(ai0, vget_low_s32(wr[k]), vget_low_s32(hi[k]));
+                ai1 = vmlal_high_s32(ai1, wr[k], hi[k]);
+                ar0 = vmlsl_s32(ar0, vget_low_s32(wi[k]), vget_low_s32(hi[k]));
+                ar1 = vmlsl_high_s32(ar1, wi[k], hi[k]);
+                ai0 = vmlal_s32(ai0, vget_low_s32(wi[k]), vget_low_s32(hr[k]));
+                ai1 = vmlal_high_s32(ai1, wi[k], hr[k]);
+            }
+            const int64_t pr = vaddvq_s64(vaddq_s64(ar0, ar1));
+            const int64_t pi = vaddvq_s64(vaddq_s64(ai0, ai1));
+            // predRoundShift without a branch: |v| rounded, its sign put back.
+            const uint64_t sgr = (uint64_t)(pr >> 63), sgi = (uint64_t)(pi >> 63);
+            const int64_t qr = (int64_t)((((((uint64_t)pr ^ sgr) - sgr) + half) >> kTapShift ^ sgr) - sgr);
+            const int64_t qi = (int64_t)((((((uint64_t)pi ^ sgi) - sgi) + half) >> kTapShift ^ sgi) - sgi);
+            const int64_t xr = er + qr, xi = ei + qi;
+            if (xr < INT32_MIN || xr > INT32_MAX || xi < INT32_MIN || xi > INT32_MAX) break;
+
+            if (er != 0 || ei != 0) {
+                const int32_t mr = (int32_t)(_mu * predSign(er));
+                const int32_t mi = (int32_t)(_mu * predSign(ei));
+                for (int k = 0; k < 4; ++k) {
+                    // Signs as -1/0/+1: the (h < 0) mask less the (h > 0) mask.
+                    const int32x4_t sr = vsubq_s32(vreinterpretq_s32_u32(vcltzq_s32(hr[k])),
+                                                   vreinterpretq_s32_u32(vcgtzq_s32(hr[k])));
+                    const int32x4_t si = vsubq_s32(vreinterpretq_s32_u32(vcltzq_s32(hi[k])),
+                                                   vreinterpretq_s32_u32(vcgtzq_s32(hi[k])));
+                    // predLeak: |w| >> shift with w's sign put back.
+                    const int32x4_t gr = vshrq_n_s32(wr[k], 31), gi = vshrq_n_s32(wi[k], 31);
+                    const int32x4_t lr = vsubq_s32(veorq_s32(vshrq_n_s32(vabsq_s32(wr[k]), kLeakShiftComplex), gr), gr);
+                    const int32x4_t li = vsubq_s32(veorq_s32(vshrq_n_s32(vabsq_s32(wi[k]), kLeakShiftComplex), gi), gi);
+                    const int32x4_t nr = vsubq_s32(vmlaq_n_s32(vmlaq_n_s32(wr[k], sr, mr), si, mi), lr);
+                    const int32x4_t ni = vsubq_s32(vmlsq_n_s32(vmlaq_n_s32(wi[k], sr, mi), si, mr), li);
+                    wr[k] = vmaxq_s32(vminq_s32(nr, lim), nlim);
+                    wi[k] = vmaxq_s32(vminq_s32(ni, lim), nlim);
+                }
+            }
+
+            out[2 * f] = (int16_t)xr;
+            out[2 * f + 1] = (int16_t)xi;
+            // Slide the window a lane: the oldest out, this frame in at the top.
+            hr[0] = vextq_s32(hr[0], hr[1], 1);
+            hr[1] = vextq_s32(hr[1], hr[2], 1);
+            hr[2] = vextq_s32(hr[2], hr[3], 1);
+            hr[3] = vextq_s32(hr[3], vdupq_n_s32((int32_t)xr), 1);
+            hi[0] = vextq_s32(hi[0], hi[1], 1);
+            hi[1] = vextq_s32(hi[1], hi[2], 1);
+            hi[2] = vextq_s32(hi[2], hi[3], 1);
+            hi[3] = vextq_s32(hi[3], vdupq_n_s32((int32_t)xi), 1);
+        }
+        for (int k = 0; k < 4; ++k) {
+            vst1q_s32(&_wr[4 * (size_t)k], wr[k]);
+            vst1q_s32(&_wi[4 * (size_t)k], wi[k]);
+            vst1q_s32(&_hr[4 * (size_t)k], hr[k]);
+            vst1q_s32(&_hi[4 * (size_t)k], hi[k]);
+        }
+        _idx = 16;
+        for (; f < frames; ++f) {
+            int64_t xr, xi;
+            inverse(res[2 * f], res[2 * f + 1], xr, xi);
+            out[2 * f] = (int16_t)xr;
+            out[2 * f + 1] = (int16_t)xi;
+        }
+    }
+#endif
+
 private:
+    // The same filter in int64 throughout, as the server writes it: what this
+    // stage becomes for good if a sample ever leaves int32 (see push). A stream
+    // the server coded from int16 samples never gets there.
+    class Wide {
+    public:
+        void load(int order, int64_t mu, bool fast, int idx, const std::vector<int32_t> &wr,
+                  const std::vector<int32_t> &wi, const std::vector<int32_t> &hr,
+                  const std::vector<int32_t> &hi) {
+            _order = order;
+            _mu = mu;
+            _fast = fast;
+            _idx = idx;
+            _wr.assign(wr.begin(), wr.end());
+            _wi.assign(wi.begin(), wi.end());
+            _hr.assign(hr.begin(), hr.end());
+            _hi.assign(hi.begin(), hi.end());
+            _sr.resize(_hr.size());
+            _si.resize(_hi.size());
+            for (size_t j = 0; j < _hr.size(); ++j) {
+                _sr[j] = predSign(_hr[j]);
+                _si[j] = predSign(_hi[j]);
+            }
+        }
+
+        void beginPacket(int steps) {
+            int64_t maxAbs = 0;
+            for (size_t j = 0; j < _wr.size(); ++j) {
+                int64_t w = _wr[j] < 0 ? -_wr[j] : _wr[j];
+                if (w > maxAbs) maxAbs = w;
+            }
+            for (size_t j = 0; j < _wi.size(); ++j) {
+                int64_t w = _wi[j] < 0 ? -_wi[j] : _wi[j];
+                if (w > maxAbs) maxAbs = w;
+            }
+            _fast = maxAbs + 2 * _mu * (int64_t)steps <= kTapLimit;
+        }
+
+        void forward(int64_t xr, int64_t xi, int64_t &er, int64_t &ei) {
+            int64_t pr, pi;
+            predict(pr, pi);
+            er = xr - pr;
+            ei = xi - pi;
+            adapt(er, ei);
+            push(xr, xi);
+        }
+
+        void inverse(int64_t er, int64_t ei, int64_t &xr, int64_t &xi) {
+            int64_t pr, pi;
+            predict(pr, pi);
+            xr = er + pr;
+            xi = ei + pi;
+            adapt(er, ei);
+            push(xr, xi);
+        }
+
+        void push(int64_t xr, int64_t xi) {
+            _hr[_idx] = xr;
+            _hi[_idx] = xi;
+            _sr[_idx] = predSign(xr);
+            _si[_idx] = predSign(xi);
+            ++_idx;
+            if (_idx == (int)_hr.size()) {
+                const int n = _order;
+                for (int j = 0; j < n; ++j) {
+                    _hr[j] = _hr[_idx - n + j];
+                    _hi[j] = _hi[_idx - n + j];
+                    _sr[j] = _sr[_idx - n + j];
+                    _si[j] = _si[_idx - n + j];
+                }
+                _idx = n;
+            }
+        }
+
+    private:
+        void predict(int64_t &outR, int64_t &outI) const {
+            const int order = _order;
+            const int lo = _idx - order;
+            // Summed through uint64_t: a corrupt stream can push these past
+            // int64, where signed overflow is undefined in C++. Unsigned wraps,
+            // which is what the server's Go arithmetic does and what the
+            // compiler produced in practice anyway.
+            uint64_t pr = 0, pi = 0;
+            for (int j = 0; j < order; ++j) {
+                const int64_t br = _hr[lo + j], bi = _hi[lo + j];
+                const int64_t w = _wr[j], wiv = _wi[j];
+                pr += (uint64_t)w * (uint64_t)br - (uint64_t)wiv * (uint64_t)bi;
+                pi += (uint64_t)w * (uint64_t)bi + (uint64_t)wiv * (uint64_t)br;
+            }
+            outR = predRoundShift((int64_t)pr, kTapShift);
+            outI = predRoundShift((int64_t)pi, kTapShift);
+        }
+
+        void adapt(int64_t er, int64_t ei) {
+            if (er == 0 && ei == 0) return;
+            const int64_t mr = _mu * predSign(er);
+            const int64_t mi = _mu * predSign(ei);
+            const int order = _order;
+            const int lo = _idx - order;
+            if (_fast) {
+                for (int j = 0; j < order; ++j) {
+                    const int64_t hrs = _sr[lo + j];
+                    const int64_t his = -_si[lo + j];
+                    _wr[j] += mr * hrs - mi * his - predLeak(_wr[j], kLeakShiftComplex);
+                    _wi[j] += mr * his + mi * hrs - predLeak(_wi[j], kLeakShiftComplex);
+                }
+                return;
+            }
+            for (int j = 0; j < order; ++j) {
+                const int64_t hrs = _sr[lo + j];
+                const int64_t his = -_si[lo + j];
+                _wr[j] = predClampTap(_wr[j] + mr * hrs - mi * his -
+                                      predLeak(_wr[j], kLeakShiftComplex));
+                _wi[j] = predClampTap(_wi[j] + mr * his + mi * hrs -
+                                      predLeak(_wi[j], kLeakShiftComplex));
+            }
+        }
+
+        int _order = 0;
+        int64_t _mu = 0;
+        bool _fast = false;
+        int _idx = 0;
+        std::vector<int64_t> _wr, _wi, _hr, _hi, _sr, _si;
+    };
+
+    // The prediction sum, exact in int64: a tap is within 2^24 and a sample
+    // within int32, so each product is under 2^55 and the 2*order of them
+    // under 2^60. Integer sums do not depend on their order, which leaves the
+    // compiler free to run the taps in vector lanes.
     void predict(int64_t &outR, int64_t &outI) const {
         const int order = _order;
-        const int lo = _idx - order;
+        const int32_t *hr = &_hr[(size_t)(_idx - order)];
+        const int32_t *hi = &_hi[(size_t)(_idx - order)];
+        const int32_t *wr = &_wr[0];
+        const int32_t *wi = &_wi[0];
         int64_t pr = 0, pi = 0;
         for (int j = 0; j < order; ++j) {
-            const int64_t br = _hr[lo + j], bi = _hi[lo + j];
-            const int64_t w = _wr[j], wiv = _wi[j];
-            pr += w * br - wiv * bi;
-            pi += w * bi + wiv * br;
+            pr += (int64_t)wr[j] * hr[j] - (int64_t)wi[j] * hi[j];
+            pi += (int64_t)wr[j] * hi[j] + (int64_t)wi[j] * hr[j];
         }
         outR = predRoundShift(pr, kTapShift);
         outI = predRoundShift(pi, kTapShift);
     }
 
-    // Leak kLeakShiftComplex off each tap, then nudge it by mu in the direction
-    // that would have reduced this error.
-    // The conjugate of the history is used, as the complex LMS gradient
-    // requires; here that is the negated sign of the imaginary part.
+    // The server's update in int32, every value as its int64 one: a tap never
+    // leaves +-kTapLimit (clamped, or the fast path's bound), and a step is at
+    // most 2*mu. Leak kLeakShiftComplex off each tap, then nudge it by mu in
+    // the direction that would have reduced this error, against the conjugate
+    // of the history: with s the history's signs,
+    //   wr += mr*sr + mi*si,  wi += mi*sr - mr*si.
     //
     // A zero error is a genuine no-op — both steps are zero and every tap is
     // already inside the clamp — which turns the adapt pass over silence into a
     // return.
     void adapt(int64_t er, int64_t ei) {
         if (er == 0 && ei == 0) return;
-        const int64_t mr = _mu * predSign(er);
-        const int64_t mi = _mu * predSign(ei);
+        const int32_t mr = (int32_t)(_mu * predSign(er));
+        const int32_t mi = (int32_t)(_mu * predSign(ei));
         const int order = _order;
-        const int lo = _idx - order;
+        const int32_t *hr = &_hr[(size_t)(_idx - order)];
+        const int32_t *hi = &_hi[(size_t)(_idx - order)];
+        int32_t *wr = &_wr[0];
+        int32_t *wi = &_wi[0];
+        const int32_t lim = (int32_t)kTapLimit;
         if (_fast) {
             for (int j = 0; j < order; ++j) {
-                const int64_t hrs = _sr[lo + j];
-                const int64_t his = -_si[lo + j];
-                _wr[j] += mr * hrs - mi * his - predLeak(_wr[j], kLeakShiftComplex);
-                _wi[j] += mr * his + mi * hrs - predLeak(_wi[j], kLeakShiftComplex);
+                const int32_t sr = (hr[j] > 0) - (hr[j] < 0);
+                const int32_t si = (hi[j] > 0) - (hi[j] < 0);
+                const int32_t r = wr[j], i = wi[j];
+                wr[j] = r + mr * sr + mi * si - leak(r);
+                wi[j] = i + mi * sr - mr * si - leak(i);
             }
             return;
         }
         for (int j = 0; j < order; ++j) {
-            const int64_t hrs = _sr[lo + j];
-            const int64_t his = -_si[lo + j];
-            _wr[j] = predClampTap(_wr[j] + mr * hrs - mi * his -
-                                  predLeak(_wr[j], kLeakShiftComplex));
-            _wi[j] = predClampTap(_wi[j] + mr * his + mi * hrs -
-                                  predLeak(_wi[j], kLeakShiftComplex));
+            const int32_t sr = (hr[j] > 0) - (hr[j] < 0);
+            const int32_t si = (hi[j] > 0) - (hi[j] < 0);
+            const int32_t r = wr[j], i = wi[j];
+            const int32_t nr = r + mr * sr + mi * si - leak(r);
+            const int32_t ni = i + mi * sr - mr * si - leak(i);
+            wr[j] = nr > lim ? lim : (nr < -lim ? -lim : nr);
+            wi[j] = ni > lim ? lim : (ni < -lim ? -lim : ni);
         }
     }
 
+    // predLeak in int32 without a branch: the magnitude shifted, its sign put
+    // back. |w| <= kTapLimit, so the negation cannot overflow.
+    static inline int32_t leak(int32_t w) {
+        const int32_t s = w >> 31; // 0 or -1 (arithmetic on every target here)
+        return (int32_t)((((w ^ s) - s) >> kLeakShiftComplex) ^ s) - s;
+    }
+
     void push(int64_t xr, int64_t xi) {
-        _hr[_idx] = xr;
-        _hi[_idx] = xi;
-        _sr[_idx] = predSign(xr);
-        _si[_idx] = predSign(xi);
+        if (xr < INT32_MIN || xr > INT32_MAX || xi < INT32_MIN || xi > INT32_MAX) {
+            // Out of int32: carry on in int64 from here, exactly as before.
+            _wide = true;
+            _wideStage.load(_order, _mu, _fast, _idx, _wr, _wi, _hr, _hi);
+            _wideStage.push(xr, xi);
+            return;
+        }
+        _hr[(size_t)_idx] = (int32_t)xr;
+        _hi[(size_t)_idx] = (int32_t)xi;
         ++_idx;
         if (_idx == (int)_hr.size()) {
             const int n = _order;
             for (int j = 0; j < n; ++j) {
-                _hr[j] = _hr[_idx - n + j];
-                _hi[j] = _hi[_idx - n + j];
-                _sr[j] = _sr[_idx - n + j];
-                _si[j] = _si[_idx - n + j];
+                _hr[(size_t)j] = _hr[(size_t)(_idx - n + j)];
+                _hi[(size_t)j] = _hi[(size_t)(_idx - n + j)];
             }
             _idx = n;
         }
@@ -361,11 +813,13 @@ private:
     int64_t _mu;
     bool _fast;
     int _idx;
+    bool _wide;
     // Taps in Q16, oldest-first: _wr[j] weighs the history sample at
     // _hr[_idx-order+j], so predict and adapt walk taps and history forward
-    // together. Sample signs are kept beside the samples so the update loop
-    // does not recompute a sign per tap per sample.
-    std::vector<int64_t> _wr, _wi, _hr, _hi, _sr, _si;
+    // together. int32, which holds every value a stream coded from int16
+    // samples produces; _wideStage takes over if one ever does not fit.
+    std::vector<int32_t> _wr, _wi, _hr, _hi;
+    Wide _wideStage;
 };
 
 // ComplexStage with the imaginary terms removed, for mono audio. Same fast
@@ -410,9 +864,10 @@ private:
     int64_t predict() const {
         const int order = _order;
         const int lo = _idx - order;
-        int64_t p = 0;
-        for (int j = 0; j < order; ++j) p += _w[j] * _h[lo + j];
-        return predRoundShift(p, kTapShift);
+        // Summed through uint64_t; see the complex form.
+        uint64_t p = 0;
+        for (int j = 0; j < order; ++j) p += (uint64_t)_w[j] * (uint64_t)_h[lo + j];
+        return predRoundShift((int64_t)p, kTapShift);
     }
 
     void adapt(int64_t e) {
@@ -859,6 +1314,7 @@ public:
 
         beginPacket(count / step);
         if (_complex) {
+            if (_cx.size() == 1 && _cx[0].inverseBlock(&_res[0], out, count / 2)) return true;
             for (int i = 0; i < count; i += 2) {
                 int64_t a = _res[i], b = _res[i + 1];
                 // Stages are inverted in reverse order: the last to have

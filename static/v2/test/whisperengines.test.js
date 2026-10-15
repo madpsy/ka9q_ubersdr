@@ -936,6 +936,26 @@ t('the host\'s translator is called with text, source and target', async () => {
     assert.deepStrictEqual(calls[0], ['hallo', 'de', 'en']);
 });
 
+t('an app\'s translator without the languages says so before the first line', async () => {
+    // iOS can only translate between languages already on the device; a pair
+    // that was not came out as untranslated lines with nothing said.
+    const calls = [];
+    const host = (status) => ({ ubersdrDesktop: { translate: {
+        availability: async () => status,
+        translate: async (...a) => { calls.push(a); return 'hallo'; },
+    } } });
+    await assert.rejects(T.openTranslator({ source: 'en', target: 'de' }, { win: host('downloadable') }), /aren't on this device yet/);
+    await assert.rejects(T.openTranslator({ source: 'en', target: 'de' }, { win: host('unavailable') }), /not supported/);
+    assert.strictEqual(calls.length, 0, 'translated without the languages');
+    const notes = [];
+    const lt = T.createLineTranslator({ pair: { source: 'en', target: 'de' }, win: host('downloadable'), onNote: (n) => notes.push(n) });
+    assert.deepStrictEqual(await lt.translate('hello'), { text: 'hello', translated: false });
+    assert.strictEqual(notes.length, 1);
+    assert.match(notes[0].message, /aren't on this device yet/);
+    const ok = await T.openTranslator({ source: 'en', target: 'de' }, { win: host('available') });
+    assert.strictEqual(await ok.translate('hello'), 'hallo');
+});
+
 t('lines come back translated, in the order they were spoken', async () => {
     const delays = { one: 30, two: 1, three: 10 };
     const open = async () => ({

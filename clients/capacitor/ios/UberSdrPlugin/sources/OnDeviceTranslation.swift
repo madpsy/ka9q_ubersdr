@@ -72,8 +72,23 @@ final class OnDeviceTranslation {
                 }
                 do {
                     let response = try await session.translate(text)
-                    self.reply("translate-result", ["id": id, "text": response.targetText])
+                    let out = response.targetText
+                    // The same text back is not a translation. Between two
+                    // different languages it means the framework passed the
+                    // line through, and saying so beats a transcript that
+                    // stays in the spoken language with nothing to explain it.
+                    let same = out.trimmingCharacters(in: .whitespacesAndNewlines)
+                        == text.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if same && Self.base(source) != Self.base(target) && text.count > 3 {
+                        self.sessions[key] = nil
+                        let reason = await Self.reason(nil, source: source, target: target)
+                        NSLog("[UberSDR translate] %@ came back unchanged (%@)", key, reason)
+                        self.reply("translate-result", ["id": id, "error": reason])
+                        return
+                    }
+                    self.reply("translate-result", ["id": id, "text": out])
                 } catch {
+                    NSLog("[UberSDR translate] %@ failed: %@", key, String(describing: error))
                     // Not reused: a session that has failed may have been
                     // cancelled, and the next line should get a fresh one.
                     self.sessions[key] = nil
@@ -107,7 +122,7 @@ final class OnDeviceTranslation {
     /// The framework's own errors are written for developers; the usual cause
     /// — languages not downloaded — is checked for and said plainly.
     @available(iOS 26.0, *)
-    private static func reason(_ error: Error, source: String, target: String) async -> String {
+    private static func reason(_ error: Error?, source: String, target: String) async -> String {
         let status = await LanguageAvailability().status(from: Locale.Language(identifier: source),
                                                          to: Locale.Language(identifier: target))
         switch status {
@@ -116,10 +131,15 @@ final class OnDeviceTranslation {
         case .unsupported:
             return "this language pair is not supported"
         default:
-            return error.localizedDescription
+            return error?.localizedDescription ?? "the translator returned the line untranslated"
         }
     }
     #endif
+
+    /// "en" for "en-US": the language without its region.
+    private static func base(_ tag: String) -> String {
+        String(tag.lowercased().split(whereSeparator: { $0 == "-" || $0 == "_" }).first ?? "")
+    }
 
     private func reply(_ prefix: String, _ payload: [String: Any]) {
         guard let data = try? JSONSerialization.data(withJSONObject: payload),

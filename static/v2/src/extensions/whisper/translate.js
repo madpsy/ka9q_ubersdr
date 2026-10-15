@@ -100,6 +100,21 @@ export async function openTranslator(pair, { win = theWindow(), onProgress } = {
     if (!pair || !kind) throw new Error('no translator on this device');
     if (kind === 'host') {
         const t = win.ubersdrDesktop.translate;
+        // Asked before the first line, not left to the first translation to
+        // fail. An app's translator can only use languages already on the
+        // device — iOS's cannot fetch them without showing a sheet — and a
+        // pair that is not there was reaching the transcript as English with
+        // nothing said, which reads as translation being broken rather than
+        // as a download nobody has done.
+        if (typeof t.availability === 'function') {
+            const status = await translationStatus(pair, win);
+            if (status === 'unavailable') {
+                throw Object.assign(new Error('this language pair is not supported'), { name: 'NotSupportedError' });
+            }
+            if (status === 'downloadable' || status === 'downloading') {
+                throw new Error('the translation languages aren\'t on this device yet — add them in the device\'s settings, then press Start again');
+            }
+        }
         return {
             translate: (text) => Promise.resolve(t.translate(text, pair.source, pair.target)).then(String),
             destroy() {},

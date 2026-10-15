@@ -10,6 +10,7 @@ import atexit
 import json
 import os
 import platform
+import shutil
 import signal
 import socket
 import stat
@@ -426,13 +427,30 @@ class RadioClient:
             # Default to 2 channels for audio devices to support left/right channel control
             self.output_channels = 2
 
+        # WAV output is opened when the first audio arrives, because a WAV
+        # holds one rate and the stream's rate is not known until then.
+        # wav_format is the (rate, channels) of the open file; wav_part counts
+        # files written, for the -2, -3 ... names a format change starts.
         self.wav_writer = None
+        self.wav_format = None
+        self.wav_part = 0
+        self.wav_current_file = None
+        self.wav_file_frames = 0
+        self.wav_seconds = 0.0  # audio written so far, across files, for -t
+        self.wav_duration_reached = False
+
+        # pw-play is started when the first audio arrives and restarted when
+        # its rate or channel count changes; pipewire_format is what it runs at.
         self.pipewire_process = None
+        self.pipewire_format = None
+        self.pipewire_available = True
+        self.pipewire_target = None  # PipeWire node name (--pipewire-target)
 
         # PyAudio output
         self.pyaudio_instance = None
         self.pyaudio_stream = None
         self.pyaudio_device_index = pyaudio_device_index  # Device index for PyAudio (None = default)
+        self.pyaudio_format = None  # (rate, channels) the open stream runs at
 
         # sounddevice output
         self.sounddevice_stream = None
@@ -772,13 +790,72 @@ class RadioClient:
             return url
 
     def setup_wav_writer(self):
-        """Initialize WAV file writer."""
+        """Announce WAV recording; the file is opened when audio arrives."""
         if self.wav_file:
-            self.wav_writer = wave.open(self.wav_file, 'wb')
-            self.wav_writer.setnchannels(self.channels)  # Mono or stereo
-            self.wav_writer.setsampwidth(2)  # 16-bit
-            self.wav_writer.setframerate(self.sample_rate)
-            print(f"Recording to WAV file: {self.wav_file} ({self.channels} channel(s))", file=sys.stderr)
+            print(f"Recording to WAV file: {self.wav_file} (opened when the first audio sets the sample rate)", file=sys.stderr)
+
+    def _open_wav(self, rate: int, channels: int):
+        """Open the next WAV file at the given format.
+
+        A WAV header holds one rate and channel count. If a retune or mode
+        change alters either mid-recording, the current file is closed and the
+        recording continues in FILE-2.wav, FILE-3.wav and so on: every file is
+        then exact, lossless and plays at the right speed, where resampling
+        into the first file would change the audio and stopping would lose it.
+        A reconnect continues the same way rather than truncating FILE.
+        """
+        old_file, old_format = self.wav_current_file, self.wav_format
+        self._close_wav()
+        self.wav_part += 1
+        if self.wav_part == 1:
+            path = self.wav_file
+        else:
+            base, ext = os.path.splitext(self.wav_file)
+            path = f"{base}-{self.wav_part}{ext or '.wav'}"
+        self.wav_writer = wave.open(path, 'wb')
+        self.wav_writer.setnchannels(channels)
+        self.wav_writer.setsampwidth(2)  # 16-bit
+        self.wav_writer.setframerate(rate)
+        self.wav_current_file = path
+        self.wav_format = (rate, channels)
+        self.wav_file_frames = 0
+        if old_format is not None:
+            print(f"WAV format changed {old_format[0]} Hz/{old_format[1]} ch -> {rate} Hz/{channels} ch: "
+                  f"closed {old_file}, continuing in {path} (a WAV holds one rate)", file=sys.stderr, flush=True)
+        elif self.wav_part > 1:
+            print(f"Recording continues in WAV file: {path} ({rate} Hz, {channels} channel(s))", file=sys.stderr, flush=True)
+        else:
+            print(f"WAV file opened: {path} ({rate} Hz, {channels} channel(s))", file=sys.stderr, flush=True)
+
+    def _close_wav(self):
+        """Close the open WAV file, if any, and say how much it holds."""
+        if self.wav_writer:
+            self.wav_writer.close()
+            rate = self.wav_format[0]
+            print(f"WAV file closed: {self.wav_current_file} ({self.wav_file_frames / rate:.2f} s at {rate} Hz)", file=sys.stderr)
+        self.wav_writer = None
+        self.wav_format = None
+
+    def _write_wav(self, audio_array):
+        """Write int16 audio to the WAV file at the stream's current rate.
+
+        With -t the recording stops after exactly that much audio, counted at
+        the rate each sample was written at, so it holds across a rate change.
+        """
+        if not self.wav_file or self.wav_duration_reached:
+            return
+        channels = audio_array.shape[1] if audio_array.ndim == 2 else 1
+        if self.wav_writer is None or self.wav_format != (self.sample_rate, channels):
+            self._open_wav(self.sample_rate, channels)
+        frames = audio_array.shape[0]
+        if self.duration is not None:
+            remaining = round((self.duration - self.wav_seconds) * self.sample_rate)
+            if remaining <= frames:
+                frames = max(remaining, 0)
+                self.wav_duration_reached = True
+        self.wav_writer.writeframes(audio_array[:frames].tobytes())
+        self.wav_file_frames += frames
+        self.wav_seconds += frames / self.sample_rate
 
     def setup_fifo(self):
         """Create FIFO file (doesn't open it yet)."""
@@ -805,78 +882,76 @@ class RadioClient:
             self.fifo_path = None
 
     async def setup_pipewire(self):
-        """Start PipeWire playback process."""
-        try:
-            # Use configured output channels
-            output_channels = self.output_channels
+        """Check PipeWire playback is available; pw-play starts when audio arrives."""
+        if shutil.which('pw-play') is None:
+            print("Error: pw-play not found. Please install pipewire-utils.", file=sys.stderr)
+            # Don't terminate the program - just disable PipeWire output
+            # This allows TCI server, UDP, FIFO and other functionality to continue
+            self.pipewire_available = False
+            if self.status_callback:
+                self.status_callback("error", "pw-play not found. Please install pipewire-utils.")
+            return
+        print("PipeWire output: sample rate not known yet, pw-play starts when audio arrives", file=sys.stderr)
+        # Only show "Loading GUI" message when GUI is active (status_callback is set)
+        if self.status_callback:
+            print("Loading GUI (may take a moment)...", file=sys.stderr)
 
-            # Use pw-play for PipeWire audio output
+    async def _ensure_pipewire(self, channels: int):
+        """Run pw-play at the stream's real rate and channel count.
+
+        The rate is only known from the audio packets, and a retune or mode
+        change can alter it (AM arrives at 24 kHz, SSB at 12 kHz), so pw-play
+        is started on the first audio and restarted whenever the format moves.
+        """
+        fmt = (self.sample_rate, channels)
+        if not self.pipewire_available or fmt == self.pipewire_format:
+            return
+        old_format = self.pipewire_format
+        await self._stop_pipewire()
+        self.pipewire_format = fmt
+        args = ['pw-play', '--format=s16', '--rate', str(fmt[0]), f'--channels={channels}']
+        if self.pipewire_target:
+            args += ['--target', self.pipewire_target]
+        try:
             self.pipewire_process = await asyncio.create_subprocess_exec(
-                'pw-play',
-                '--format=s16',
-                '--rate', str(self.sample_rate),
-                f'--channels={output_channels}',
-                '-',
+                *args, '-',
                 stdin=asyncio.subprocess.PIPE,
                 stdout=asyncio.subprocess.DEVNULL,
                 stderr=asyncio.subprocess.DEVNULL
             )
-            print(f"PipeWire output started (sample rate: {self.sample_rate} Hz, channels: {output_channels})", file=sys.stderr)
-            # Only show "Loading GUI" message when GUI is active (status_callback is set)
-            if self.status_callback:
-                print("Loading GUI (may take a moment)...", file=sys.stderr)
-        except FileNotFoundError:
-            print("Error: pw-play not found. Please install pipewire-utils.", file=sys.stderr)
-            # Don't terminate the program - just disable PipeWire output
-            # This allows TCI server, UDP, FIFO and other functionality to continue
+        except OSError as e:
+            print(f"Error: could not start pw-play: {e}", file=sys.stderr)
             self.pipewire_process = None
-            # Don't set self.running = False - that would stop everything
-            # Just log the error and continue without PipeWire output
-            if self.status_callback:
-                self.status_callback("error", "pw-play not found. Please install pipewire-utils.")
+            return
+        changed = f" (was {old_format[0]} Hz, {old_format[1]} ch)" if old_format else ""
+        print(f"PipeWire output started (sample rate: {fmt[0]} Hz, channels: {channels}){changed}", file=sys.stderr, flush=True)
+
+    async def _stop_pipewire(self):
+        """Stop pw-play, if running, without leaving the process behind."""
+        process, self.pipewire_process = self.pipewire_process, None
+        self.pipewire_format = None
+        if process is None:
+            return
+        if process.stdin:
+            try:
+                process.stdin.close()
+            except Exception:
+                pass
+        try:
+            await asyncio.wait_for(process.wait(), timeout=2.0)
+        except asyncio.TimeoutError:
+            process.kill()
+            await process.wait()
 
     async def setup_pyaudio(self):
-        """Start PyAudio playback stream."""
+        """Start PyAudio; the stream opens when audio arrives."""
         if not PYAUDIO_AVAILABLE:
             print("Error: PyAudio not available. Install with: pip install pyaudio", file=sys.stderr)
             sys.exit(1)
 
         try:
-            # Use configured output channels
-            output_channels = self.output_channels
-
             self.pyaudio_instance = pyaudio.PyAudio()
-
-            # On Windows, use 48 kHz to avoid high latency from resampling
-            # Windows audio APIs (MME/DirectSound) don't support 12 kHz natively
-            if self.pyaudio_needs_resampling:
-                self.pyaudio_output_rate = 48000
-                if not SCIPY_AVAILABLE:
-                    print("Error: Windows PyAudio requires scipy for resampling. Install with: pip install scipy", file=sys.stderr)
-                    sys.exit(1)
-                print(f"Windows detected: Resampling {self.sample_rate} Hz -> {self.pyaudio_output_rate} Hz for low latency", file=sys.stderr)
-            else:
-                self.pyaudio_output_rate = self.sample_rate
-
-            # Build kwargs for stream opening
-            stream_kwargs = {
-                'format': pyaudio.paInt16,
-                'channels': output_channels,
-                'rate': self.pyaudio_output_rate,
-                'output': True,
-                'frames_per_buffer': 1024
-            }
-
-            # Add device index if specified
-            if self.pyaudio_device_index is not None:
-                stream_kwargs['output_device_index'] = self.pyaudio_device_index
-                device_info = self.pyaudio_instance.get_device_info_by_index(self.pyaudio_device_index)
-                device_name = device_info.get('name', 'Unknown')
-                print(f"PyAudio output started on device [{self.pyaudio_device_index}] {device_name} (sample rate: {self.pyaudio_output_rate} Hz, channels: {output_channels})", file=sys.stderr)
-            else:
-                print(f"PyAudio output started (sample rate: {self.pyaudio_output_rate} Hz, channels: {output_channels})", file=sys.stderr)
-
-            self.pyaudio_stream = self.pyaudio_instance.open(**stream_kwargs)
+            print("PyAudio output: sample rate not known yet, stream opens when audio arrives", file=sys.stderr)
 
             # Only show "Loading GUI" message when GUI is active (status_callback is set)
             if self.status_callback:
@@ -885,11 +960,61 @@ class RadioClient:
             print(f"Error: Failed to initialize PyAudio: {e}", file=sys.stderr)
             # Don't terminate the program - just disable PyAudio output
             # This allows TCI server, UDP, FIFO and other functionality to continue
-            self.pyaudio_stream = None
-            # Don't set self.running = False - that would stop everything
-            # Just log the error and continue without PyAudio output
+            self.pyaudio_instance = None
             if self.status_callback:
                 self.status_callback("error", f"Failed to initialize PyAudio: {e}")
+
+    def _ensure_pyaudio(self, channels: int):
+        """Open the PyAudio stream at the stream's real rate, reopening on change.
+
+        The rate comes from the audio packets and can change on a retune or
+        mode change, so the stream is opened on the first audio, not at connect.
+        PyAudio output is not resampled, so it runs at the stream's own rate.
+        """
+        fmt = (self.sample_rate, channels)
+        if self.pyaudio_instance is None or fmt == self.pyaudio_format:
+            return
+        old_format = self.pyaudio_format
+        self._close_pyaudio_stream()
+        self.pyaudio_format = fmt
+        try:
+            # Build kwargs for stream opening
+            stream_kwargs = {
+                'format': pyaudio.paInt16,
+                'channels': channels,
+                'rate': fmt[0],
+                'output': True,
+                'frames_per_buffer': 1024
+            }
+
+            # Add device index if specified
+            device = ""
+            if self.pyaudio_device_index is not None:
+                stream_kwargs['output_device_index'] = self.pyaudio_device_index
+                device_info = self.pyaudio_instance.get_device_info_by_index(self.pyaudio_device_index)
+                device = f" on device [{self.pyaudio_device_index}] {device_info.get('name', 'Unknown')}"
+
+            self.pyaudio_stream = self.pyaudio_instance.open(**stream_kwargs)
+            changed = f" (was {old_format[0]} Hz, {old_format[1]} ch)" if old_format else ""
+            print(f"PyAudio output started{device} (sample rate: {fmt[0]} Hz, channels: {channels}){changed}", file=sys.stderr, flush=True)
+        except Exception as e:
+            print(f"Error: Failed to open PyAudio stream at {fmt[0]} Hz: {e}", file=sys.stderr)
+            # Leave pyaudio_format set so a failing format is not retried per packet
+            self.pyaudio_stream = None
+            if self.status_callback:
+                self.status_callback("error", f"Failed to initialize PyAudio: {e}")
+
+    def _close_pyaudio_stream(self):
+        """Stop and close the PyAudio stream, if open."""
+        stream, self.pyaudio_stream = self.pyaudio_stream, None
+        self.pyaudio_format = None
+        if stream is None:
+            return
+        try:
+            stream.stop_stream()
+            stream.close()
+        except Exception as e:
+            print(f"Error closing PyAudio stream: {e}", file=sys.stderr)
 
     async def setup_sounddevice(self):
         """Start sounddevice playback stream."""
@@ -909,7 +1034,7 @@ class RadioClient:
                     print("Error: sounddevice requires samplerate for resampling. Install with: pip install samplerate", file=sys.stderr)
                     sys.exit(1)
 
-                print(f"Resampling {self.sample_rate} Hz -> {self.sounddevice_output_rate} Hz using samplerate (stateful, click-free)", file=sys.stderr)
+                print(f"Resampling the stream's rate -> {self.sounddevice_output_rate} Hz using samplerate (stateful, click-free)", file=sys.stderr)
             else:
                 self.sounddevice_output_rate = self.sample_rate
 
@@ -1016,6 +1141,61 @@ class RadioClient:
             if self.status_callback:
                 self.status_callback("error", f"Failed to initialize sounddevice: {e}")
 
+    def _set_sample_rate(self, sample_rate: int):
+        """Adopt a new stream sample rate from a packet header.
+
+        Both decoders (Opus and PCM) call this, so a retune or mode change that
+        alters the rate resets the resamplers and rebuilds the sounddevice
+        stream the same way whichever one is in use. PipeWire, PyAudio and WAV
+        follow self.sample_rate from the audio path instead (see output_audio).
+        """
+        old_rate = self.sample_rate
+        self.sample_rate = sample_rate
+        # Reset resamplers when sample rate changes
+        self.resampler_left = None
+        self.resampler_right = None
+        # Reset debug flags when sample rate changes
+        if hasattr(self, '_fm_decode_success_logged'):
+            delattr(self, '_fm_decode_success_logged')
+
+        # Recreate sounddevice stream with correct sample rate
+        # Mark stream as being recreated to prevent writes during recreation
+        if self.output_mode == 'sounddevice' and self.sounddevice_stream:
+            # Temporarily set stream to None to prevent writes during recreation
+            old_stream = self.sounddevice_stream
+            self.sounddevice_stream = None
+
+            try:
+                # Stop and close old stream (blocking, but quick)
+                old_stream.stop()
+                old_stream.close()
+
+                # Recreate stream with new sample rate
+                if self.needs_resampling:
+                    self.sounddevice_output_rate = 48000
+                else:
+                    self.sounddevice_output_rate = self.sample_rate
+
+                self.sounddevice_stream = sd.OutputStream(
+                    samplerate=self.sounddevice_output_rate,
+                    channels=self.output_channels,
+                    dtype='int16',
+                    device=self.sounddevice_device_index,
+                    blocksize=1024,
+                    latency='low'
+                )
+                self.sounddevice_stream.start()
+                print(f"Sample rate changed: {old_rate} Hz -> {sample_rate} Hz (stream recreated)", file=sys.stderr, flush=True)
+            except Exception as e:
+                print(f"Warning: Failed to recreate sounddevice stream: {e}", file=sys.stderr, flush=True)
+                # Try to restore old stream if recreation failed
+                if old_stream and not self.sounddevice_stream:
+                    try:
+                        old_stream.start()
+                        self.sounddevice_stream = old_stream
+                    except:
+                        pass
+
     def decode_opus_binary(self, binary_data: bytes) -> bytes:
         """Decode a version 4 Opus packet to PCM bytes.
 
@@ -1058,52 +1238,7 @@ class RadioClient:
 
         # Update client sample rate if it changes (e.g., FM/NFM switching from 12kHz to 24kHz)
         if self.sample_rate != sample_rate:
-            old_rate = self.sample_rate
-            self.sample_rate = sample_rate
-            # Reset resamplers when sample rate changes
-            self.resampler_left = None
-            self.resampler_right = None
-            # Reset debug flags when sample rate changes
-            if hasattr(self, '_fm_decode_success_logged'):
-                delattr(self, '_fm_decode_success_logged')
-
-            # Recreate sounddevice stream with correct sample rate
-            # Mark stream as being recreated to prevent writes during recreation
-            if self.output_mode == 'sounddevice' and self.sounddevice_stream:
-                # Temporarily set stream to None to prevent writes during recreation
-                old_stream = self.sounddevice_stream
-                self.sounddevice_stream = None
-
-                try:
-                    # Stop and close old stream (blocking, but quick)
-                    old_stream.stop()
-                    old_stream.close()
-
-                    # Recreate stream with new sample rate
-                    if self.needs_resampling:
-                        self.sounddevice_output_rate = 48000
-                    else:
-                        self.sounddevice_output_rate = self.sample_rate
-
-                    self.sounddevice_stream = sd.OutputStream(
-                        samplerate=self.sounddevice_output_rate,
-                        channels=self.output_channels,
-                        dtype='int16',
-                        device=self.sounddevice_device_index,
-                        blocksize=1024,
-                        latency='low'
-                    )
-                    self.sounddevice_stream.start()
-                    print(f"Sample rate changed: {old_rate} Hz -> {sample_rate} Hz (stream recreated)", file=sys.stderr, flush=True)
-                except Exception as e:
-                    print(f"Warning: Failed to recreate sounddevice stream: {e}", file=sys.stderr, flush=True)
-                    # Try to restore old stream if recreation failed
-                    if old_stream and not self.sounddevice_stream:
-                        try:
-                            old_stream.start()
-                            self.sounddevice_stream = old_stream
-                        except:
-                            pass
+            self._set_sample_rate(sample_rate)
 
         # Skip packets with no or minimal Opus data (e.g., during squelch)
         # Opus packets need at least a few bytes to be valid
@@ -1193,7 +1328,7 @@ class RadioClient:
         self.pcm_last_sample_rate = header.sample_rate
         self.pcm_last_channels = header.channels
         if self.sample_rate != header.sample_rate:
-            self.sample_rate = header.sample_rate
+            self._set_sample_rate(header.sample_rate)
 
         # Version 3 and 4 both report passband noise power, so the SNR the rest
         # of the client shows is on the same scale either way.
@@ -1497,6 +1632,8 @@ class RadioClient:
             # Write to PipeWire process (skip if in IQ mode)
             is_iq_mode = self.mode in ('iq', 'iq48', 'iq96', 'iq192', 'iq384')
 
+            if not is_iq_mode:
+                await self._ensure_pipewire(audio_array.shape[1] if audio_array.ndim == 2 else 1)
             if not is_iq_mode and self.pipewire_process and self.pipewire_process.stdin:
                 try:
                     self.pipewire_process.stdin.write(pcm_data)
@@ -1514,6 +1651,8 @@ class RadioClient:
             # Write to PyAudio stream (skip if in IQ mode)
             is_iq_mode = self.mode in ('iq', 'iq48', 'iq96', 'iq192', 'iq384')
 
+            if not is_iq_mode:
+                self._ensure_pyaudio(audio_array.shape[1] if audio_array.ndim == 2 else 1)
             if not is_iq_mode and self.pyaudio_stream:
                 try:
                     self.pyaudio_stream.write(pcm_data)
@@ -1533,6 +1672,11 @@ class RadioClient:
                 except Exception as e:
                     print(f"sounddevice error: {e}", file=sys.stderr)
                     self.running = False
+
+        elif self.output_mode == 'wav':
+            # Write to WAV file, opened at the stream's real rate and the
+            # channel count actually written
+            self._write_wav(audio_array)
 
         elif self.output_mode == 'udp':
             # Send to UDP socket (main output mode)
@@ -1561,11 +1705,6 @@ class RadioClient:
             except Exception as e:
                 print(f"UDP send error: {e}", file=sys.stderr)
 
-        elif self.output_mode == 'wav':
-            # Write to WAV file
-            if self.wav_writer:
-                self.wav_writer.writeframes(pcm_data)
-
     def _announce_raw_output(self, label: str, channels: int) -> bool:
         """Print the format of raw stdout/udp output when first known or changed.
 
@@ -1584,6 +1723,14 @@ class RadioClient:
     def check_duration(self) -> bool:
         """Check if duration limit has been reached."""
         if self.duration is None:
+            return True
+
+        # WAV recordings count the audio written, at the rate it was written
+        # at, so the file holds exactly -t seconds whatever the stream's rate
+        if self.output_mode == 'wav':
+            if self.wav_duration_reached:
+                print(f"\nRecording duration reached: {self.wav_seconds:.1f}s of audio", file=sys.stderr)
+                return False
             return True
 
         if self.start_time is None:
@@ -2190,21 +2337,13 @@ class RadioClient:
                     print(f"Error removing FIFO: {e}", file=sys.stderr)
 
         # Close WAV file
-        if self.wav_writer:
-            self.wav_writer.close()
-            print(f"WAV file closed: {self.wav_file}", file=sys.stderr)
+        self._close_wav()
 
         # Close PipeWire process
-        if self.pipewire_process:
-            if self.pipewire_process.stdin:
-                self.pipewire_process.stdin.close()
-            try:
-                await asyncio.wait_for(self.pipewire_process.wait(), timeout=2.0)
-            except asyncio.TimeoutError:
-                self.pipewire_process.kill()
-                await self.pipewire_process.wait()
+        await self._stop_pipewire()
 
         # Close PyAudio stream
+        self.pyaudio_format = None
         if self.pyaudio_stream:
             try:
                 self.pyaudio_stream.stop_stream()
@@ -3147,6 +3286,7 @@ il2p:        0=off  1=IL2P  2=IL2P+CRC  3=Both
         udp_stereo=False,  # CLI default: mono (can be added as argument if needed)
         use_opus=args.opus
     )
+    client.pipewire_target = args.pipewire_target
 
     # Initialize TCI server now that client exists
     if tci_server_port is not None:

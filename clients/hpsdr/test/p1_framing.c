@@ -44,6 +44,7 @@ bool p1_host_p2_busy(void) { return stub_p2_busy; }
 static unsigned char stub_mac[6] = {0x02, 0x11, 0x22, 0x33, 0x44, 0x55};
 const unsigned char *p1_host_mac(void) { return stub_mac; }
 int p1_host_board_type(void) { return 6; }   /* Hermes Lite */
+void p1_host_tag(unsigned char *reply) { (void)reply; }
 
 void t_print(const char *fmt, ...)
 {

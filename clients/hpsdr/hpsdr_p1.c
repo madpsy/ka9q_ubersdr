@@ -169,6 +169,7 @@ static void p1_send_discovery_reply(int sock, const struct sockaddr_in *to)
     reply[9]  = 62;
     reply[10] = (unsigned char)p1_host_board_type();
     reply[19] = P1_NUM_RX;
+    p1_host_tag(reply);
 
     sendto(sock, reply, sizeof(reply), 0, (const struct sockaddr *)to, sizeof(*to));
 }

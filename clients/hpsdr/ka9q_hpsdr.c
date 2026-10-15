@@ -491,6 +491,21 @@ static float scale_for_rate(int khz)
 const unsigned char *p1_host_mac(void) { return p1_mac; }
 int p1_host_board_type(void) { return mcb.device_type; }
 
+static void put_be32(unsigned char *p, unsigned long v)
+{
+    p[0] = (unsigned char)(v >> 24);
+    p[1] = (unsigned char)(v >> 16);
+    p[2] = (unsigned char)(v >> 8);
+    p[3] = (unsigned char)v;
+}
+
+void p1_host_tag(unsigned char *reply)
+{
+    memcpy(&reply[44], "UBERSDR", 8);  /* with its NUL */
+    put_be32(&reply[52], (unsigned long)ubersdr_min_freq);
+    put_be32(&reply[56], (unsigned long)ubersdr_max_freq);
+}
+
 /* Is a protocol 2 client streaming? Both protocols drive the same receivers, so
  * the second one to arrive has to be turned away rather than allowed to
  * reconfigure the first one's session out from under it. */
@@ -2088,6 +2103,7 @@ int main (int argc, char *argv[])
              * stale 7 here is what made 384 kHz unreachable however wide the
              * receiver was. */
             buffer[22] = 0x0f;
+            p1_host_tag(buffer);
 
             sendto(sock_udp, buffer, 60, 0, (struct sockaddr *)&addr_from, sizeof(addr_from));
             continue;

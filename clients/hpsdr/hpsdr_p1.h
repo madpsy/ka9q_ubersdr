@@ -108,5 +108,11 @@ void p1_host_stop_all(void);
 bool p1_host_p2_busy(void);
 const unsigned char *p1_host_mac(void);
 int p1_host_board_type(void);
+/* Bytes 44-59 of a 60-byte discovery reply, either protocol: "UBERSDR", a NUL,
+ * then the receiver's lowest and highest frequency in Hz, big-endian. A real
+ * Hermes Lite 2 sends zeros there and HermesIntf reads nothing past byte 31,
+ * so this tells a client that knows to look (ubersdr-skimmer) that the board
+ * id is a bridge's and what it tunes; every other client sees a Hermes Lite. */
+void p1_host_tag(unsigned char *reply);
 
 #endif /* UBERSDR_HPSDR_P1_H */

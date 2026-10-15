@@ -1,4 +1,21 @@
-# Latest Stable - 0.1.66
+# Latest Stable - 0.1.67
+
+## Version 0.1.67 - 15th Oct 2026
+
+### New Features
+- Added **Sample source timestamp** which can be used to more accurately match when a sample was captured (useful for the new NTP addon and potentially TDoA in the future)
+- Added **IQ Playground** in the IQ Demod panel in the V2 interface which lets users create flow graphs using blocks (icon/button in the top right of the panel)
+- Added **Two new addons** NTP and NDB. The NTP addon can sync time with various HF clock sources. NDB addon can decode Non-Directional Beacons
+
+### Bug Fixes
+- Fixed **Unncessary Spectrogram calls** which wasted CPU cycles
+- Fixed **PCMv4 protocol lacked SIMD** which again wasted CPU cycles in UberSDR server and clients
+
+### Other Announcements
+
+This new version will replace NTPd with Chrony on the host machine. It will replace Chrony's default config once as well. Customisations after initial upgrade won't be touched so long as the comment header at the top of the file remains.
+
+A new Skimmer addon is under development which will replace all built in skimmers (CW and Digital modes). It is highly optimised and outperforms the current decoders in terms of efficiency, plus adds JTTY and RTTY skimming. More information to follow shortly.
 
 ## Version 0.1.66 - 8th Sep 2026
 

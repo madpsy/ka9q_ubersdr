@@ -17,9 +17,19 @@ CUSTOM_TAG=""
 SKIP_SCAN=false
 TRIVY_IMAGE="aquasec/trivy:latest"
 TRIVY_SEVERITY="HIGH,CRITICAL"
+PROMOTE_FROM=""
 
 for arg in "$@"; do
     case $arg in
+        --promote|--promote=*)
+            PROMOTE_FROM="testing"
+            [ "$arg" != "--promote" ] && PROMOTE_FROM="${arg#*=}"
+            if [ -z "$PROMOTE_FROM" ]; then
+                echo "ERROR: --promote= needs a tag, e.g. --promote=testing"
+                exit 1
+            fi
+            echo "Promoting $IMAGE:$PROMOTE_FROM to the version tag (no rebuild)"
+            ;;
         --tag=*)
             CUSTOM_TAG="${arg#*=}"
             if [ -z "$CUSTOM_TAG" ]; then
@@ -70,11 +80,18 @@ for arg in "$@"; do
             ;;
         *)
             echo "Unknown option: $arg"
-            echo "Usage: $0 [--tag=<value>] [--no-latest] [--no-cache] [--fluent-bit] [--no-geoip] [--no-git] [--no-scan] [--amd64] [--arm64]"
+            echo "Usage: $0 [--tag=<value>] [--promote[=<tag>]] [--no-latest] [--no-cache] [--fluent-bit] [--no-geoip] [--no-git] [--no-scan] [--amd64] [--arm64]"
             exit 1
             ;;
     esac
 done
+
+# --promote retags an image already in the registry; the options that shape a
+# build, or that give it some other tag, have nothing to act on.
+if [ -n "$PROMOTE_FROM" ] && { [ -n "$CUSTOM_TAG" ] || [ "$PUSH_OR_LOAD" = "--load" ] || [ "$PLATFORM" != "linux/amd64,linux/arm64" ]; }; then
+    echo "ERROR: --promote cannot be combined with --tag, --amd64 or --arm64"
+    exit 1
+fi
 
 # Scan an image with Trivy for known vulnerabilities.
 #
@@ -139,6 +156,52 @@ echo "Current version: $VERSION"
 echo ""
 read -p "Press any key to continue..." -n1 -s
 echo ""
+
+# Commit and push version changes (unless --no-latest or --no-git flag is set)
+git_commit_and_push() {
+    if [ "$TAG_LATEST" = true ] && [ "$NO_GIT" = false ]; then
+        echo "Committing and pushing to git..."
+        git add .
+        git commit -m "$VERSION"
+        git push -v
+    else
+        echo "Skipping git commit and push (--no-latest or --no-git flag set)"
+    fi
+}
+
+# Point the version (and latest) tags at an image already pushed under another
+# tag, e.g. one built with --tag=testing and tried out. `imagetools create`
+# writes a new tag for the same manifest list inside the registry: nothing is
+# rebuilt or pulled, both architectures come along, and the digest that was
+# tested is exactly the digest that ships. No GeoIP download and no scan, for
+# the same reason: the image is the one built and scanned under the old tag.
+promote_image() {
+    local image="$1"
+    local src="$image:$PROMOTE_FROM"
+    local tags=(-t "$image:$VERSION")
+    [ "$TAG_LATEST" = true ] && tags+=(-t "$image:latest")
+
+    if ! docker buildx imagetools inspect "$src" >/dev/null 2>&1; then
+        echo "ERROR: $src is not in the registry (an --amd64 build is only loaded locally)"
+        exit 1
+    fi
+
+    echo "Tagging $src as: $image:$VERSION$([ "$TAG_LATEST" = true ] && echo " $image:latest")"
+    if ! docker buildx imagetools create "${tags[@]}" "$src"; then
+        echo "ERROR: could not tag $src"
+        exit 1
+    fi
+    docker buildx imagetools inspect "$image:$VERSION" | grep -E '^(Name|Digest):'
+}
+
+if [ -n "$PROMOTE_FROM" ]; then
+    promote_image "$IMAGE"
+    if [ "$BUILD_FLUENT_BIT" = true ]; then
+        promote_image "$FLUENT_BIT_IMAGE"
+    fi
+    git_commit_and_push
+    exit 0
+fi
 
 # Auto-fetch GeoIP City and ASN databases (unless --no-geoip flag is set)
 if [ "$SKIP_GEOIP" = true ]; then
@@ -298,12 +361,4 @@ else
     echo "Skipping Fluent Bit build (use --fluent-bit flag to build)"
 fi
 
-# Commit and push version changes (unless --no-latest or --no-git flag is set)
-if [ "$TAG_LATEST" = true ] && [ "$NO_GIT" = false ]; then
-    echo "Committing and pushing to git..."
-    git add .
-    git commit -m "$VERSION"
-    git push -v
-else
-    echo "Skipping git commit and push (--no-latest or --no-git flag set)"
-fi
+git_commit_and_push

@@ -1,5 +1,5 @@
 # Multi-stage build for ka9q_ubersdr on Ubuntu 24.04
-FROM golang:1.25-bookworm AS builder
+FROM golang:1.26-bookworm AS builder
 
 # Install build dependencies for Opus and JS bundling (esbuild)
 RUN apt-get update && apt-get install -y \

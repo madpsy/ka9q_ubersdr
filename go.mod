@@ -1,6 +1,6 @@
 module github.com/cwsl/ka9q_ubersdr
 
-go 1.25.0
+go 1.26.9
 
 require (
 	github.com/eclipse/paho.mqtt.golang v1.4.3
@@ -16,10 +16,10 @@ require (
 	github.com/prometheus/client_model v0.6.2
 	github.com/shirou/gopsutil/v3 v3.24.5
 	github.com/ua-parser/uap-go v0.0.0-20251207011819-db9adb27a0b8
-	golang.org/x/net v0.58.0
-	golang.org/x/sync v0.22.0
-	golang.org/x/sys v0.47.0
-	golang.org/x/text v0.41.0
+	golang.org/x/net v0.61.0
+	golang.org/x/sync v0.24.0
+	golang.org/x/sys v0.49.0
+	golang.org/x/text v0.43.0
 	gonum.org/v1/gonum v0.17.0
 	google.golang.org/grpc v1.83.2
 	google.golang.org/protobuf v1.36.11

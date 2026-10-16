@@ -10319,8 +10319,13 @@ a.btn { text-decoration: none; }
 
 .stt__lang { max-width: 190px; }
 .stt__model { max-width: 230px; }
-/* The Model menu with its Download / Cancel / Remove beside it, not below. */
-.stt__model-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+/* The Model menu with its Download / Cancel / Remove beside it, not below:
+   one line, so the field is no taller than the others. The menu sizes to its
+   options — .select is width: 100%, which in a row takes the whole line and
+   pushes the button under it. */
+.stt__model-row { display: flex; align-items: center; gap: 6px; flex-wrap: nowrap; }
+.stt__model-row .stt__model { width: auto; flex: none; }
+.stt__model-row .btn { flex: none; }
 /* Why Start is off: the one thing to do next, so not faint. */
 .stt__model-why {
     font-size: calc(10.5px * var(--ui-scale));

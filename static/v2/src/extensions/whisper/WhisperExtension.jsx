@@ -1262,9 +1262,8 @@ export default function WhisperExtension({ minimal }) {
                                         : (inBrowser
                                             ? 'Delete this model from this browser. Another downloaded one is used instead, or Download again to transcribe on this device'
                                             : 'Delete this model from this computer. The built-in one is used instead')}
-                                >
-                                    Remove
-                                </Button>
+                                    aria-label="Remove model"
+                                />
                             )}
                         </div>
                         {modelBlock && !decoding && <span className="stt__model-why">{modelBlock}</span>}

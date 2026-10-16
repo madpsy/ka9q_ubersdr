@@ -128,7 +128,9 @@ function fresh() {
 }
 
 const buttons = (tree) => deep(tree).filter((n) => n.type === 'button');
-const button = (tree, text) => buttons(tree).find((b) => words(b).trim() === text);
+// By its text, or by its aria-label for an icon-only one (the model's Remove).
+const button = (tree, text) => buttons(tree).find((b) => words(b).trim() === text)
+    || buttons(tree).find((b) => b.props['aria-label'] === `${text} model`);
 const sources = (tree) => buttons(tree).filter((b) => /segmented__item/.test(b.props.className || '')
     && /^(On this device|Server)$/.test(words(b).trim()));
 const activeSource = (tree) => {

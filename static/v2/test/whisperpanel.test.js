@@ -702,10 +702,10 @@ t('removing the model in use goes back to the built-in one', async () => {
     unmount();
 });
 
-t('a model change while running restarts the recogniser on it; a refused one does not', async () => {
+t('while running, the model cannot be changed or removed; stopped, a change is taken at the next Start', async () => {
     fresh();
     const host = hostWithModels();
-    host.list = host.list.map((m) => ({ ...m, installed: true }));
+    host.list = host.list.map((m) => ({ ...m, installed: true, active: m.id === 'small' }));
     globalThis.ubersdrDesktop = { stt: host };
     const ctx = context();
     let tree = keep(ctx);
@@ -721,38 +721,84 @@ t('a model change while running restarts the recogniser on it; a refused one doe
     // Renders that change nothing leave it running.
     tree = keep(ctx);
     assert.strictEqual(host.starts.length, 1, 'restarted by a render');
-    const stops = host.stops;
 
-    modelMenu(tree).props.onChange({ target: { value: 'small' } });
-    await settle();
+    // Locked while it runs, and the menu says why.
+    const menu = modelMenu(tree);
+    assert.strictEqual(menu.props.disabled, true, 'the model can be changed while running');
+    assert.match(menu.props.title, /Stop transcribing to change the model/);
+    assert.strictEqual(button(tree, 'Remove').props.disabled, true, 'the model in use can be removed while running');
+    assert.match(button(tree, 'Remove').props.title, /Stop transcribing/);
+
+    button(tree, 'Stop').props.onClick();
     tree = keep(ctx);
     await settle();
     tree = keep(ctx);
-    assert.deepStrictEqual(host.calls, [['set', 'small']]);
-    assert.strictEqual(host.starts.length, 2, 'not restarted on the new model');
-    assert.ok(host.stops > stops, 'the old session was left running');
-
-    // The host refusing the change: nothing changed, so nothing restarts.
-    host.setModel = (id) => {
-        host.calls.push(['set', id]);
-        return Promise.reject(new Error('The Base model could not be chosen.'));
-    };
+    assert.strictEqual(modelMenu(tree).props.disabled, false, 'still locked after Stop');
     modelMenu(tree).props.onChange({ target: { value: 'base' } });
     await settle();
     tree = keep(ctx);
     await settle();
     tree = keep(ctx);
-    assert.strictEqual(host.starts.length, 2, 'restarted for a model that was not chosen');
-    assert.match(notes(tree).map(words).join(' '), /could not be chosen/);
+    assert.deepStrictEqual(host.calls, [['set', 'base']]);
+    assert.strictEqual(host.starts.length, 1, 'started by a model change while stopped');
 
-    // Removing the one in use: the built-in one from now on, at once.
-    button(tree, 'Remove').props.onClick();
+    // The host refusing a change: said so, and nothing starts.
+    host.setModel = (id) => {
+        host.calls.push(['set', id]);
+        return Promise.reject(new Error('The Small model could not be chosen.'));
+    };
+    modelMenu(tree).props.onChange({ target: { value: 'small' } });
     await settle();
     tree = keep(ctx);
     await settle();
     tree = keep(ctx);
-    assert.deepStrictEqual(host.calls.slice(-1), [['remove', 'small']]);
-    assert.strictEqual(host.starts.length, 3, 'not restarted after removing the model in use');
+    assert.strictEqual(host.starts.length, 1);
+    assert.match(notes(tree).map(words).join(' '), /could not be chosen/);
+    unmount();
+});
+
+const modelWhy = (tree) => {
+    const n = deep(tree).find((x) => /\bstt__model-why\b/.test(x.props.className || ''));
+    return n ? words(n).trim() : '';
+};
+
+t('Start is off, saying why, while the chosen model is not downloaded or still downloading', async () => {
+    fresh();
+    const host = hostWithModels();
+    globalThis.ubersdrDesktop = { stt: host };
+    const ctx = context();
+    let tree = keep(ctx);
+    await settle();
+    tree = keep(ctx);
+    assert.strictEqual(button(tree, 'Start').props.disabled, false, 'the built-in model is there');
+    assert.strictEqual(modelWhy(tree), '');
+
+    modelMenu(tree).props.onChange({ target: { value: 'small' } });
+    tree = keep(ctx);
+    await settle();
+    tree = keep(ctx);
+    let start = button(tree, 'Start');
+    assert.strictEqual(start.props.disabled, true, 'Start on a model that is not there');
+    assert.match(start.props.title, /Small model isn't downloaded yet — press Download/);
+    assert.match(modelWhy(tree), /Small model isn't downloaded yet/, 'the reason is not on screen');
+
+    button(tree, 'Download').props.onClick();
+    tree = keep(ctx);
+    await settle();
+    tree = keep(ctx);
+    start = button(tree, 'Start');
+    assert.strictEqual(start.props.disabled, true, 'Start mid-download');
+    assert.match(start.props.title, /Wait for the Small model to finish downloading/);
+    assert.match(modelWhy(tree), /Wait for the Small model/);
+
+    host.finish();
+    await settle();
+    tree = keep(ctx);
+    await settle();
+    tree = keep(ctx);
+    assert.strictEqual(button(tree, 'Start').props.disabled, false, 'still off once it arrived');
+    assert.strictEqual(modelWhy(tree), '');
+    assert.strictEqual(host.starts.length, 0, 'started by the download');
     unmount();
 });
 

@@ -353,6 +353,23 @@ export default function WhisperExtension({ minimal }) {
     const models = useHostModels({ stt: contractStt(localKind), enabled: local });
     // Where the models live, for the Model row's wording.
     const inBrowser = localKind === 'wasm';
+    // Why Start cannot run the chosen model yet, or ''. Shown beside the Model
+    // menu and on Start itself: the recogniser takes the model it is started
+    // with, so starting on one that is not there is a failure waiting to
+    // happen — in a browser, with nothing downloaded, a certain one.
+    let modelBlock = '';
+    if (local && models.on) {
+        const nameOf = (id) => {
+            const m = models.items.find((x) => x.id === id);
+            return (m && (m.label || m.id)) || 'speech';
+        };
+        if (!models.ready) modelBlock = 'Checking which speech models are on this device…';
+        else if (models.job) modelBlock = `Wait for the ${nameOf(models.job.id)} model to finish downloading`;
+        else if (!models.selected) modelBlock = 'Choose a speech model under Model first';
+        else if (!models.selected.installed) {
+            modelBlock = `The ${nameOf(models.selected.id)} model isn't downloaded yet — press Download next to Model to get it`;
+        }
+    }
     const modelApplied = models.applied;
     // A setter's wrapper, so safe to call from a callback an older render made.
     const refreshModels = models.refresh;
@@ -1115,12 +1132,12 @@ export default function WhisperExtension({ minimal }) {
                             size="sm"
                             variant="primary"
                             onClick={() => setDecoding(true)}
-                            disabled={!live || (local && noLanguages)}
+                            disabled={!live || (local && noLanguages) || !!modelBlock}
                             icon={<Icon.Power size={13} />}
                             title={live
                                 ? (local && noLanguages
                                     ? 'There is no language this device can recognise — see the note below'
-                                    : `Start transcribing the audio this receiver is tuned to${local ? ', on this device' : ''}`)
+                                    : (modelBlock || `Start transcribing the audio this receiver is tuned to${local ? ', on this device' : ''}`))
                                 : (local
                                     ? 'Start the receiver first — there is no audio to transcribe yet'
                                     : 'Start the receiver first — the transcriber runs on your audio session')}
@@ -1190,57 +1207,67 @@ export default function WhisperExtension({ minimal }) {
                             : 'Which speech model recognises on this device. A larger one copes better with a weak or noisy signal and needs more of the computer to keep up. Changing it restarts the recogniser'}
                     >
                         <span className="tp__field-label">Model</span>
-                        <select
-                            className="select stt__model"
-                            value={models.selectedId}
-                            disabled={!!models.job}
-                            onChange={(e) => models.choose(e.target.value)}
-                        >
-                            {models.items.map((m) => <option key={m.id} value={m.id}>{modelLabel(m)}</option>)}
-                        </select>
-                        {models.job && (
-                            <>
-                                <span className="stt__model-progress">
-                                    {`Downloading ${downloadPercent(models.job)}%`}
-                                </span>
+                        {/* The menu and its buttons on one line: a field
+                            stacks its children, and a button below the menu
+                            would take a row of the bar to itself. */}
+                        <div className="stt__model-row">
+                            <select
+                                className="select stt__model"
+                                value={models.selectedId}
+                                disabled={!!models.job || decoding}
+                                onChange={(e) => models.choose(e.target.value)}
+                                title={decoding ? 'Stop transcribing to change the model' : undefined}
+                            >
+                                {models.items.map((m) => <option key={m.id} value={m.id}>{modelLabel(m)}</option>)}
+                            </select>
+                            {models.job && (
+                                <>
+                                    <span className="stt__model-progress">
+                                        {`Downloading ${downloadPercent(models.job)}%`}
+                                    </span>
+                                    <Button
+                                        size="sm"
+                                        variant="ghost"
+                                        onClick={models.cancel}
+                                        title={inBrowser
+                                            ? 'Stop the download. Nothing is kept: Download starts it again from the beginning'
+                                            : 'Stop the download. What has arrived is kept, and Download carries on from there'}
+                                    >
+                                        Cancel
+                                    </Button>
+                                </>
+                            )}
+                            {!models.job && models.selected && !models.selected.installed && (
                                 <Button
                                     size="sm"
                                     variant="ghost"
-                                    onClick={models.cancel}
+                                    onClick={models.download}
+                                    icon={<Icon.Download size={13} />}
                                     title={inBrowser
-                                        ? 'Stop the download. Nothing is kept: Download starts it again from the beginning'
-                                        : 'Stop the download. What has arrived is kept, and Download carries on from there'}
+                                        ? 'Download this model once and switch to it. It is kept in this browser for this receiver\'s site, so it is there next time. Nothing you listen to is sent anywhere'
+                                        : 'Download this model once, to this computer, and switch to it. Nothing you listen to is sent anywhere'}
                                 >
-                                    Cancel
+                                    Download
                                 </Button>
-                            </>
-                        )}
-                        {!models.job && models.selected && !models.selected.installed && (
-                            <Button
-                                size="sm"
-                                variant="ghost"
-                                onClick={models.download}
-                                icon={<Icon.Download size={13} />}
-                                title={inBrowser
-                                    ? 'Download this model once and switch to it. It is kept in this browser for this receiver\'s site, so it is there next time. Nothing you listen to is sent anywhere'
-                                    : 'Download this model once, to this computer, and switch to it. Nothing you listen to is sent anywhere'}
-                            >
-                                Download
-                            </Button>
-                        )}
-                        {!models.job && models.selected && models.selected.installed && !models.selected.builtIn && (
-                            <Button
-                                size="sm"
-                                variant="ghost"
-                                onClick={models.remove}
-                                icon={<Icon.Trash size={13} />}
-                                title={inBrowser
-                                    ? 'Delete this model from this browser. Another downloaded one is used instead, or Download again to transcribe on this device'
-                                    : 'Delete this model from this computer. The built-in one is used instead'}
-                            >
-                                Remove
-                            </Button>
-                        )}
+                            )}
+                            {!models.job && models.selected && models.selected.installed && !models.selected.builtIn && (
+                                <Button
+                                    size="sm"
+                                    variant="ghost"
+                                    onClick={models.remove}
+                                    disabled={decoding}
+                                    icon={<Icon.Trash size={13} />}
+                                    title={decoding
+                                        ? 'Stop transcribing to remove the model in use'
+                                        : (inBrowser
+                                            ? 'Delete this model from this browser. Another downloaded one is used instead, or Download again to transcribe on this device'
+                                            : 'Delete this model from this computer. The built-in one is used instead')}
+                                >
+                                    Remove
+                                </Button>
+                            )}
+                        </div>
+                        {modelBlock && !decoding && <span className="stt__model-why">{modelBlock}</span>}
                     </div>
                 )}
 

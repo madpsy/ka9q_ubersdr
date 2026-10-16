@@ -10353,6 +10353,13 @@ a.btn { text-decoration: none; }
 /* The one readout that is a live measurement rather than a label, so it is
    tabular — it changes every second and must not jitter sideways. */
 .stt__since { font-variant-numeric: tabular-nums; text-transform: none; letter-spacing: 0; }
+/* Tops, not bottoms, in this panel: every field here is a label over a
+   control, and some grow a line beneath it — why local is off, why Start is
+   off. Aligned by their bottoms, that line would lift its field's label and
+   control above the rest; aligned by their tops, it hangs below. The "since"
+   readout is the one thing that belongs at the bottom. */
+.stt .tp__config { align-items: flex-start; }
+.stt .tp__config .stt__since { align-self: flex-end; }
 .stt__detected { color: var(--accent); }
 
 .stt__tts { align-items: flex-end; gap: 8px 12px; }

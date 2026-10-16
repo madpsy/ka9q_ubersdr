@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/ua-parser/uap-go/uaparser"
@@ -86,37 +87,67 @@ func handlePublicSessionStats(w http.ResponseWriter, r *http.Request, config *Co
 		return
 	}
 
-	// Aggregate queries over the session tables: milliseconds, and the cost does
-	// not grow with the length of the window. This used to replay every snapshot
-	// row in the retention window on each request, which is what exhausted the
-	// receiver's memory.
-	endTime := time.Now().UTC()
-	startTime := endTime.Add(-publicSessionStatsDays * 24 * time.Hour)
-
-	stats, err := PublicSessionStatsFromDB(readDB, startTime, endTime)
+	body, err := cachedPublicSessionStats(readDB)
 	if err != nil {
 		http.Error(w, "Failed to read session statistics", http.StatusInternalServerError)
 		log.Printf("Error reading session statistics: %v", err)
 		return
 	}
 
-	response := map[string]interface{}{
-		"period_start": startTime.Format(time.RFC3339),
-		"period_end":   endTime.Format(time.RFC3339),
-		"period_days":  publicSessionStatsDays,
-		"stats":        stats,
-	}
-
+	w.Header().Set("Cache-Control", "public, max-age=60")
 	w.WriteHeader(http.StatusOK)
-	if err := json.NewEncoder(w).Encode(response); err != nil {
-		log.Printf("Error encoding public session stats: %v", err)
-	}
+	w.Write(body)
 }
 
 const (
 	// publicSessionStatsDays is the reporting window, in days.
 	publicSessionStatsDays = 28
+
+	// publicSessionStatsCacheTTL is how long one computed response is served.
+	publicSessionStatsCacheTTL = time.Minute
 )
+
+// publicSessionStatsCache holds the last encoded response. Computing it
+// costs about half a second at 60k sessions in the window, and the per-IP rate limit
+// does nothing to stop many clients each paying it.
+var publicSessionStatsCache struct {
+	sync.Mutex
+	body []byte
+	at   time.Time
+}
+
+// cachedPublicSessionStats returns the encoded response, recomputing it once the
+// cached copy is older than publicSessionStatsCacheTTL. The lock is held across
+// the recompute, so concurrent requests on expiry wait for one pass rather than
+// each starting their own. Errors are not cached.
+func cachedPublicSessionStats(readDB *sql.DB) ([]byte, error) {
+	c := &publicSessionStatsCache
+	c.Lock()
+	defer c.Unlock()
+
+	if c.body != nil && time.Since(c.at) < publicSessionStatsCacheTTL {
+		return c.body, nil
+	}
+
+	endTime := time.Now().UTC()
+	startTime := endTime.Add(-publicSessionStatsDays * 24 * time.Hour)
+	stats, err := PublicSessionStatsFromDB(readDB, startTime, endTime)
+	if err != nil {
+		return nil, err
+	}
+	body, err := json.Marshal(map[string]interface{}{
+		"period_start": startTime.Format(time.RFC3339),
+		"period_end":   endTime.Format(time.RFC3339),
+		"period_days":  publicSessionStatsDays,
+		"stats":        stats,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	c.body, c.at = body, endTime
+	return body, nil
+}
 
 // computePublicSessionStats folds the legacy snapshot log into the public
 // statistics response.

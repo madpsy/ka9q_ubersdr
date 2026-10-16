@@ -95,19 +95,24 @@ func NewDBManager(dataDir string) (*DBManager, error) {
 	// alongside the single writer without any Go-level serialization.
 	// Each connection gets its own OS file descriptor; SQLite WAL handles
 	// snapshot isolation so readers never see a partial write transaction.
-	readDB, err := sql.Open("sqlite", "file:"+dbPath+"?mode=ro")
+	//
+	// PRAGMAs go in the DSN so the driver applies them to every connection the
+	// pool opens; a db.Exec would reach only whichever one it happened to use.
+	// busy_timeout: readers can briefly block during a WAL checkpoint; 5 s
+	// matches the write connection. cache_size: 16 MiB per connection, so at
+	// most 64 MiB across the pool -- SQLite's 2 MiB default is too small to
+	// hold the hot pages of a production database.
+	readDB, err := sql.Open("sqlite", "file:"+dbPath+"?mode=ro&_pragma=busy_timeout(5000)&_pragma=cache_size(-16384)")
 	if err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("db_manager: open read pool %q: %w", dbPath, err)
 	}
 	readDB.SetMaxOpenConns(4)
 	readDB.SetMaxIdleConns(4)
-	// busy_timeout is still useful on the read pool: readers can briefly block
-	// during a WAL checkpoint. 5 s matches the write connection setting.
-	if _, err := readDB.Exec("PRAGMA busy_timeout=5000"); err != nil {
+	if err := readDB.Ping(); err != nil {
 		_ = db.Close()
 		_ = readDB.Close()
-		return nil, fmt.Errorf("db_manager: read pool busy_timeout: %w", err)
+		return nil, fmt.Errorf("db_manager: open read pool: %w", err)
 	}
 	mgr.readDB = readDB
 

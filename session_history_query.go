@@ -266,10 +266,15 @@ func SynthesiseActivityLogs(records []SessionHistoryRecord, startTime, endTime t
 
 // ─── public statistics ────────────────────────────────────────────────────────
 
-// PublicSessionStatsFromDB computes the public statistics with aggregate queries
-// over the session tables. This replaces a fold that replayed every snapshot row
-// in the retention window; on a real receiver it is milliseconds rather than
-// seconds, and its cost does not grow with the length of the window.
+// PublicSessionStatsFromDB computes the public statistics from the session
+// tables. This replaces a fold that replayed every snapshot row in the retention
+// window; its cost is linear in the sessions that ended inside the window, not in
+// the length of the retention.
+//
+// Everything but bands and modes comes from one scan of the window, aggregated
+// here: each pass over the window costs as much as the next, so one scan instead
+// of seven halves the time. Bands and modes are one-to-many, so they are counted
+// in SQL by a second query.
 //
 // Only sessions that ended inside the window count, matching the old behaviour of
 // aggregating session_end events.
@@ -282,20 +287,97 @@ func PublicSessionStatsFromDB(db *sql.DB, startTime, endTime time.Time) (map[str
 	const where = `WHERE session.ended_at >= ? AND session.ended_at <= ? AND COALESCE(session.auth_method, '') = ''`
 	args := []interface{}{startTime.Unix(), endTime.Unix()}
 
-	var totalSessions, uniqueUsers int
-	var earliest sql.NullInt64
-	if err := db.QueryRow(`
-		SELECT COUNT(*), COUNT(DISTINCT NULLIF(session.client_ip, '')), MIN(session.ended_at)
-		FROM session `+where, args...).Scan(&totalSessions, &uniqueUsers, &earliest); err != nil {
-		return nil, fmt.Errorf("totals: %w", err)
+	rows, err := db.Query(`
+		SELECT session.started_at, session.ended_at, COALESCE(session.client_ip, ''),
+		       COALESCE(NULLIF(session.country, ''), 'Unknown'), COALESCE(session.country_code, ''),
+		       session.latitude, session.longitude,
+		       COALESCE(user_agent.browser, ''), COALESCE(user_agent.os, '')
+		FROM session LEFT JOIN user_agent ON session.user_agent_id = user_agent.id `+where, args...)
+	if err != nil {
+		return nil, fmt.Errorf("sessions: %w", err)
+	}
+	defer rows.Close()
+
+	type countryAgg struct {
+		code      string
+		sessions  int
+		locations map[[2]float64]int
+	}
+	var (
+		totalSessions int
+		earliest      int64
+		durations     = make([]int, len(publicDurationBuckets))
+		hourly        = make([]int, 24)
+		weekday       = make([]int, 7)
+		users         = map[string]struct{}{}
+		browsers      = map[string]int{}
+		oses          = map[string]int{}
+		countries     = map[string]*countryAgg{}
+	)
+	for rows.Next() {
+		var started, ended int64
+		var ip, country, code, browser, osName string
+		var lat, lon sql.NullFloat64
+		if err := rows.Scan(&started, &ended, &ip, &country, &code, &lat, &lon, &browser, &osName); err != nil {
+			return nil, err
+		}
+
+		if totalSessions == 0 || ended < earliest {
+			earliest = ended
+		}
+		totalSessions++
+		if ip != "" {
+			users[ip] = struct{}{}
+		}
+		if browser != "" {
+			browsers[browser]++
+		}
+		if osName != "" {
+			oses[osName]++
+		}
+
+		bucket := len(publicDurationBuckets) - 1
+		for i, b := range publicDurationBuckets[:bucket] {
+			if ended-started < b.below {
+				bucket = i
+				break
+			}
+		}
+		durations[bucket]++
+
+		at := time.Unix(ended, 0).UTC()
+		hourly[at.Hour()]++
+		weekday[at.Weekday()]++
+
+		agg := countries[country]
+		if agg == nil {
+			agg = &countryAgg{locations: map[[2]float64]int{}}
+			countries[country] = agg
+		}
+		// A country seen under several codes reports the lowest non-empty one.
+		if code != "" && (agg.code == "" || code < agg.code) {
+			agg.code = code
+		}
+		agg.sessions++
+		if lat.Valid && lon.Valid {
+			agg.locations[[2]float64{lat.Float64, lon.Float64}]++
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	bands, modes, err := queryBandsAndModes(db, where, args)
+	if err != nil {
+		return nil, err
 	}
 
 	// Averages are over the span actually covered by data, not the nominal
 	// window: a receiver with two days of history must not have its activity
 	// divided by 28.
 	observedStart := startTime
-	if earliest.Valid {
-		if t := time.Unix(earliest.Int64, 0).UTC(); t.After(startTime) {
+	if totalSessions > 0 {
+		if t := time.Unix(earliest, 0).UTC(); t.After(startTime) {
 			observedStart = t
 		}
 	}
@@ -303,224 +385,140 @@ func PublicSessionStatsFromDB(db *sql.DB, startTime, endTime time.Time) (map[str
 	if observedDays < 1 {
 		observedDays = 1
 	}
-
-	durationBuckets, err := queryDurationBuckets(db, where, args)
-	if err != nil {
-		return nil, err
+	observedWeeks := observedDays / 7.0
+	if observedWeeks < 1 {
+		observedWeeks = 1
 	}
-	hourly, err := queryBucketedCounts(db, `CAST(strftime('%H', session.ended_at, 'unixepoch') AS INTEGER)`, 24, where, args)
-	if err != nil {
-		return nil, fmt.Errorf("hourly: %w", err)
-	}
-	weekday, err := queryBucketedCounts(db, `CAST(strftime('%w', session.ended_at, 'unixepoch') AS INTEGER)`, 7, where, args)
-	if err != nil {
-		return nil, fmt.Errorf("weekday: %w", err)
-	}
-
 	avgHourly := make([]float64, 24)
 	for i, n := range hourly {
 		avgHourly[i] = float64(n) / observedDays
 	}
 	avgWeekday := make([]float64, 7)
-	observedWeeks := observedDays / 7.0
-	if observedWeeks < 1 {
-		observedWeeks = 1
-	}
 	for i, n := range weekday {
 		avgWeekday[i] = float64(n) / observedWeeks
 	}
 
-	countries, err := queryCountries(db, where, args)
-	if err != nil {
-		return nil, err
+	durationBuckets := make([]map[string]interface{}, len(publicDurationBuckets))
+	for i, b := range publicDurationBuckets {
+		durationBuckets[i] = map[string]interface{}{"range": b.name, "count": durations[i]}
 	}
-	browsers, err := queryTopJoined(db, "user_agent", "user_agent.browser", "session.user_agent_id = user_agent.id", where, args, 10)
-	if err != nil {
-		return nil, fmt.Errorf("browsers: %w", err)
-	}
-	operatingSystems, err := queryTopJoined(db, "user_agent", "user_agent.os", "session.user_agent_id = user_agent.id", where, args, 10)
-	if err != nil {
-		return nil, fmt.Errorf("operating systems: %w", err)
-	}
-	bands, err := queryTopJoined(db, "session_band", "session_band.band", "session_band.session_id = session.id", where, args, 0)
-	if err != nil {
-		return nil, fmt.Errorf("bands: %w", err)
-	}
-	modes, err := queryTopJoined(db, "session_mode", "session_mode.mode", "session_mode.session_id = session.id", where, args, 0)
-	if err != nil {
-		return nil, fmt.Errorf("modes: %w", err)
-	}
+	sort.SliceStable(durationBuckets, func(i, j int) bool {
+		return durationBuckets[i]["count"].(int) > durationBuckets[j]["count"].(int)
+	})
 
-	return map[string]interface{}{
-		"unique_countries":      len(countries),
-		"countries":             countries,
-		"unique_users":          uniqueUsers,
-		"total_sessions":        totalSessions,
-		"duration_buckets":      durationBuckets,
-		"avg_hourly_activity":   avgHourly,
-		"avg_weekday_activity":  avgWeekday,
-		"top_browsers":          browsers,
-		"top_operating_systems": operatingSystems,
-		"top_bands":             bands,
-		"top_modes":             modes,
-	}, nil
-}
-
-// queryDurationBuckets groups sessions by how long they lasted.
-func queryDurationBuckets(db *sql.DB, where string, args []interface{}) ([]map[string]interface{}, error) {
-	const bucketExpr = `
-		CASE
-			WHEN (session.ended_at - session.started_at) <   60 THEN '0-1min'
-			WHEN (session.ended_at - session.started_at) <  300 THEN '1-5min'
-			WHEN (session.ended_at - session.started_at) <  900 THEN '5-15min'
-			WHEN (session.ended_at - session.started_at) < 1800 THEN '15-30min'
-			WHEN (session.ended_at - session.started_at) < 3600 THEN '30-60min'
-			WHEN (session.ended_at - session.started_at) < 7200 THEN '60-120min'
-			ELSE '120min+'
-		END`
-
-	counts := map[string]int{}
-	rows, err := db.Query(`SELECT `+bucketExpr+` AS bucket, COUNT(*) FROM session `+where+` GROUP BY bucket`, args...)
-	if err != nil {
-		return nil, fmt.Errorf("duration buckets: %w", err)
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var bucket string
-		var n int
-		if err := rows.Scan(&bucket, &n); err != nil {
-			return nil, err
-		}
-		counts[bucket] = n
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-
-	out := make([]map[string]interface{}, 0, 7)
-	for _, name := range []string{"0-1min", "1-5min", "5-15min", "15-30min", "30-60min", "60-120min", "120min+"} {
-		out = append(out, map[string]interface{}{"range": name, "count": counts[name]})
-	}
-	sort.SliceStable(out, func(i, j int) bool { return out[i]["count"].(int) > out[j]["count"].(int) })
-	return out, nil
-}
-
-// queryBucketedCounts counts sessions per value of a small integer expression.
-func queryBucketedCounts(db *sql.DB, expr string, size int, where string, args []interface{}) ([]int, error) {
-	counts := make([]int, size)
-	rows, err := db.Query(`SELECT `+expr+` AS bucket, COUNT(*) FROM session `+where+` GROUP BY bucket`, args...)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var bucket, n int
-		if err := rows.Scan(&bucket, &n); err != nil {
-			return nil, err
-		}
-		if bucket >= 0 && bucket < size {
-			counts[bucket] = n
-		}
-	}
-	return counts, rows.Err()
-}
-
-// queryCountries groups sessions by country, with the distinct coordinates seen
-// for each so the map still has points to plot.
-func queryCountries(db *sql.DB, where string, args []interface{}) ([]map[string]interface{}, error) {
-	type countryAgg struct {
-		name      string
-		code      string
-		sessions  int
-		locations map[string]map[string]interface{}
-	}
-	byName := map[string]*countryAgg{}
-
-	rows, err := db.Query(`
-		SELECT COALESCE(NULLIF(session.country, ''), 'Unknown'), COALESCE(session.country_code, ''),
-		       session.latitude, session.longitude, COUNT(*)
-		FROM session `+where+`
-		GROUP BY 1, 2, 3, 4`, args...)
-	if err != nil {
-		return nil, fmt.Errorf("countries: %w", err)
-	}
-	defer rows.Close()
-
-	for rows.Next() {
-		var name, code string
-		var lat, lon sql.NullFloat64
-		var n int
-		if err := rows.Scan(&name, &code, &lat, &lon, &n); err != nil {
-			return nil, err
-		}
-		agg := byName[name]
-		if agg == nil {
-			agg = &countryAgg{name: name, code: code, locations: map[string]map[string]interface{}{}}
-			byName[name] = agg
-		}
-		if agg.code == "" {
-			agg.code = code
-		}
-		agg.sessions += n
-		if lat.Valid && lon.Valid {
-			key := fmt.Sprintf("%.4f,%.4f", lat.Float64, lon.Float64)
-			if loc, ok := agg.locations[key]; ok {
+	countryList := make([]map[string]interface{}, 0, len(countries))
+	for name, agg := range countries {
+		// Points closer than the precision shown on the map are one point.
+		merged := map[string]map[string]interface{}{}
+		for ll, n := range agg.locations {
+			key := fmt.Sprintf("%.4f,%.4f", ll[0], ll[1])
+			if loc, ok := merged[key]; ok {
 				loc["sessions"] = loc["sessions"].(int) + n
 			} else {
-				agg.locations[key] = map[string]interface{}{
-					"latitude": lat.Float64, "longitude": lon.Float64, "sessions": n,
-				}
+				merged[key] = map[string]interface{}{"latitude": ll[0], "longitude": ll[1], "sessions": n}
 			}
 		}
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-
-	out := make([]map[string]interface{}, 0, len(byName))
-	for _, agg := range byName {
-		locations := make([]map[string]interface{}, 0, len(agg.locations))
-		for _, loc := range agg.locations {
+		locations := make([]map[string]interface{}, 0, len(merged))
+		for _, loc := range merged {
 			locations = append(locations, loc)
 		}
-		out = append(out, map[string]interface{}{
-			"country":      agg.name,
+		countryList = append(countryList, map[string]interface{}{
+			"country":      name,
 			"country_code": agg.code,
 			"sessions":     agg.sessions,
 			"locations":    locations,
 		})
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i]["sessions"].(int) > out[j]["sessions"].(int) })
-	return out, nil
+	sort.Slice(countryList, func(i, j int) bool {
+		a, b := countryList[i], countryList[j]
+		if a["sessions"].(int) != b["sessions"].(int) {
+			return a["sessions"].(int) > b["sessions"].(int)
+		}
+		return a["country"].(string) < b["country"].(string)
+	})
+
+	return map[string]interface{}{
+		"unique_countries":      len(countryList),
+		"countries":             countryList,
+		"unique_users":          len(users),
+		"total_sessions":        totalSessions,
+		"duration_buckets":      durationBuckets,
+		"avg_hourly_activity":   avgHourly,
+		"avg_weekday_activity":  avgWeekday,
+		"top_browsers":          rankCounts(browsers, 10),
+		"top_operating_systems": rankCounts(oses, 10),
+		"top_bands":             rankCounts(bands, 0),
+		"top_modes":             rankCounts(modes, 0),
+	}, nil
 }
 
-// queryTopJoined counts sessions per value of a joined column, most common first.
-// limit <= 0 returns every value.
-func queryTopJoined(db *sql.DB, table, column, on, where string, args []interface{}, limit int) ([]map[string]interface{}, error) {
-	q := `SELECT ` + column + ` AS label, COUNT(*) FROM session
-	      JOIN ` + table + ` ON ` + on + ` ` + where + `
-	      AND ` + column + ` IS NOT NULL AND ` + column + ` != ''
-	      GROUP BY label ORDER BY COUNT(*) DESC`
-	if limit > 0 {
-		q += fmt.Sprintf(" LIMIT %d", limit)
-	}
+// publicDurationBuckets are the session-length ranges, shortest first. The last
+// one is open-ended; its bound is never compared.
+var publicDurationBuckets = []struct {
+	name  string
+	below int64 // seconds
+}{
+	{"0-1min", 60},
+	{"1-5min", 300},
+	{"5-15min", 900},
+	{"15-30min", 1800},
+	{"30-60min", 3600},
+	{"60-120min", 7200},
+	{"120min+", 0},
+}
 
-	rows, err := db.Query(q, args...)
+// queryBandsAndModes counts the sessions that visited each band and used each
+// mode, in one round trip.
+func queryBandsAndModes(db *sql.DB, where string, args []interface{}) (bands, modes map[string]int, err error) {
+	rows, err := db.Query(`
+		SELECT 0, session_band.band, COUNT(*) FROM session
+		JOIN session_band ON session_band.session_id = session.id `+where+` AND session_band.band != ''
+		GROUP BY 2
+		UNION ALL
+		SELECT 1, session_mode.mode, COUNT(*) FROM session
+		JOIN session_mode ON session_mode.session_id = session.id `+where+` AND session_mode.mode != ''
+		GROUP BY 2`, append(append([]interface{}{}, args...), args...)...)
 	if err != nil {
-		return nil, err
+		return nil, nil, fmt.Errorf("bands and modes: %w", err)
 	}
 	defer rows.Close()
 
-	out := []map[string]interface{}{}
+	bands, modes = map[string]int{}, map[string]int{}
 	for rows.Next() {
+		var kind, n int
 		var label string
-		var n int
-		if err := rows.Scan(&label, &n); err != nil {
-			return nil, err
+		if err := rows.Scan(&kind, &label, &n); err != nil {
+			return nil, nil, err
 		}
-		out = append(out, map[string]interface{}{"name": label, "sessions": n})
+		if kind == 0 {
+			bands[label] = n
+		} else {
+			modes[label] = n
+		}
 	}
-	return out, rows.Err()
+	return bands, modes, rows.Err()
+}
+
+// rankCounts lists counts most common first, ties by name. limit <= 0 keeps all.
+func rankCounts(counts map[string]int, limit int) []map[string]interface{} {
+	names := make([]string, 0, len(counts))
+	for name := range counts {
+		names = append(names, name)
+	}
+	sort.Slice(names, func(i, j int) bool {
+		if counts[names[i]] != counts[names[j]] {
+			return counts[names[i]] > counts[names[j]]
+		}
+		return names[i] < names[j]
+	})
+	if limit > 0 && len(names) > limit {
+		names = names[:limit]
+	}
+	out := make([]map[string]interface{}, len(names))
+	for i, name := range names {
+		out[i] = map[string]interface{}{"name": name, "sessions": counts[name]}
+	}
+	return out
 }
 
 // SessionBucketsFromRecords counts the sessions active at each bucket boundary,

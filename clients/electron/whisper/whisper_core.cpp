@@ -211,6 +211,13 @@ std::string whisperLanguage(const std::string &lang) {
     return code;
 }
 
+std::string languageTag(const std::string &whisperCode) {
+    std::string code;
+    for (char c : whisperCode) code += static_cast<char>((c >= 'A' && c <= 'Z') ? c - 'A' + 'a' : c);
+    if (code == "jw") return "jv";
+    return code;
+}
+
 // ── Utterances ───────────────────────────────────────────────────────────────
 
 Segmenter::Segmenter(SegmenterConfig cfg) : cfg_(cfg), preRoll_(static_cast<size_t>(std::max(0, cfg.preRoll))) {}

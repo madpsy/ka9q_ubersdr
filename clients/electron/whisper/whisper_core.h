@@ -49,6 +49,12 @@ StartRequest parseStart(const std::string &json);
 // so a tag that slipped through unmapped still means what it says.
 std::string whisperLanguage(const std::string &lang);
 
+// The other way: a Whisper language code as the BCP-47 tag a page lists and
+// names. Whisper's codes are ISO 639-1 but for Javanese, which is "jw" to it and
+// "jv" to everybody else. The desktop client does this in JavaScript on the
+// helper's --languages list (stt.js); the browser build asks this.
+std::string languageTag(const std::string &whisperCode);
+
 // ── Utterances ───────────────────────────────────────────────────────────────
 
 // Whisper transcribes a window of audio, not a stream, and cuts words where the

@@ -45,13 +45,16 @@ const ALL = Symbol('all');
 const PROGRESS_MS = 250;
 
 /**
- * models.json's entries, in its order, as `{id, file, url, size, sha256,
- * bundled}`. `//` keys are its notes.
+ * models.json's entries for this client, in its order, as `{id, file, url,
+ * size, sha256, bundled}`. `//` keys are its notes. The file is shared with the
+ * browser's Whisper (static/v2), and an entry's `clients` says which of the two
+ * offer it — tiny is the browser's alone. An entry without one is for both.
  */
 function readPins(pins) {
     const out = [];
     for (const [id, v] of Object.entries(pins || {})) {
         if (id.startsWith('//') || !v || typeof v !== 'object') continue;
+        if (Array.isArray(v.clients) && !v.clients.includes('desktop')) continue;
         out.push({
             id,
             file: String(v.file || ''),

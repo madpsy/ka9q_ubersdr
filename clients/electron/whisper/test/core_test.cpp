@@ -113,6 +113,11 @@ TEST(language_codes) {
     CHECK(whisperLanguage("nb") == "no");
     CHECK(whisperLanguage("jv") == "jw");
     CHECK(whisperLanguage("iw") == "he");
+    CHECK(languageTag("jw") == "jv");
+    CHECK(languageTag("en") == "en");
+    CHECK(languageTag("YUE") == "yue");
+    // A round trip lands on the code it started from.
+    CHECK(whisperLanguage(languageTag("jw")) == "jw");
     return ok;
 }
 

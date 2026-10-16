@@ -82,6 +82,19 @@ PLAYGROUND=(
     --outfile=dist/playground-worker.js
 )
 
+# The speech-to-text worker, for the same reason: the browser's own Whisper
+# runs in a Worker (src/extensions/whisper/engines/wasm.js), and loads the
+# WebAssembly module itself from whisper/, which is committed rather than built
+# here — see clients/electron/whisper/build.sh --only=wasm.
+WHISPER=(
+    src/extensions/whisper/wasm/worker.entry.js
+    --bundle
+    --format=iife
+    --target=es2020
+    --log-level=warning
+    --outfile=dist/whisper-worker.js
+)
+
 # The names a manifest may use, for the admin editor to check one against.
 #
 # Generated from the source rather than written out again: the icon keys and the
@@ -114,19 +127,22 @@ case "$MODE" in
         esbuild "${COMMON[@]}" --minify
         esbuild "${RUNTIME[@]}" --minify
         esbuild "${PLAYGROUND[@]}" --minify
+        esbuild "${WHISPER[@]}" --minify
         panel_meta
-        echo "built $OUT ($(numfmt --to=iec < <(wc -c < "$OUT"))), dist/panel-runtime.js, dist/playground-worker.js and dist/v2.css"
+        echo "built $OUT ($(numfmt --to=iec < <(wc -c < "$OUT"))), dist/panel-runtime.js, dist/playground-worker.js, dist/whisper-worker.js and dist/v2.css"
         ;;
     dev)
         esbuild "${COMMON[@]}" --sourcemap=inline
         esbuild "${RUNTIME[@]}" --sourcemap=inline
         esbuild "${PLAYGROUND[@]}" --sourcemap=inline
+        esbuild "${WHISPER[@]}" --sourcemap=inline
         panel_meta
-        echo "built $OUT, dist/panel-runtime.js and dist/playground-worker.js (dev)"
+        echo "built $OUT, dist/panel-runtime.js, dist/playground-worker.js and dist/whisper-worker.js (dev)"
         ;;
     watch)
         esbuild "${RUNTIME[@]}" --sourcemap=inline
         esbuild "${PLAYGROUND[@]}" --sourcemap=inline
+        esbuild "${WHISPER[@]}" --sourcemap=inline
         panel_meta
         esbuild "${COMMON[@]}" --sourcemap=inline --watch
         ;;

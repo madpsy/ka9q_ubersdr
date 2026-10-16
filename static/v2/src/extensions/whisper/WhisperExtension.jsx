@@ -83,9 +83,10 @@ import {
 } from './local.js';
 import { LOCAL_EMPTY, finishSentence, foldResult, liveSegment } from './localSegments.js';
 import {
-    TRACK_UNSUPPORTED_REASON, browserTrackProbed, canInstall, createLocalEngine, hostStt, installLanguage,
+    TRACK_UNSUPPORTED_REASON, browserTrackProbed, canInstall, contractStt, createLocalEngine, installLanguage,
     localEngineKind, localLanguages, localUnavailableReason, probeBrowserTrack,
 } from './engines/index.js';
+import { wasmHasModel } from './engines/wasm.js';
 import { createLineTranslator } from './translate.js';
 import { useHostModels } from './useHostModels.js';
 import { saveFile } from '../../lib/saveFile.js';
@@ -329,21 +330,29 @@ export default function WhisperExtension({ minimal }) {
     const noLanguages = !!localKind && !!spokenList && spokenList.length === 0;
     const localUsable = !!localKind && !(noLanguages && serverEnabled);
 
+    // The browser's own Whisper is no use until a model is downloaded, so
+    // until then it is offered but the server stays the default — see
+    // pickSource. Read each render: a download changes it.
+    const localDefault = localKind !== 'wasm' || wasmHasModel();
     const picked = useMemo(() => pickSource({
         localAvailable: localUsable,
         serverEnabled,
         saved: savedSource,
         localReason: localKind ? LOCAL_NO_LANGUAGES : localReason,
-    }), [localUsable, localKind, serverEnabled, savedSource, localReason]);
+        localDefault,
+    }), [localUsable, localKind, serverEnabled, savedSource, localReason, localDefault]);
     // Null only when neither is possible, and the extension is not offered
     // then — so anything that does render with it falls to the server path,
     // which is what this component always was.
     const source = picked.source;
     const local = source === SOURCE_LOCAL;
 
-    // The host recogniser's models, where it has a choice of them — see
+    // The recogniser's models, where it has a choice of them — an app's, or the
+    // browser's own Whisper, which has nothing until one is downloaded. See
     // ./useHostModels.js. Only asked while local is the source.
-    const models = useHostModels({ stt: localKind === 'host' ? hostStt() : null, enabled: local });
+    const models = useHostModels({ stt: contractStt(localKind), enabled: local });
+    // Where the models live, for the Model row's wording.
+    const inBrowser = localKind === 'wasm';
     const modelApplied = models.applied;
     // A setter's wrapper, so safe to call from a callback an older render made.
     const refreshModels = models.refresh;
@@ -530,7 +539,7 @@ export default function WhisperExtension({ minimal }) {
     useEffect(() => {
         if (!local || !localKind) return undefined;
         let cancelled = false;
-        const host = localKind === 'host' ? hostStt() : null;
+        const host = contractStt(localKind);
         const late = setTimeout(() => {
             if (cancelled) return;
             setFailure({
@@ -1176,7 +1185,9 @@ export default function WhisperExtension({ minimal }) {
                 {local && models.on && models.items.length > 0 && (
                     <div
                         className="tp__field"
-                        title="Which speech model recognises on this device. A larger one copes better with a weak or noisy signal and needs more of the computer to keep up. Changing it restarts the recogniser"
+                        title={inBrowser
+                            ? 'Which Whisper model recognises in this browser. Base is the more accurate; Tiny keeps up on a slower computer. Changing it restarts the recogniser'
+                            : 'Which speech model recognises on this device. A larger one copes better with a weak or noisy signal and needs more of the computer to keep up. Changing it restarts the recogniser'}
                     >
                         <span className="tp__field-label">Model</span>
                         <select
@@ -1196,7 +1207,9 @@ export default function WhisperExtension({ minimal }) {
                                     size="sm"
                                     variant="ghost"
                                     onClick={models.cancel}
-                                    title="Stop the download. What has arrived is kept, and Download carries on from there"
+                                    title={inBrowser
+                                        ? 'Stop the download. Nothing is kept: Download starts it again from the beginning'
+                                        : 'Stop the download. What has arrived is kept, and Download carries on from there'}
                                 >
                                     Cancel
                                 </Button>
@@ -1208,7 +1221,9 @@ export default function WhisperExtension({ minimal }) {
                                 variant="ghost"
                                 onClick={models.download}
                                 icon={<Icon.Download size={13} />}
-                                title="Download this model once, to this computer, and switch to it. Nothing you listen to is sent anywhere"
+                                title={inBrowser
+                                    ? 'Download this model once and switch to it. It is kept in this browser for this receiver\'s site, so it is there next time. Nothing you listen to is sent anywhere'
+                                    : 'Download this model once, to this computer, and switch to it. Nothing you listen to is sent anywhere'}
                             >
                                 Download
                             </Button>
@@ -1219,7 +1234,9 @@ export default function WhisperExtension({ minimal }) {
                                 variant="ghost"
                                 onClick={models.remove}
                                 icon={<Icon.Trash size={13} />}
-                                title="Delete this model from this computer. The built-in one is used instead"
+                                title={inBrowser
+                                    ? 'Delete this model from this browser. Another downloaded one is used instead, or Download again to transcribe on this device'
+                                    : 'Delete this model from this computer. The built-in one is used instead'}
                             >
                                 Remove
                             </Button>

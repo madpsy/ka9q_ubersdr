@@ -166,6 +166,14 @@ t('the pins the app reads are the ones the build checks', () => {
     assert.match(PINS.small.url, /^https:\/\/huggingface\.co\/.*\/resolve\/[0-9a-f]{40}\/ggml-small-q5_1\.bin$/);
 });
 
+t('the desktop offers only its own models from the shared pins: no tiny', () => {
+    // models.json also pins the browser's models; tiny is the browser's alone.
+    assert.ok(PINS.tiny, 'tiny is pinned for the browser');
+    const m = new ModelManager({ pins: PINS, builtinDir: '/nowhere', dir: '/nowhere', getActive: () => null, setActive: () => {} });
+    assert.deepStrictEqual(m.speech.map((p) => p.id), ['base', 'small']);
+    assert.ok(m.vadPin && m.vadPin.id === 'vad');
+});
+
 // ---- languages -------------------------------------------------------------------
 
 t('languages: Whisper\'s codes as tags the page names, and back', () => {

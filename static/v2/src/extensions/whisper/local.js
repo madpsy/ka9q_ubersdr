@@ -66,8 +66,14 @@ export const LOCAL_NO_LANGUAGES = 'No languages can be recognised on this device
  * A saved choice that is no longer possible — server picked on a receiver
  * whose operator has since switched the transcriber off — falls back without
  * being forgotten, so it applies again where it can.
+ *
+ * `localDefault: false` keeps local on offer but not the default where the
+ * server is there: the browser's own Whisper before a model has been
+ * downloaded, which would otherwise greet everybody on a receiver with a
+ * transcriber with a failure until they found the Download button. Choosing
+ * local by hand still sticks.
  */
-export function pickSource({ localAvailable, serverEnabled, saved, localReason } = {}) {
+export function pickSource({ localAvailable, serverEnabled, saved, localReason, localDefault = true } = {}) {
     const local = !!localAvailable;
     const server = !!serverEnabled;
     if (!local && !server) return { source: null, options: [] };
@@ -81,7 +87,7 @@ export function pickSource({ localAvailable, serverEnabled, saved, localReason }
     if (!server) return { source: SOURCE_LOCAL, options };
     options.push({ value: SOURCE_SERVER, label: 'Server', disabled: false, reason: '' });
 
-    let source = local ? SOURCE_LOCAL : SOURCE_SERVER;
+    let source = local && localDefault ? SOURCE_LOCAL : SOURCE_SERVER;
     if (saved === SOURCE_SERVER) source = SOURCE_SERVER;
     else if (saved === SOURCE_LOCAL && local) source = SOURCE_LOCAL;
     return { source, options };

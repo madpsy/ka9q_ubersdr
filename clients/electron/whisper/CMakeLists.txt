@@ -33,7 +33,7 @@ set(GGML_CCACHE OFF CACHE BOOL "" FORCE)
 
 add_subdirectory("${WHISPER_CPP_DIR}" whisper.cpp EXCLUDE_FROM_ALL)
 
-add_executable(whisper-helper whisper_helper.cpp whisper_core.cpp)
+add_executable(whisper-helper whisper_helper.cpp whisper_session.cpp whisper_core.cpp)
 target_link_libraries(whisper-helper PRIVATE whisper)
 target_compile_definitions(whisper-helper PRIVATE
   WHISPER_CPP_COMMIT="${WHISPER_CPP_COMMIT}"

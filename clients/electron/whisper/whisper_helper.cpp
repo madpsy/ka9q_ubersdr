@@ -1,7 +1,7 @@
 // whisper_helper.cpp — on-device speech-to-text for the desktop client, as a
 // child process.
 //
-//   whisper-helper --model PATH --vad-model PATH [--threads N] [--verbose]
+//   whisper-helper --model PATH --vad-model PATH [--threads N] [--sized-finals] [--verbose]
 //   whisper-helper --languages     a JSON array of Whisper's language codes
 //   whisper-helper --version
 //
@@ -41,11 +41,17 @@
 // Two threads. One only reads stdin, so the pipe never backs up however long a
 // transcription takes — the page pushes audio in real time and a blocked pipe
 // would stall the receiver's audio path in Electron's main process. The other
-// runs the VAD over everything that arrives and transcribes each utterance as
-// it ends (whisper_core.cpp decides where that is), with an interim transcript
-// of the utterance in progress every two seconds of new speech when it can
-// afford one. If it falls more than ten seconds behind, the oldest audio is
-// dropped rather than letting the delay grow without bound.
+// runs a Session (whisper_session.cpp, shared with the browser's WebAssembly
+// build in wasm/) over everything that arrives: the VAD, each utterance
+// transcribed as it ends (whisper_core.cpp decides where that is), and an
+// interim transcript of the utterance in progress every two seconds of new
+// speech when it can afford one. If it falls more than ten seconds behind, the
+// oldest audio is dropped rather than letting the delay grow without bound.
+//
+// --sized-finals transcribes finals with Whisper's encoder sized to the
+// utterance, as interims are, instead of its full 30 s window: several times
+// cheaper, and what the browser build does. Off by default until it has been
+// weighed on off-air audio against the full window (test/ab.js).
 //
 // Exit codes: 0 end of input, 1 bad arguments, 2 a model could not be loaded,
 // 3 the input stopped making sense.
@@ -84,6 +90,7 @@
 
 #include "whisper.h"
 #include "whisper_core.h"
+#include "whisper_session.h"
 
 using namespace whisperhelper;
 
@@ -106,13 +113,6 @@ constexpr size_t KEEP_BACKLOG = RATE * 3;
 // No frame is anywhere near this; one that claims to be has lost its framing,
 // and nothing after it can be trusted.
 constexpr uint32_t MAX_FRAME = 16u << 20;
-// An interim waits for this much new audio at least, and for twice what the
-// last one took, so interims never take more than half the time between them.
-constexpr size_t INTERIM_EVERY = RATE * 2;
-// ...and is skipped while this much audio is waiting: the final matters more.
-constexpr size_t INTERIM_MAX_BACKLOG = RATE / 2;
-// ...and while the speaker has been quiet for this long.
-constexpr int INTERIM_PAUSE = RATE * 3 / 10;
 
 std::atomic<bool> verbose{false};
 
@@ -213,7 +213,7 @@ public:
         return true;
     }
 
-    size_t backlog() {
+    size_t backlog() const {
         std::lock_guard<std::mutex> g(lock_);
         return queued_;
     }
@@ -268,7 +268,7 @@ private:
         }
     }
 
-    std::mutex lock_;
+    mutable std::mutex lock_;
     std::condition_variable ready_;
     std::deque<Event> q_;
     size_t queued_ = 0;
@@ -422,363 +422,42 @@ whisper_vad_context *loadVad(const std::string &path) {
     return vad;
 }
 
-// ── The worker ───────────────────────────────────────────────────────────────
+// ── The session ──────────────────────────────────────────────────────────────
 
-class Worker {
+// What a Session needs, from the inbox: whisper_session.cpp is the whole of
+// what happens to the audio, shared with the browser's WebAssembly build.
+class InboxHost : public SessionHost {
 public:
-    Worker(Inbox &inbox, whisper_context *ctx, whisper_vad_context *vad, int threads)
-        : inbox_(inbox), ctx_(ctx), vad_(vad), threads_(threads) {}
-
-    void run() {
-        for (;;) {
-            Event e;
-            if (!inbox_.tryPop(e)) {
-                // Caught up: the moment for an interim, if one is due.
-                interim();
-                e = inbox_.pop();
-            }
-            if (e.kind == Event::END) return;
-            handle(e);
-        }
-    }
+    explicit InboxHost(Inbox &inbox) : inbox_(inbox) {}
+    void emit(const std::string &line) override { ::emit(line); }
+    void note(const std::string &text) override { ::note("%s", text.c_str()); }
+    // A control frame has arrived since the event in hand was taken: the
+    // reader bumps the epoch, so a decode in progress is abandoned the moment
+    // one does rather than finishing work whose result would be thrown away.
+    bool superseded() const override { return inbox_.epoch() != inbox_.epochTaken(); }
+    size_t backlog() const override { return inbox_.backlog(); }
 
 private:
-    struct Transcript {
-        std::string text;
-        bool stale = false;
-        double took = 0;
-        int lang = -1;  // what Whisper detected, when it was left to; else -1
-    };
-
-    // A transcription in progress is abandoned the moment a control frame
-    // arrives — the reader bumps the epoch — rather than finishing work whose
-    // result would be thrown away anyway.
-    struct Abort {
-        const Inbox *inbox;
-        uint64_t epoch;
-    };
-
-    void handle(Event &e) {
-        switch (e.kind) {
-        case Event::START: start(e.json); break;
-        case Event::AUDIO: audio(e); break;
-        case Event::RESET:
-            // A retune: maybe to a station in another language.
-            if (active_) clear();
-            forgetLanguage();
-            break;
-        case Event::STOP:
-            active_ = false;
-            clear();
-            forgetLanguage();
-            break;
-        case Event::END: break;
-        }
-    }
-
-    void start(const std::string &json) {
-        active_ = false;
-        clear();
-        StartRequest r = parseStart(json);
-        const std::string code = whisperLanguage(r.lang);
-        if (code != "auto") {
-            const bool known = whisper_lang_id(code.c_str()) >= 0;
-            const bool modelHasIt = whisper_is_multilingual(ctx_) || code == "en";
-            if (!known || !modelHasIt) {
-                emitError(r.hasSession, r.session, "language-not-supported",
-                          "Whisper cannot recognise '" + r.lang + "' with this model.", true);
-                return;
-            }
-        }
-        session_ = r.session;
-        hasSession_ = r.hasSession;
-        lang_ = code;
-        forgetLanguage();
-        lastFinal_.clear();
-        interimCost_ = 0;
-        active_ = true;
-        emit("{\"type\":\"started\",\"session\":" + sessionField(hasSession_, session_) + "}");
-    }
-
-    // Forget the utterance in progress and the VAD's memory of the audio.
-    void clear() {
-        seg_.reset();
-        vadIn_.clear();
-        whisper_vad_reset_state(vad_);
-        interimMark_ = 0;
-        lastInterim_.clear();
-    }
-
-    // "auto" settles on one language rather than leaving every utterance to
-    // Whisper's detector, which on off-air audio is not steady: measured on an
-    // English AM broadcast, three interims of one utterance came out English
-    // and its final Welsh, looping.
-    //
-    // Only finals vote, each once, by the seconds of its utterance, and only
-    // a final that was accepted as it decoded. Interims would count the same
-    // audio again at every step of a growing utterance — two of them can
-    // reach four seconds of votes off four seconds of speech — and they are
-    // the cheapest decodes, on a shortened encoder, so the least reliable. A
-    // language settles once it has two utterances, four seconds and twice the
-    // votes of any other; from then on every decode uses it.
-    //
-    // A settled language is not taken on trust for ever: two finals in a row
-    // that loop or come out empty under it — what Whisper does when told the
-    // wrong language — unsettle it, and voting starts again. Otherwise it lasts
-    // until a START, a RESET (a retune) or a STOP.
-    struct Votes {
-        double seconds = 0;
-        int utterances = 0;
-    };
-
-    void forgetLanguage() {
-        votes_.clear();
-        settled_ = -1;
-        failedUnderSettled_ = 0;
-    }
-
-    void vote(int id, double seconds) {
-        if (id < 0) return;
-        Votes &v = votes_[id];
-        v.seconds += seconds;
-        v.utterances++;
-        int best = -1;
-        double top = 0, second = 0;
-        for (const auto &kv : votes_) {
-            if (kv.second.seconds > top) {
-                second = top;
-                top = kv.second.seconds;
-                best = kv.first;
-            } else if (kv.second.seconds > second) {
-                second = kv.second.seconds;
-            }
-        }
-        if (best >= 0 && top >= 4.0 && top >= 2.0 * second && votes_[best].utterances >= 2) {
-            settled_ = best;
-            failedUnderSettled_ = 0;
-            if (verbose) note("language settled: %s", whisper_lang_str(best));
-        }
-    }
-
-    // A final's decode, for the settled language's sake: failed is true if it
-    // failed the way a wrong language makes it fail.
-    void judgeSettled(bool failed) {
-        if (lang_ != "auto" || settled_ < 0) return;
-        if (!failed) {
-            failedUnderSettled_ = 0;
-            return;
-        }
-        if (++failedUnderSettled_ < 2) return;
-        if (verbose) note("language unsettled: %s, after two failed finals", whisper_lang_str(settled_));
-        forgetLanguage();
-    }
-
-    void audio(Event &e) {
-        if (!active_) return;
-        if (e.gap) {
-            // Audio was dropped just before this: what is in progress is cut
-            // off and will not join up with what follows, so it is finished as
-            // it stands and the VAD starts again.
-            if (seg_.inSpeech()) finish(seg_.take());
-            clear();
-        }
-        vadIn_.insert(vadIn_.end(), e.audio.begin(), e.audio.end());
-        const int window = seg_.config().window;
-        const size_t windows = vadIn_.size() / static_cast<size_t>(window);
-        if (windows == 0) return;
-        // Whole windows only: whisper.cpp pads a partial one with zeros, and
-        // the VAD would hear a burst of silence in the middle of a word. The
-        // no_reset form keeps the LSTM's state from one call to the next,
-        // which is what makes it a stream.
-        if (!whisper_vad_detect_speech_no_reset(vad_, vadIn_.data(), static_cast<int>(windows * window))) {
-            note("the VAD failed on %zu samples; dropped", windows * window);
-            vadIn_.erase(vadIn_.begin(), vadIn_.begin() + static_cast<long>(windows * window));
-            return;
-        }
-        const float *probs = whisper_vad_probs(vad_);
-        const int n = std::min(static_cast<int>(windows), whisper_vad_n_probs(vad_));
-        // Copied, because finish() below can take long enough for a control
-        // frame to arrive, and the rest of this audio is then stale.
-        std::vector<float> p(probs, probs + n);
-        for (int i = 0; i < n; i++) {
-            switch (seg_.push(vadIn_.data() + static_cast<size_t>(i) * window, p[i])) {
-            case Segmenter::STARTED:
-                interimMark_ = 0;
-                lastInterim_.clear();
-                break;
-            case Segmenter::ENDED: finish(seg_.take()); break;
-            case Segmenter::NONE: break;
-            }
-            if (inbox_.epoch() != e.epoch) break;
-        }
-        vadIn_.erase(vadIn_.begin(), vadIn_.begin() + static_cast<long>(windows * window));
-    }
-
-    // An utterance has ended: its final transcript, if it has one worth
-    // showing. An utterance whose final is rejected sends nothing — the page
-    // has no way to withdraw an interim, and an empty final would settle the
-    // interim as it stood (see localSegments.js foldResult); the next result
-    // replaces it instead.
-    //
-    // A final that fails to decode — a loop, more words than the audio could
-    // hold, nothing at all, or a third of the words its last interim had —
-    // falls back on that interim, if it heard most of the utterance: it passed
-    // the same checks, and the reader has been looking at it. Measured live on
-    // small: a 20 s utterance whose interim had fifty words, and whose final
-    // was "the".
-    void finish(Utterance u) {
-        const std::string interimText = lastInterim_;
-        const size_t interimHeard = interimMark_;
-        interimMark_ = 0;
-        lastInterim_.clear();
-        if (!u.enough) {
-            if (verbose) note("%.2f s with %.2f s voiced: too little speech to transcribe", u.evidence.seconds, u.evidence.voicedSeconds);
-            return;
-        }
-        Transcript t = transcribe(u.audio, false);
-        if (t.stale) return;
-        std::string text = cleanTranscript(t.text);
-        const char *why = rejectTranscript(text, u.evidence, lastFinal_);
-        if (verbose)
-            note("final   %5.2f s audio, %.2f s voiced, p %.2f, %.1f dBFS -> %.2f s%s%s: %s", u.evidence.seconds,
-                 u.evidence.voicedSeconds, u.evidence.meanProb, u.evidence.rmsDb, t.took, why ? " REJECTED " : "",
-                 why ? why : "", t.text.c_str());
-        const bool garbled = why && (!std::strcmp(why, "loop") || !std::strcmp(why, "too-many-words") || !std::strcmp(why, "empty"));
-        const bool failed = why ? garbled : wordCount(text) * 3 < wordCount(interimText);
-        // Only a final accepted as it decoded counts towards the language: not
-        // one rejected, and not the interim it may fall back on below, which
-        // is the cheaper decode.
-        if (!why && !failed) vote(t.lang, u.evidence.seconds);
-        judgeSettled(garbled);
-        if (failed && !interimText.empty() && interimHeard * 2 >= u.audio.size()) {
-            text = interimText;
-            why = rejectTranscript(text, u.evidence, lastFinal_);
-            if (verbose) note("final   settled on the last interim%s%s", why ? ", REJECTED " : "", why ? why : "");
-        }
-        if (why) return;
-        lastFinal_ = normalise(text);
-        result(text, true);
-    }
-
-    void interim() {
-        if (!active_ || !seg_.inSpeech()) return;
-        const size_t length = seg_.audio().size();
-        const size_t due = std::max(INTERIM_EVERY, static_cast<size_t>(2.0 * interimCost_ * RATE));
-        if (length < interimMark_ + due) return;
-        if (seg_.voicedSamples() < static_cast<size_t>(RATE / 2)) return;
-        // Already in a pause, the utterance is probably ending, and its final
-        // will say more than an interim, sooner, without one in the way.
-        if (seg_.pause() >= INTERIM_PAUSE) return;
-        if (inbox_.backlog() > INTERIM_MAX_BACKLOG) return;
-        interimMark_ = length;
-        Transcript t = transcribe(seg_.audio(), true);
-        interimCost_ = t.took;
-        if (t.stale) return;
-        const std::string text = cleanTranscript(t.text);
-        const Evidence ev = seg_.evidence();
-        const char *why = rejectTranscript(text, ev, lastFinal_);
-        if (verbose)
-            note("interim %5.2f s audio -> %.2f s%s%s: %s", ev.seconds, t.took, why ? " REJECTED " : "", why ? why : "",
-                 t.text.c_str());
-        if (why || text == lastInterim_) return;
-        lastInterim_ = text;
-        result(text, false);
-    }
-
-    void result(const std::string &text, bool final) {
-        emit("{\"type\":\"result\",\"session\":" + sessionField(hasSession_, session_) + ",\"text\":" +
-             jsonString(text) + ",\"final\":" + (final ? "true" : "false") + "}");
-    }
-
-    Transcript transcribe(const std::vector<float> &audio, bool interim) {
-        Transcript t;
-        // Measured from the event that brought this audio, not from now: a
-        // control frame that arrived since makes it stale already.
-        Abort abort{&inbox_, inbox_.epochTaken()};
-        whisper_full_params p = whisper_full_default_params(WHISPER_SAMPLING_GREEDY);
-        p.n_threads = threads_;
-        const bool detect = lang_ == "auto" && settled_ < 0;
-        p.language = lang_ != "auto" ? lang_.c_str() : settled_ >= 0 ? whisper_lang_str(settled_) : "auto";
-        p.detect_language = false;
-        p.translate = false;
-        // Each utterance on its own. Conditioning on the previous text is how
-        // Whisper carries a hallucination from one window into the next, and
-        // the utterances here are cut at pauses, so there is little context to
-        // lose.
-        p.no_context = true;
-        p.no_timestamps = true;
-        p.print_progress = false;
-        p.print_realtime = false;
-        p.print_special = false;
-        p.print_timestamps = false;
-        p.suppress_blank = true;
-        p.suppress_nst = true;
-        // No more tokens than the audio could hold. A loop otherwise runs on to
-        // the context's end, costing a second or more of decoding for text that
-        // is rejected anyway.
-        const double seconds = static_cast<double>(audio.size()) / RATE;
-        p.max_tokens = std::min(220, static_cast<int>(24 + 8 * seconds));
-        if (interim) {
-            // An interim is a preview that the final replaces, so it is bought
-            // cheaply: the encoder sized to the audio instead of Whisper's full
-            // 30 s (measured 2-3x faster on 5 s, with the same words), and no
-            // temperature fallback.
-            const int frames = static_cast<int>(audio.size() / 320) + 64;
-            p.audio_ctx = std::min(1500, (frames + 63) / 64 * 64);
-            p.temperature_inc = 0.0f;
-        } else {
-            // A fallback decodes again at a higher temperature; two candidates
-            // rather than the default five keep it affordable.
-            p.greedy.best_of = 2;
-        }
-        p.abort_callback = [](void *data) {
-            const Abort *a = static_cast<const Abort *>(data);
-            return a->inbox->epoch() != a->epoch;
-        };
-        p.abort_callback_user_data = &abort;
-
-        const auto t0 = std::chrono::steady_clock::now();
-        const int rc = whisper_full(ctx_, p, audio.data(), static_cast<int>(audio.size()));
-        t.took = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
-        if (inbox_.epoch() != abort.epoch) {
-            t.stale = true;
-            return t;
-        }
-        if (rc != 0) {
-            note("whisper_full failed (%d) on %.2f s of audio", rc, seconds);
-            return t;
-        }
-        const int n = whisper_full_n_segments(ctx_);
-        for (int i = 0; i < n; i++) {
-            const char *s = whisper_full_get_segment_text(ctx_, i);
-            if (s) t.text += s;
-        }
-        // A decode that heard nothing has no say in the language; finish()
-        // decides whether this one does.
-        if (detect && !interim && !cleanTranscript(t.text).empty()) t.lang = whisper_full_lang_id(ctx_);
-        return t;
-    }
-
     Inbox &inbox_;
-    whisper_context *ctx_;
-    whisper_vad_context *vad_;
-    int threads_;
-
-    bool active_ = false;
-    long long session_ = 0;
-    bool hasSession_ = false;
-    std::string lang_ = "auto";
-
-    Segmenter seg_;
-    std::vector<float> vadIn_;  // audio not yet through the VAD: less than a window
-    size_t interimMark_ = 0;     // the utterance's length at its last interim
-    double interimCost_ = 0;     // what the last interim took, seconds
-    std::string lastInterim_;
-    std::string lastFinal_;  // normalised
-    std::map<int, Votes> votes_;   // "auto": the finals behind each detected language
-    int settled_ = -1;             // ...and the one settled on, or -1
-    int failedUnderSettled_ = 0;   // finals in a row that failed under it
 };
+
+void run(Inbox &inbox, Session &session) {
+    for (;;) {
+        Event e;
+        if (!inbox.tryPop(e)) {
+            // Caught up: the moment for an interim, if one is due.
+            session.interim();
+            e = inbox.pop();
+        }
+        switch (e.kind) {
+        case Event::START: session.start(e.json); break;
+        case Event::AUDIO: session.audio(e.audio.data(), e.audio.size(), e.gap); break;
+        case Event::RESET: session.reset(); break;
+        case Event::STOP: session.stop(); break;
+        case Event::END: return;
+        }
+    }
+}
 
 // ── CPU dispatch ─────────────────────────────────────────────────────────────
 //
@@ -923,7 +602,7 @@ std::vector<std::string> arguments(int argc, char **argv) {
 
 int usage() {
     std::fprintf(stderr,
-                 "usage: whisper-helper --model PATH --vad-model PATH [--threads N] [--verbose]\n"
+                 "usage: whisper-helper --model PATH --vad-model PATH [--threads N] [--sized-finals] [--verbose]\n"
                  "       whisper-helper --languages\n"
                  "       whisper-helper --version\n");
     return 1;
@@ -955,6 +634,7 @@ int main(int argc, char **argv) {
     const std::vector<std::string> args = arguments(argc, argv);
     std::string model, vadModel;
     int threads = 0;
+    SessionConfig cfg;
     for (size_t i = 1; i < args.size(); i++) {
         const std::string &a = args[i];
         const bool hasValue = i + 1 < args.size();
@@ -977,6 +657,8 @@ int main(int argc, char **argv) {
         } else if (a == "--threads" && hasValue) {
             threads = std::atoi(args[++i].c_str());
             if (threads < 1) return usage();
+        } else if (a == "--sized-finals") {
+            cfg.sizedFinals = true;
         } else if (a == "--verbose") {
             verbose = true;
         } else {
@@ -994,12 +676,16 @@ int main(int argc, char **argv) {
     const auto t0 = std::chrono::steady_clock::now();
     whisper_vad_context *vad = loadVad(vadModel);
     whisper_context *ctx = loadModel(model);
-    note("ready: %s, %d threads, %s build, loaded in %.2f s", whisper_is_multilingual(ctx) ? "multilingual" : "English only",
-         threads, WHISPER_HELPER_VARIANT,
+    note("ready: %s, %d threads, %s build, %s finals, loaded in %.2f s",
+         whisper_is_multilingual(ctx) ? "multilingual" : "English only", threads, WHISPER_HELPER_VARIANT,
+         cfg.sizedFinals ? "sized" : "full-window",
          std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count());
     emit("{\"type\":\"ready\"}");
 
-    Worker(inbox, ctx, vad, threads).run();
+    cfg.threads = threads;
+    InboxHost host(inbox);
+    Session session(ctx, vad, cfg, host, verbose.load());
+    run(inbox, session);
 
     reader.join();
     whisper_free(ctx);

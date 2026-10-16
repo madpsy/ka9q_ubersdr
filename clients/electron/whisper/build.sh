@@ -13,6 +13,15 @@
 #   models/ggml-base-q5_1.bin          the bundled multilingual model
 #   models/ggml-silero-v6.2.0.bin      the voice-activity model
 #
+# And, only when asked for (--only=wasm), the same session for a browser:
+#
+#   ../../../static/v2/whisper/whisper-stt.{js,wasm}
+#                                      whisper_session.cpp in WebAssembly, for
+#                                      the v2 page where no app brings a
+#                                      recogniser (see wasm/whisper_wasm.cpp).
+#                                      Committed with the page; built in the
+#                                      pinned emscripten/emsdk image.
+#
 # Every binary is static — the Linux ones fully, against glibc, so there is no
 # glibc version to match against the oldest distribution the AppImage reaches;
 # the Windows ones with libstdc++, libgcc and winpthread linked in; the Mac's
@@ -37,12 +46,13 @@
 #   ./build.sh                       everything
 #   ./build.sh --only=linux-x64,models
 #                                    some of: linux-x64, linux-arm64, win-x64,
-#                                    darwin, models
+#                                    darwin, models, wasm
 #   ./build.sh --test                ...then test/run.sh against linux-x64
 #
 # Environment:
 #   MAC_HOST                Mac to build on (default: macbook)
 #   UBERSDR_WHISPER_IMAGE   the build image's tag (default: ubersdr-whisper-build:trixie)
+#   UBERSDR_EMSDK_IMAGE     the WebAssembly build's (default: emscripten/emsdk:4.0.10)
 set -euo pipefail
 cd "$(dirname "$0")"
 HERE="$PWD"
@@ -56,6 +66,7 @@ WHISPER_CPP_REPO=https://github.com/ggml-org/whisper.cpp
 MAC_HOST="${MAC_HOST:-macbook}"
 MAC_DIR="ubersdr-whisper-build"
 IMAGE="${UBERSDR_WHISPER_IMAGE:-ubersdr-whisper-build:trixie}"
+EMSDK_IMAGE="${UBERSDR_EMSDK_IMAGE:-emscripten/emsdk:4.0.10}"
 
 ONLY="linux-x64,linux-arm64,win-x64,darwin,models"
 TEST=0
@@ -63,7 +74,7 @@ for arg in "$@"; do
   case "$arg" in
     --only=*) ONLY="${arg#--only=}" ;;
     --test) TEST=1 ;;
-    -h|--help) sed -n '2,46p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,55p' "$0"; exit 0 ;;
     *) echo "unknown option: $arg" >&2; exit 2 ;;
   esac
 done
@@ -173,7 +184,7 @@ build_darwin() {
   ssh -o BatchMode=yes -o ConnectTimeout=10 "$MAC_HOST" true 2>/dev/null \
     || fail "cannot reach $MAC_HOST over ssh without a password"
   mac "mkdir -p ~/$MAC_DIR" >/dev/null
-  tar czf - CMakeLists.txt whisper_helper.cpp whisper_core.cpp whisper_core.h build-darwin.sh \
+  tar czf - CMakeLists.txt whisper_helper.cpp whisper_session.cpp whisper_session.h whisper_core.cpp whisper_core.h build-darwin.sh \
     | mac "cd ~/$MAC_DIR && tar xzf -"
   if ! mac "cd ~/$MAC_DIR && bash build-darwin.sh $WHISPER_CPP_COMMIT" >"dist/build-darwin.log" 2>&1; then
     tail -25 dist/build-darwin.log >&2
@@ -216,6 +227,20 @@ fi
 if want darwin; then
   build_darwin
   check dist/darwin-universal/whisper-helper "Mach-O universal binary with 3 architectures"
+fi
+
+if want wasm; then
+  fetch_whisper
+  command -v docker >/dev/null 2>&1 || fail "docker is required for the wasm build"
+  echo "building wasm ($EMSDK_IMAGE) …"
+  if ! docker run --rm -u "$(id -u):$(id -g)" -v "$HERE:/w" -w /w "$EMSDK_IMAGE" \
+      bash /w/wasm/build-wasm.sh >"dist/build-wasm.log" 2>&1; then
+    tail -25 dist/build-wasm.log >&2
+    fail "wasm build (whole log: dist/build-wasm.log)"
+  fi
+  grep -q "Wasm detected" dist/build-wasm.log || fail "ggml did not build its WebAssembly kernels (see wasm/CMakeLists.txt)"
+  check build/wasm/whisper-stt.wasm "WebAssembly"
+  node wasm/embed.js "$WHISPER_CPP_COMMIT" "$EMSDK_IMAGE"
 fi
 
 if [ "$TEST" = 1 ]; then

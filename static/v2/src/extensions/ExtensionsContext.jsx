@@ -144,7 +144,9 @@ export function ExtensionsProvider({ children }) {
     }, [tuning.mode, activeId]);
 
     // Whether this browser can transcribe on its own. A host app's recogniser
-    // is known at once; a browser's has to be tried, because its APIs can all
+    // is known at once, and so is the page's own Whisper (WebAssembly, with a
+    // model the user downloads — whisper/engines/wasm.js); Web Speech's has to
+    // be tried, because its APIs can all
     // be there while recognising a track fails every time (see
     // probeBrowserTrack). False until that answer is in, so the extension
     // appears with it rather than offering a default that cannot work.

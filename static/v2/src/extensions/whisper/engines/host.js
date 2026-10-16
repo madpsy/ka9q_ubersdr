@@ -134,10 +134,16 @@
 import { describeError, restartPlan } from '../local.js';
 import { Pcm16Batcher, STT_RATE } from '../pcm.js';
 
-/** See ./index.js for the engine contract, and the top of this file for the host's. */
+/**
+ * See ./index.js for the engine contract, and the top of this file for the
+ * host's. `kind` is what the engine says it is: 'host' for an app's recogniser,
+ * 'wasm' for the page's own (./wasm.js answers the same contract), which picks
+ * a browser's wording for its errors rather than an app's.
+ */
 export function createHostEngine({
     player,
     stt,
+    kind = 'host',
     setTimer = (fn, ms) => setTimeout(fn, ms),
     clearTimer = (id) => clearTimeout(id),
     now = () => Date.now(),
@@ -189,7 +195,7 @@ export function createHostEngine({
     function hostError(id, e) {
         if (id !== session || !running) return;
         const err = e || {};
-        const d = describeError(err.code, err.message, { kind: 'host', lang });
+        const d = describeError(err.code, err.message, { kind, lang });
         // The host's own word on fatality wins; the table decides only when
         // the host did not say. A code the table does not know is shown as
         // the host phrased it.
@@ -212,7 +218,7 @@ export function createHostEngine({
         const plan = restartPlan(strikes, now() - startedAt, { error: sessionError, settled });
         strikes = plan.strikes;
         if (plan.giveUp) {
-            finish(describeError('keeps-stopping', '', { kind: 'host' }));
+            finish(describeError('keeps-stopping', '', { kind }));
             return;
         }
         timer = setTimer(() => { timer = null; launch(false); }, plan.delayMs);
@@ -244,7 +250,7 @@ export function createHostEngine({
         } catch (e) {
             if (id !== session || !running) return;
             if (first) {
-                finish(describeError('start-failed', (e && e.message) || String(e), { kind: 'host' }));
+                finish(describeError('start-failed', (e && e.message) || String(e), { kind }));
                 return;
             }
             // A restart that would not start counts as one that died at once.
@@ -267,7 +273,7 @@ export function createHostEngine({
         strikes = 0;
         lang = String(l || '');
         if (!stt || typeof stt.start !== 'function' || typeof stt.push !== 'function') {
-            finish(describeError('unsupported', '', { kind: 'host' }));
+            finish(describeError('unsupported', '', { kind }));
             return;
         }
         if (player && typeof player.onAudio === 'function') {
@@ -283,7 +289,7 @@ export function createHostEngine({
     }
 
     return {
-        kind: 'host',
+        kind,
         start,
         reset,
         stop: () => finish(null),

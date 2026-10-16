@@ -1,6 +1,6 @@
 // Speech-to-text on the device: which recogniser there is, and what it can do.
 //
-// Two engines behind one interface, both fed the *receiver's* audio and never
+// Three engines behind one interface, all fed the *receiver's* audio and never
 // the microphone:
 //
 //   'host'     the native app's own recogniser — Android's SpeechRecognizer,
@@ -9,13 +9,19 @@
 //              window.ubersdrDesktop.stt. Preferred whenever it is there: it is
 //              the platform's best model, and in a WebView it is the only one.
 //              The contract is in ./host.js.
+//   'wasm'     Whisper itself, compiled to WebAssembly and run in a Web
+//              Worker, with a model the user downloads once — the same session
+//              the desktop client's helper runs. A plain browser's engine: not
+//              offered inside an app. See ./wasm.js.
 //   'browser'  Web Speech, with on-device recognition forced on. See
-//              ./browser.js.
+//              ./browser.js. Last: where it would be used, Whisper can run too,
+//              and Chrome's on-device recogniser cannot take a track yet
+//              (probeBrowserTrack).
 //
 // Every engine is the same object:
 //
 //     engine = {
-//         kind,                               // 'host' | 'browser'
+//         kind,                               // 'host' | 'wasm' | 'browser'
 //         start({ lang, onResult, onError, onEnd }): Promise<void>,
 //         reset(),
 //         stop(),
@@ -44,6 +50,7 @@
 
 import { createBrowserEngine } from './browser.js';
 import { createHostEngine } from './host.js';
+import { wasmStt, wasmSupported } from './wasm.js';
 import { SPOKEN_CANDIDATES, LOCAL_UNSUPPORTED } from '../local.js';
 
 const theWindow = () => (typeof window !== 'undefined' ? window : {});
@@ -78,6 +85,17 @@ export function hostHasModels(stt) {
 export function hostModels(win = theWindow()) {
     const s = hostStt(win);
     return hostHasModels(s) ? s : null;
+}
+
+/**
+ * The host-contract object behind a kind: the app's for 'host', the page's own
+ * WebAssembly Whisper for 'wasm' (./wasm.js answers the same contract), null
+ * for 'browser', which is Web Speech and has no such object.
+ */
+export function contractStt(kind, win = theWindow()) {
+    if (kind === 'host') return hostStt(win);
+    if (kind === 'wasm') return wasmStt(win);
+    return null;
 }
 
 const userAgent = (win) => {
@@ -128,9 +146,10 @@ export function browserRecognition(win = theWindow()) {
     }
 }
 
-/** 'host', 'browser' or null: the local engine to use, best first. */
+/** 'host', 'wasm', 'browser' or null: the local engine to use, best first. */
 export function localEngineKind(win = theWindow()) {
     if (hostStt(win)) return 'host';
+    if (wasmSupported(win)) return 'wasm';
     if (browserRecognition(win)) return 'browser';
     return null;
 }
@@ -313,8 +332,8 @@ export async function languageStatus(kind, lang, win = theWindow()) {
     const tag = String(lang || '');
     if (!tag) return 'unavailable';
     try {
-        if (kind === 'host') {
-            const stt = hostStt(win);
+        if (kind === 'host' || kind === 'wasm') {
+            const stt = contractStt(kind, win);
             if (!stt) return 'unavailable';
             if (typeof stt.languages !== 'function') return 'available';
             const list = await stt.languages();
@@ -343,8 +362,8 @@ export async function languageStatus(kind, lang, win = theWindow()) {
  * choosing one is how the user gets to the Install button.
  */
 export async function localLanguages(kind, win = theWindow()) {
-    if (kind === 'host') {
-        const stt = hostStt(win);
+    if (kind === 'host' || kind === 'wasm') {
+        const stt = contractStt(kind, win);
         if (!stt || typeof stt.languages !== 'function') return [];
         try {
             const list = await stt.languages();
@@ -398,6 +417,7 @@ export async function installLanguage(lang, win = theWindow()) {
 export function createLocalEngine(kind, deps = {}) {
     const win = deps.win || theWindow();
     if (kind === 'host') return createHostEngine({ ...deps, stt: deps.stt || hostStt(win) });
+    if (kind === 'wasm') return createHostEngine({ ...deps, kind: 'wasm', stt: deps.stt || wasmStt(win) });
     if (kind === 'browser') {
         return createBrowserEngine({ ...deps, Recognition: deps.Recognition || browserRecognition(win) });
     }

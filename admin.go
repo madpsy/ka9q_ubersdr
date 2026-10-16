@@ -32,6 +32,17 @@ import (
 // admin-supplied map to the types Config declares, then prove the result loads
 // before it goes anywhere near the file.
 func marshalMainConfigYAML(config map[string]interface{}) ([]byte, []ConfigRepair, error) {
+	// The load falls back to UTC on a bad timezone, but saving one would leave
+	// the server quietly running on the wrong clock, so refuse it here.
+	if admin, ok := config["admin"].(map[string]interface{}); ok {
+		if tz, ok := admin["timezone"].(string); ok {
+			name, err := normalizeTimezoneName(tz)
+			if err != nil {
+				return nil, nil, err
+			}
+			admin["timezone"] = name
+		}
+	}
 	return marshalCheckedYAML(config, configRootType)
 }
 

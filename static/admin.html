@@ -6325,14 +6325,31 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
                         field.appendChild(tzPicker);
 
                         // Text input shows/edits the raw IANA name directly
+                        const tzError = document.createElement('small');
+                        tzError.style.cssText = 'display:none;margin-top:4px;color:#dc3545;';
                         input.dataset.path = fullPath;
                         input.addEventListener('change', (e) => {
-                            updateConfigValue(e.target.dataset.path, e.target.value);
+                            const name = e.target.value.trim();
+                            e.target.value = name;
+                            updateConfigValue(e.target.dataset.path, name);
                             // Sync picker to matching zone if present
-                            const matchingOpt = Array.from(tzPicker.options).find(o => o.value === e.target.value);
+                            const matchingOpt = Array.from(tzPicker.options).find(o => o.value === name);
                             tzPicker.value = matchingOpt ? matchingOpt.value : '';
+                            // The server refuses an unknown name on save; say so now.
+                            let valid = name === '' || !!matchingOpt;
+                            if (!valid) {
+                                try { new Intl.DateTimeFormat('en', { timeZone: name }); valid = true; } catch (_) {}
+                            }
+                            tzError.textContent = valid ? '' : `"${name}" is not an IANA timezone name. Use a name like "Europe/London" or pick one from the list; offsets such as "UTC+1" are not accepted.`;
+                            tzError.style.display = valid ? 'none' : 'block';
+                            input.style.borderColor = valid ? '' : '#dc3545';
+                        });
+                        tzPicker.addEventListener('change', () => {
+                            tzError.style.display = 'none';
+                            input.style.borderColor = '';
                         });
                         field.appendChild(input);
+                        field.appendChild(tzError);
                         container.appendChild(field);
                         continue;
                     }

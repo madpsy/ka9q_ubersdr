@@ -1283,13 +1283,15 @@ func LoadConfig(filename string) (*Config, error) {
 		config.Server.SSBAgcDefaults.ThresholdDb = &v
 	}
 
-	// Default and validate admin timezone (IANA name)
-	if config.Admin.Timezone == "" {
-		config.Admin.Timezone = "UTC"
+	// Default and validate admin timezone (IANA name). A bad name falls back to
+	// UTC rather than failing the load: a typo here (e.g. "UTC+1") once left the
+	// server unable to start, and with it the admin UI needed to correct it.
+	tz, err := normalizeTimezoneName(config.Admin.Timezone)
+	if err != nil {
+		log.Printf("WARNING: %v; using UTC until it is corrected", err)
+		tz = "UTC"
 	}
-	if _, err := time.LoadLocation(config.Admin.Timezone); err != nil {
-		return nil, fmt.Errorf("admin.timezone %q is not a valid IANA timezone name: %w", config.Admin.Timezone, err)
-	}
+	config.Admin.Timezone = tz
 
 	// Parse admin allowed IPs/CIDRs
 	if err := config.Admin.parseAllowedIPs(); err != nil {
@@ -2722,6 +2724,19 @@ func (spc *SSHProxyConfig) IsIPAllowed(ipStr string) bool {
 // hardcodedAdminAllowedIPs are always permitted regardless of the configured allowed_ips list.
 // These are internal infrastructure addresses that must never be locked out.
 // 172.20.0.1 is the Docker host gateway used by internal infrastructure containers.
+// normalizeTimezoneName trims an admin.timezone value and checks it names a
+// zone in the tz database. Empty means UTC.
+func normalizeTimezoneName(name string) (string, error) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return "UTC", nil
+	}
+	if _, err := time.LoadLocation(name); err != nil {
+		return "", fmt.Errorf("admin.timezone %q is not a valid IANA timezone name (e.g. \"Europe/London\")", name)
+	}
+	return name, nil
+}
+
 // TimezoneLocation returns the *time.Location for the configured IANA timezone.
 // Falls back to UTC if the name is invalid (should not happen after LoadConfig validation).
 func (ac *AdminConfig) TimezoneLocation() *time.Location {

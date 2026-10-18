@@ -106,10 +106,11 @@ export const GROUPS = [
         icon: <Icon.Volume />,
         // The sound and what shapes it. Signal is here rather than under Tune
         // because it carries the squelch, which is an audio gate — see
-        // SignalPanel.
+        // SignalPanel. Timeshift is beside the Recorder, as it is in the dock:
+        // both are about holding on to what the receiver played.
         panels: [
             'audio', 'noise', 'filters', 'signal', 'scope',
-            'recorder', 'mediasession', 'announcements',
+            'timeshift', 'recorder', 'mediasession', 'announcements',
         ],
     },
     {

@@ -82,6 +82,8 @@ import MeasureOverlay from './MeasureOverlay.jsx';
 import { useMeasureActive } from '../lib/useMeasure.js';
 import { measureState, setSelection } from '../lib/measureTool.js';
 import { grabMode } from '../lib/measure.js';
+import useTimeshift, { formatBehind, tuningNote } from '../lib/useTimeshift.js';
+import { getTimeshift, tuningDiffers } from '../lib/timeshift.js';
 
 // How near a passband edge counts as grabbing it, and how wide the passband
 // has to be on screen before either edge can be grabbed at all.
@@ -470,6 +472,34 @@ function FreqOffsetTag() {
         <span className={`tag tag--${band}`} data-optional="offset" title={offsetTitle(serverInfo)}>
             Δf {offsetLabel(hz)}
         </span>
+    );
+}
+
+// That the display and the audio are a replay, how far behind, and the
+// one-press way back. Warm rather than red: it is a choice the operator made,
+// not a fault — but it is the one tag here that means nothing on screen is
+// now, so it has to be impossible to miss.
+//
+// When the moment playing was tuned somewhere else, it says where — the dial
+// shows where the receiver is now, and the audio is from then.
+function TimeshiftTag() {
+    const ts = useTimeshift(5, false);
+    const { tuning } = useRadio();
+    if (!ts.replaying) return null;
+    const then = tuningNote(ts.replayTuning, tuning);
+    return (
+        <button
+            type="button"
+            className="tag tag--button tag--warn tag--ico"
+            title={`${ts.paused ? 'Paused' : 'Playing'} ${formatBehind(ts.behindMs).slice(1)} behind live`
+                + (then ? `, tuned to ${then} at the time` : '')
+                + ' — click to go back to live'}
+            onClick={() => ts.goLive()}
+        >
+            {ts.paused ? <Icon.Pause size={10} /> : <Icon.Rewind size={10} />}
+            <span className="tag--tshift">{formatBehind(ts.behindMs)}</span>
+            {then && <span>{`\u00b7 ${then}`}</span>}
+        </button>
     );
 }
 
@@ -1328,11 +1358,15 @@ export default function SpectrumView() {
     // ---- data -----------------------------------------------------------
 
     useEffect(() => {
-        const off = spectrumConn.on('frame', ({ bins }) => {
+        const off = spectrumConn.on('frame', ({ bins, replay }) => {
             const g = gfx.current;
             g.bins = bins;
             g.rowsPending++;
             g.dirty = true;
+            // What a replayed frame was tuned to, for the ghost passband —
+            // taken per frame, so it changes where the history does. Live
+            // frames clear it.
+            g.ghost = replay ? getTimeshift().replayTuning : null;
         });
         return off;
     }, [spectrumConn]);
@@ -2655,6 +2689,10 @@ export default function SpectrumView() {
                             tags: this one is about what the numbers on screen mean,
                             not about what is being done to the sound. */}
                         {!mobile && room.offset && <FreqOffsetTag />}
+                        {/* First of the audio tags: it qualifies all the others —
+                            everything after it, and everything drawn below, is
+                            a replay while it is there. */}
+                        <TimeshiftTag />
                         <SquelchTag />
                         <NoiseReductionTag />
                         {/* Client stage after the server's, matching the audio
@@ -3436,7 +3474,7 @@ export default function SpectrumView() {
 // caches them per theme — getComputedStyle forces a style recalculation, so
 // calling it inside the draw loop would cost more than the rendering itself.
 const THEME_VARS = [
-    '--spec-bg', '--spec-grid', '--spec-band',
+    '--spec-bg', '--spec-grid', '--spec-band', '--warn',
     '--scale-bg', '--scale-text', '--scale-tick', '--accent',
     // The ink for anything drawn *over* the canvas. Light in both themes, and
     // following a chosen text colour where that stays legible on a waterfall —
@@ -4025,6 +4063,44 @@ function drawHoverBand(c, pxW, H, cfg, tuning, hoverPx, colBand) {
     c.restore();
 }
 
+/**
+ * Where a replay was tuned, when that is not where the dial is now.
+ *
+ * Outlined, not filled, and in the warning colour the timeshift pill wears: it
+ * is a mark of where the audio came from, not a filter you have, and it must
+ * never be read as the receiver's tuning. Dashed edges and a solid dial line,
+ * the reverse of the live marks, so the two cannot be mistaken in a crowd.
+ */
+function drawGhostBand(c, pxW, H, cfg, tuning, ghost, dpr, colour) {
+    if (!ghost || !cfg.span || !tuningDiffers(ghost, tuning)) return;
+    const hzToX = (hz) => ((hz - (cfg.centerFreq - cfg.span / 2)) / cfg.span) * pxW;
+    const x0 = hzToX(ghost.frequency + ghost.bandwidthLow);
+    const x1 = hzToX(ghost.frequency + ghost.bandwidthHigh);
+    const dial = hzToX(ghost.frequency);
+    const left = Math.min(x0, x1);
+    const right = Math.max(x0, x1);
+    if (right < 0 || left > pxW) return;
+    c.save();
+    c.strokeStyle = colour;
+    c.lineWidth = Math.max(1, dpr);
+    c.globalAlpha = 0.85;
+    c.setLineDash([4 * dpr, 3 * dpr]);
+    c.beginPath();
+    for (const x of [left, right]) {
+        const px = Math.round(x) + 0.5;
+        c.moveTo(px, 0);
+        c.lineTo(px, H);
+    }
+    c.stroke();
+    c.setLineDash([]);
+    c.globalAlpha = 0.6;
+    c.beginPath();
+    c.moveTo(Math.round(dial) + 0.5, 0);
+    c.lineTo(Math.round(dial) + 0.5, H);
+    c.stroke();
+    c.restore();
+}
+
 function drawTuningMarks(c, pxW, H, cfg, tuning, dpr, dialColor, edgeColor) {
     if (!cfg.span) return;
     const hzToX = (hz) => ((hz - (cfg.centerFreq - cfg.span / 2)) / cfg.span) * pxW;
@@ -4399,7 +4475,9 @@ function drawWaterfallMarks(g, marks, wfH, pxW, cfg, tuning, colVfo, colEdge) {
         // leave the band missing until the next flicker of the mouse. The measure
         // tool decides the same thing and is in here for the same reason.
         + `${g.drag ? 'd' : ''}${g.edge ? 'e' : ''}${g.measuring ? 'm' : ''}|`
-        + `${colVfo}|${colEdge}|${colBand}|${g.blockedKey || ''}`;
+        + `${colVfo}|${colEdge}|${colBand}|${g.blockedKey || ''}|`
+        // The replay's ghost passband, by the entry it is drawn from.
+        + `${g.ghost ? `${g.ghost.stamp}` : ''}`;
     if (g.marksKey === key) return;
     g.marksKey = key;
 
@@ -4414,6 +4492,7 @@ function drawWaterfallMarks(g, marks, wfH, pxW, cfg, tuning, colVfo, colEdge) {
 
     // Under the hover line, which is what it belongs to.
     drawHoverBand(c, pxW, H, cfg, tuning, hoverBandPx(g, g.dpr), colBand);
+    drawGhostBand(c, pxW, H, cfg, tuning, g.ghost, g.dpr, colors()['--warn'] || '#f2b544');
 
     if (g.hover) {
         const hx = Math.round(g.hover.x * g.dpr) + 0.5;
@@ -4578,6 +4657,7 @@ function drawSpectrum(g, d, spec, specH, pxW, trace, floor, range, cfg, tuning, 
     // hover line further down, so it lies under the trace exactly as the tuned band
     // does: a signal must never be dimmed by a shade that follows the mouse.
     drawHoverBand(c, pxW, H, cfg, tuning, hoverBandPx(g, dpr), colBand);
+    drawGhostBand(c, pxW, H, cfg, tuning, g.ghost, dpr, col['--warn'] || '#f2b544');
 
     // Peak hold, drawn beneath the live trace.
     // Peak hold decays in dB per *second*, not per frame: the draw rate follows

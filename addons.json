@@ -8,7 +8,7 @@
       "host": "skimmer",
       "port": 6101,
       "enabled": true,
-      "require_admin": false,
+      "require_admin": true,
       "strip_prefix": true,
       "rewrite_origin": false,
       "rate_limit": 100,

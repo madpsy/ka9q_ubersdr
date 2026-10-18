@@ -520,6 +520,10 @@ esbuild ../src/lib/measureTool.js --bundle --format=cjs --platform=node \
     --outfile=.build/measuretool.cjs --log-level=warning
 esbuild measurepanel.entry.js --bundle --format=cjs --platform=node \
     --outfile=.build/measurepanel.cjs --log-level=warning
+esbuild ../src/lib/timeshift.js --bundle --format=cjs --platform=node \
+    --outfile=.build/timeshift.cjs --log-level=warning
+esbuild timeshiftpanel.entry.js --bundle --format=cjs --platform=node \
+    --outfile=.build/timeshiftpanel.cjs --log-level=warning
 esbuild statspanel.entry.js --bundle --format=cjs --platform=node \
     --outfile=.build/statspanel.cjs --log-level=warning
 
@@ -744,4 +748,6 @@ node tuningrange.test.js
 node bandtune.test.js
 node measure.test.js
 node measurepanel.test.js
+node timeshift.test.js
+node timeshiftpanel.test.js
 node statspanel.test.js

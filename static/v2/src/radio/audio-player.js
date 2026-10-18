@@ -198,6 +198,13 @@ export class AudioPlayer extends Emitter {
         // armed. Drives the 'flowing' event — see _schedule.
         this._flowed = true;
         this._decodeChain = Promise.resolve();
+        // The timeshift buffer, when one is attached (lib/timeshift.js). Every
+        // block the live schedule places is handed to it, and while it is
+        // replaying the live schedule keeps its books without playing anything.
+        this.timeshift = null;
+        // Live sources not yet finished, so a replay can silence them the
+        // moment it starts rather than after the queue has drained.
+        this._live = [];
     }
 
     get running() {
@@ -221,6 +228,10 @@ export class AudioPlayer extends Emitter {
     async suspend() {
         this.started = false;
         this.forgetStream();
+        // A receiver switched off has no "thirty seconds ago" worth keeping:
+        // the next start would offer a rewind across the gap into a session
+        // that has ended.
+        if (this.timeshift) this.timeshift.clear();
         if (this.ctx) await this.ctx.suspend().catch(() => {});
     }
 
@@ -1127,14 +1138,9 @@ export class AudioPlayer extends Emitter {
         ({ planes, frames, captureMs } = block);
 
         // Always at least two channels, with a mono stream duplicated into both
-        // — v1 does the same. The output routing above can then select a side
-        // in any mode, rather than only on the stereo IQ modes.
+        // — v1 does the same; see _play. The output routing above can then
+        // select a side in any mode, rather than only on the stereo IQ modes.
         this.channels = planes.length;
-        const channels = Math.max(2, planes.length);
-        const buffer = ctx.createBuffer(channels, frames, sampleRate);
-        for (let c = 0; c < channels; c++) {
-            buffer.copyToChannel((planes[c] || planes[0]).subarray(0, frames), c);
-        }
 
         // Level meter, from what is actually being played — cheaper than an
         // AnalyserNode read on every animation frame and in sync with the queue.
@@ -1159,14 +1165,24 @@ export class AudioPlayer extends Emitter {
             return;
         }
 
-        const src = ctx.createBufferSource();
-        src.buffer = buffer;
-        src.connect(this.head);
-        src.start(this.nextPlayTime);
-        this.nextPlayTime += buffer.duration;
-        // The buffer's own duration is the stream's, since it is built at the
-        // stream rate whatever the context runs at.
-        this.queueEndCaptureMs = captureMs == null ? null : captureMs + buffer.duration * 1000;
+        const startAt = this.nextPlayTime;
+        // The block's own duration is the stream's, since the buffer is built
+        // at the stream rate whatever the context runs at.
+        const duration = frames / sampleRate;
+        this.nextPlayTime += duration;
+        this.queueEndCaptureMs = captureMs == null ? null : captureMs + duration * 1000;
+
+        // The timeshift buffer is given the block with the moment it plays
+        // live. While it is replaying, the schedule above still runs — so the
+        // stamps stay continuous and going back to live needs no re-prime —
+        // but nothing reaches the speakers from here.
+        const ts = this.timeshift;
+        if (ts) ts.recordAudio(planes, frames, sampleRate, startAt, ctx, this.contextEpoch);
+        if (ts && ts.replaying) {
+            this._live.length = 0;
+        } else {
+            this.playLive(planes, frames, sampleRate, startAt);
+        }
 
         // Emitted from here rather than from start() or the socket, because
         // this is the first moment the browser has actually been handed audio
@@ -1175,6 +1191,48 @@ export class AudioPlayer extends Emitter {
             this._flowed = true;
             this.emit('flowing', this.contextEpoch);
         }
+    }
+
+    // One block into the head of the graph at `when` on the context clock,
+    // `offset` seconds in. Mono is duplicated into both channels, as every
+    // live block is, so the L/R routing works on it.
+    _play(planes, frames, sampleRate, when, offset = 0) {
+        const ctx = this.ctx;
+        if (!ctx || ctx.state === 'closed' || !this.head) return null;
+        const channels = Math.max(2, planes.length);
+        const buffer = ctx.createBuffer(channels, frames, sampleRate);
+        for (let c = 0; c < channels; c++) {
+            buffer.copyToChannel((planes[c] || planes[0]).subarray(0, frames), c);
+        }
+        const src = ctx.createBufferSource();
+        src.buffer = buffer;
+        src.connect(this.head);
+        src.start(when, offset);
+        return src;
+    }
+
+    /** A live block. Also how the timeshift puts the live queue back. */
+    playLive(planes, frames, sampleRate, when) {
+        const src = this._play(planes, frames, sampleRate, when);
+        if (!src) return;
+        const end = when + frames / sampleRate;
+        const t = this.ctx.currentTime;
+        if (this._live.length > 32) this._live = this._live.filter((l) => l.end > t);
+        this._live.push({ src, end });
+    }
+
+    /** A replayed block, from the timeshift buffer. Returns its source. */
+    playReplay(planes, frames, sampleRate, when, offset = 0) {
+        return this._play(planes, frames, sampleRate, when, offset);
+    }
+
+    // Silences whatever live audio is still queued: a replay starts at once
+    // rather than after the cushion has played out over the top of it.
+    haltLive() {
+        for (const l of this._live) {
+            try { l.src.stop(); } catch (e) { /* already ended */ }
+        }
+        this._live = [];
     }
 
     /**

@@ -90,6 +90,7 @@ import AddonsPanel, { addonList } from './AddonsPanel.jsx';
 import RotatorPanel from './RotatorPanel.jsx';
 import AntennaPanel from './AntennaPanel.jsx';
 import RecorderPanel from './RecorderPanel.jsx';
+import TimeshiftPanel, { TimeshiftBadge } from './TimeshiftPanel.jsx';
 import VoiceActivityPanel from './VoiceActivityPanel.jsx';
 import CallsignPanel from './CallsignPanel.jsx';
 import RadioControlPanel from './RadioControlPanel.jsx';
@@ -654,6 +655,24 @@ const BUILT_IN = [
         minimal: true,
         Component: AntennaPanel,
         requires: (serverInfo) => !!(serverInfo && serverInfo.ant_switch && serverInfo.ant_switch.enabled),
+    },
+
+    // Rewind and replay the last thirty seconds, audio and spectrum together.
+    // The buffer runs while this panel is in the layout — see TimeshiftWatch —
+    // so hiding it is how somebody who will never rewind stops paying for it.
+    // Directly above the Recorder, its neighbour in the Audio group: one keeps
+    // the last thirty seconds, the other keeps what comes next.
+    // Minimal: the status line carrying how far behind, the bar and the
+    // transport — without the big clock, the bar's scale or the explainer.
+    {
+        id: 'timeshift',
+        title: 'Timeshift',
+        icon: <Icon.Replay />,
+        dock: 'left',
+        defaultOpen: false,
+        minimal: true,
+        Badge: TimeshiftBadge,
+        Component: TimeshiftPanel,
     },
 
     // Minimal: status, clock and buttons. The format is chosen once.

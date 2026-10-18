@@ -33,6 +33,7 @@ import MeasureWatch from './components/MeasureWatch.jsx';
 import IQDemodWatch from './components/IQDemodWatch.jsx';
 import PlaygroundWatch from './components/PlaygroundWatch.jsx';
 import RecorderFormatWatch from './components/RecorderFormatWatch.jsx';
+import TimeshiftWatch from './components/TimeshiftWatch.jsx';
 import { MediaSessionProvider } from './radio/media/MediaSessionContext.jsx';
 import LegacyBridge from './compat/LegacyBridge.jsx';
 import BridgeHost from './bridge/BridgeHost.jsx';
@@ -313,6 +314,10 @@ export default function App() {
                                     lossless. Same placing, same reason — the
                                     choice outlives the panel that made it. */}
                                 <RecorderFormatWatch />
+                                {/* And the timeshift buffer's: whether it runs,
+                                    and back to live on a retune. A replay must
+                                    not outlive a collapsed panel's buttons. */}
+                                <TimeshiftWatch />
                                 <StartOverlay />
                                 {/* After the overlay, and drawn above it: the
                                     operator's notices appear the moment the page

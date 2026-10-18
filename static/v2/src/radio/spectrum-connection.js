@@ -152,6 +152,8 @@ export class SpectrumConnection extends Emitter {
         // does may a delta update _out at just the bins it changed; anything
         // that writes _out another way (the version 1 path) clears it.
         this._outLive = false;
+        // See _deliver.
+        this.timeshift = null;
     }
 
     get connected() {
@@ -671,11 +673,23 @@ export class SpectrumConnection extends Emitter {
         // name (SpectrumView, MeasureWatch, IFSpectrumPanel, BridgeHost,
         // RadioContext). Emitting anything else decodes correctly and displays
         // nothing, with no error anywhere to say why.
-        this.emit('frame', {
+        this._deliver({
             bins: out,
             frequency: readU64(u8, 16),
             timestamp: readU64(u8, 8),
         });
+    }
+
+    // Every decoded frame leaves through here. The timeshift buffer, when one
+    // is attached (lib/timeshift.js), keeps a copy, and while it is replaying
+    // it is the one emitting 'frame' — the live frames are kept and not shown.
+    _deliver(frame) {
+        const ts = this.timeshift;
+        if (ts) {
+            ts.recordFrame(frame, this.binBandwidth);
+            if (ts.replaying) return;
+        }
+        this.emit('frame', frame);
     }
 
     _onSpectrum(view) {
@@ -738,7 +752,7 @@ export class SpectrumConnection extends Emitter {
         // Bins on the wire: this session exists and is producing, which is the
         // proof the reconnect budget waits for rather than the bare open event.
         this.attempts = 0;
-        this.emit('frame', { bins: this._unwrap(bins), frequency, timestamp });
+        this._deliver({ bins: this._unwrap(bins), frequency, timestamp });
     }
 
     // Rotates raw FFT order into ascending frequency order: the second half

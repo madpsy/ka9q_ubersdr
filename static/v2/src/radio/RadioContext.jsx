@@ -44,6 +44,7 @@ import { announceLock, refusedByLock } from '../lib/tuneLock.js';
 import { failureMessage } from '../lib/connectFailure.js';
 import { clearEventLog, logEvent } from '../lib/eventLog.js';
 import { addServerTimeSample } from './serverClock.js';
+import { getTimeshift } from '../lib/timeshift.js';
 import {
     CHECK_MS as SAM_CHECK_MS, createWatch as createSamWatch, notePower as noteSamPower,
     resetWatch as resetSamWatch, shouldFallBack as samShouldFallBack,
@@ -358,6 +359,10 @@ export function RadioProvider({ children }) {
         };
     }
     const { audio: audioConn, spectrum: spectrumConn, player } = conn.current;
+    // The timeshift buffer hangs off both: the player hands it every block it
+    // schedules and the spectrum every frame it decodes. Whether it keeps them
+    // is TimeshiftWatch's to say.
+    getTimeshift().attach(player, spectrumConn);
 
     // The log lives in lib/eventLog.js now, not in this state.
     //

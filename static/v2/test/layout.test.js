@@ -108,6 +108,19 @@ t('every panel lands in exactly one place, on every machine', () => {
     }
 });
 
+t('Timeshift sits directly above the Recorder, new layout or stored', () => {
+    const above = (l) => {
+        const list = l.docks.left.panels;
+        return list.indexOf('timeshift') === list.indexOf('recorder') - 1;
+    };
+    assert.ok(above(defaultLayout(MOUSE)), 'first run');
+    // Somebody whose layout was saved before the panel existed.
+    const old = JSON.parse(JSON.stringify(defaultLayout(MOUSE)));
+    for (const d of DOCKS) old.docks[d].panels = old.docks[d].panels.filter((id) => id !== 'timeshift');
+    delete old.sections.timeshift;
+    assert.ok(above(reconcile(old, MOUSE)), 'reconciled');
+});
+
 // --- the migration ----------------------------------------------------------
 
 t('a layout stored before this gets the Multipad on a touchscreen desktop', () => {

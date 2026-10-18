@@ -122,6 +122,12 @@ export const Icon = {
     // spectrum's Resume button; Pause says what the display is doing.
     Play: (p) => <Svg {...p}><path d="M8.5 6.2 18 12l-9.5 5.8z" fill="currentColor" stroke="none" /></Svg>,
     Pause: (p) => <Svg {...p}><rect x="7.5" y="6.5" width="3.2" height="11" rx="1" fill="currentColor" stroke="none" /><rect x="13.3" y="6.5" width="3.2" height="11" rx="1" fill="currentColor" stroke="none" /></Svg>,
+    // The timeshift transport. Filled, like Play and Pause beside them.
+    Rewind: (p) => <Svg {...p}><path d="M11.5 7 5 12l6.5 5zM19 7l-6.5 5 6.5 5z" fill="currentColor" stroke="none" /></Svg>,
+    Forward: (p) => <Svg {...p}><path d="M12.5 7 19 12l-6.5 5zM5 7l6.5 5L5 17z" fill="currentColor" stroke="none" /></Svg>,
+    ToStart: (p) => <Svg {...p}><rect x="6" y="6.5" width="2.4" height="11" rx="0.8" fill="currentColor" stroke="none" /><path d="M18 6.5 9.5 12l8.5 5.5z" fill="currentColor" stroke="none" /></Svg>,
+    // A clock with its hand turning back: the panel's own icon.
+    Replay: (p) => <Svg {...p}><path d="M4.5 12a7.5 7.5 0 1 0 2.2-5.3" /><path d="M4 4.5v3.2h3.2" /><path d="M12 8v4l2.6 1.6" /></Svg>,
     Download: (p) => <Svg {...p}><path d="M12 3v11" /><path d="m7.5 10 4.5 4 4.5-4" /><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2" /></Svg>,
     Save: (p) => <Svg {...p}><path d="M5 3h11l3 3v13a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V3z" /><path d="M8 3v5h7V3" /><path d="M8 21v-7h8v7" /></Svg>,
     Folder: (p) => <Svg {...p}><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z" /></Svg>,

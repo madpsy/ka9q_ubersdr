@@ -290,4 +290,63 @@ t('tuning: kept while disabled, so a buffer started later knows its tuning', () 
     assert.strictEqual(r.ts.replayTuning.frequency, LSB.frequency);
 });
 
+t('tuning: placed when it is heard, by the capture time of the audio', () => {
+    // The receiver's clock is this page's plus 5 s, the uplink 30 ms. Audio is
+    // captured 100 ms before it arrives and plays 200 ms after that.
+    const clock = { now: 5000 };
+    const ctx = { currentTime: 4, state: 'running' };
+    const ts = new Timeshift({ now: () => clock.now, clock: () => ({ theta: 5000, err: 30 }) });
+    ts.attach({ ctx, contextEpoch: 1, queuedSec: 0.2, playLive() {}, haltLive() {} }, null);
+    ts.setEnabled(true);
+    let next = ctx.currentTime + 0.2;
+    const tick = () => {
+        ts.recordAudio([new Float32Array(20)], 20, 1000, next, ctx, 1, clock.now + 5000 - 100);
+        next += 0.02;
+        clock.now += 20; ctx.currentTime += 0.02;
+    };
+    for (let i = 0; i < 50; i++) tick();
+    ts.noteTuning(USB);
+    for (let i = 0; i < 50; i++) tick();
+    const asked = clock.now;
+    ts.noteTuning(LSB);
+    const x = ts.tunings[ts.tunings.length - 1];
+    near(x.stamp, asked + 200, 1e-6, 'provisional: now plus the queue');
+    for (let i = 0; i < 50; i++) tick();
+    // Up 30 ms, then 100 ms down and 200 ms in the queue.
+    near(x.stamp, asked + 30 + 100 + 200, 1e-6, 'placed at the sample it is heard from');
+    assert.strictEqual(x.heardFrom, null);
+});
+
+t('tuning: a quick spin of the dial never goes out of order', () => {
+    const clock = { now: 5000 };
+    const ctx = { currentTime: 4, state: 'running' };
+    const ts = new Timeshift({ now: () => clock.now, clock: () => ({ theta: 0, err: 30 }) });
+    ts.attach({ ctx, contextEpoch: 1, queuedSec: 0, playLive() {}, haltLive() {} }, null);
+    ts.setEnabled(true);
+    let next = ctx.currentTime + 0.2;
+    const tick = () => {
+        ts.recordAudio([new Float32Array(20)], 20, 1000, next, ctx, 1, clock.now - 100);
+        next += 0.02;
+        clock.now += 20; ctx.currentTime += 0.02;
+    };
+    for (let i = 0; i < 20; i++) {
+        ts.noteTuning({ ...USB, frequency: USB.frequency + i * 10 });
+        tick();
+    }
+    for (let i = 0; i < 50; i++) tick();
+    for (let i = 1; i < ts.tunings.length; i++) {
+        assert.ok(ts.tunings[i].stamp >= ts.tunings[i - 1].stamp, `entry ${i} before ${i - 1}`);
+    }
+    assert.ok(ts.tunings.every((x) => x.heardFrom === null), 'all placed');
+});
+
+t('tuning: no clock estimate yet is now plus the queue, and stays that', () => {
+    const r = rig();
+    r.player.queuedSec = 0.15;
+    r.ts.clock = () => null;
+    r.ts.noteTuning(USB);
+    fill(r, 1);
+    near(r.ts.tunings[0].stamp, 5150, 1e-6, 'provisional kept');
+});
+
 console.log(`\n${pass} passed`);

@@ -1177,7 +1177,7 @@ export class AudioPlayer extends Emitter {
         // stamps stay continuous and going back to live needs no re-prime —
         // but nothing reaches the speakers from here.
         const ts = this.timeshift;
-        if (ts) ts.recordAudio(planes, frames, sampleRate, startAt, ctx, this.contextEpoch);
+        if (ts) ts.recordAudio(planes, frames, sampleRate, startAt, ctx, this.contextEpoch, captureMs);
         if (ts && ts.replaying) {
             this._live.length = 0;
         } else {

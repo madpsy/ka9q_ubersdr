@@ -35,6 +35,7 @@
 // spectrum to draw as a ghost passband.
 
 import { Emitter } from '../radio/emitter.js';
+import { serverClock } from '../radio/serverClock.js';
 
 export const TIMESHIFT_SEC = 30;
 
@@ -157,9 +158,12 @@ class Pool {
 }
 
 export class Timeshift extends Emitter {
-    constructor({ now } = {}) {
+    constructor({ now, clock } = {}) {
         super();
         this.now = now || (() => performance.now());
+        // The receiver's clock against this page's — radio/serverClock.js,
+        // the same estimate the Stats panel ages the audio by.
+        this.clock = clock || serverClock;
         this.player = null;
         this.spectrum = null;
         this.enabled = false;
@@ -296,9 +300,10 @@ export class Timeshift extends Emitter {
     /**
      * A block the live schedule has placed, from AudioPlayer._schedule.
      * `startAt` is on the context clock; `planes` are only valid during the
-     * call, so they are copied.
+     * call, so they are copied. `captureMs` is when its first sample was
+     * captured, on the receiver's clock, or null — see _placeTunings.
      */
-    recordAudio(planes, frames, rate, startAt, ctx, epoch) {
+    recordAudio(planes, frames, rate, startAt, ctx, epoch, captureMs = null) {
         if (!this.enabled || !frames || !rate) return;
         const off = this._offset(ctx, epoch);
         const stamp = startAt * 1000 + off;
@@ -320,6 +325,7 @@ export class Timeshift extends Emitter {
             rms: Math.sqrt(sum / frames),
         });
         this.audioBytes += frames * planes.length * 4;
+        if (captureMs != null) this._placeTunings(stamp, captureMs, (frames / rate) * 1000);
         this._prune();
         // Live packets arrive every 20 ms whatever the timers are doing, so
         // they are the steadiest clock a replay has to top itself up from.
@@ -342,12 +348,39 @@ export class Timeshift extends Emitter {
      * Kept whether or not the buffer is running, since it is one entry and
      * the history that starts later has to know what it started on.
      */
+    //
+    // Stamped for when it will be *heard*, not when it was asked for. A retune
+    // goes up to the receiver, which starts capturing the new frequency, and
+    // that audio then comes down and through the queue — a few hundred ms in
+    // all, the "heard" age the Stats panel shows. Stamped at the moment of
+    // asking, the label and the ghost passband changed that much before the
+    // sound did.
+    //
+    // So the change is put on the receiver's clock — now, plus the one-way trip
+    // up, which is half the best round trip the clock estimate has seen — and
+    // the first block captured at or after that is when it is heard: the
+    // tuning's stamp moves to that block's play time, to the sample, when it
+    // arrives (_placeTunings). That is the same capture time and the same clock
+    // offset the Stats panel ages the audio with, used per block rather than
+    // as an average.
+    //
+    // Until that block arrives, or always on a stream without capture times,
+    // the stamp is a provisional now plus the audio queue — the part of the
+    // delay this client can see for itself.
     noteTuning(t) {
         if (!t) return;
         const last = this.tunings[this.tunings.length - 1];
         if (last && !tuningDiffers(last, t)) return;
+        const now = this.now();
+        const clk = this.clock ? this.clock(now) : null;
+        const queued = this.player && this.player.queuedSec ? this.player.queuedSec * 1000 : 0;
         this.tunings.push({
-            stamp: this.now(),
+            // Never before the one it replaces, which a quick spin of the dial
+            // would otherwise manage: the earlier change is placed on the
+            // receiver's clock, the later one only provisionally.
+            stamp: Math.max(now + queued, last ? last.stamp : -Infinity),
+            // On the receiver's clock; null when no estimate exists yet.
+            heardFrom: clk ? now + clk.theta + clk.err : null,
             frequency: t.frequency,
             mode: t.mode,
             bandwidthLow: t.bandwidthLow,
@@ -355,6 +388,26 @@ export class Timeshift extends Emitter {
         });
         if (!this.enabled) this.tunings = this.tunings.slice(-1);
         else this._prune();
+    }
+
+    // A block captured from `captureMs` for `durMs`, playing from `stamp`:
+    // every tuning still waiting for its first block that this one reaches is
+    // placed at the sample it takes effect from. Newest first, since the
+    // waiting ones are at the end, and stopped at the first already placed.
+    _placeTunings(stamp, captureMs, durMs) {
+        const list = this.tunings;
+        for (let i = list.length - 1; i >= 0; i--) {
+            const x = list[i];
+            if (x.heardFrom == null) break;
+            if (captureMs + durMs <= x.heardFrom) continue;
+            x.stamp = stamp + Math.max(0, x.heardFrom - captureMs);
+            x.heardFrom = null;
+            // Anything after it that is still provisional cannot be heard
+            // before it.
+            for (let k = i + 1; k < list.length; k++) {
+                if (list[k].stamp < x.stamp) list[k].stamp = x.stamp;
+            }
+        }
     }
 
     /** The tuning in force at `stamp`, or null when none is known. */

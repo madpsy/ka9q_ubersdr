@@ -12,6 +12,7 @@ import { useRadio } from '../radio/RadioContext.jsx';
 import { Bar, Button, Field, Icon, Segmented } from '../components/ui.jsx';
 import LosslessWarning from '../components/LosslessWarning.jsx';
 import { isIQ } from '../radio/constants.js';
+import useTimeshift from '../lib/useTimeshift.js';
 import {
     MAX_RECORDING_MS, formatElapsed, getRecorder, playbackDuration, wavSupported,
 } from '../lib/recorder.js';
@@ -60,6 +61,9 @@ function deliveryText(format, archive) {
 export default function RecorderPanel({ minimal }) {
     const { audio, player, running, tuning, serverInfo, meters } = useRadio();
     const rec = getRecorder(player);
+    // Followed only to say what a recording made during a replay holds; it
+    // ticks only while replaying, and then only once a second.
+    const ts = useTimeshift(1, false);
 
     // The recorder is not React state, so a change on it has to be turned into
     // a render by hand.
@@ -466,6 +470,29 @@ export default function RecorderPanel({ minimal }) {
 
             {error && <div className="note note--warn">{error}</div>}
             {!error && rec.notice && <div className="note note--warn">{rec.notice}</div>}
+
+            {/* Timeshift. A recording holds what is heard, so during a replay
+                it holds the replay — said before Start rather than discovered
+                in the file. IQ is the exception: it is taken from the live
+                stream ahead of the graph, so the replay is not in it at all. */}
+            {ts.enabled && ts.replaying && (
+                <div className="note note--tight">
+                    {iq
+                        ? 'IQ records the live stream — the replay you are hearing is not in the recording.'
+                        : recording
+                            ? 'Recording the replay, not live. The archive lists which parts were'
+                                + ' replayed, and the signal log follows the replay.'
+                            : 'Start records the replay as you hear it, not the live signal.'}
+                </div>
+            )}
+            {!recording && rec.hasData && rec.shifts.length > 0 && !(ts.enabled && ts.replaying) && (
+                <div className="note note--tight">
+                    Parts of this recording are replayed rather than live.
+                    {archive
+                        ? ' The metadata file in the archive lists them.'
+                        : ' Download the archive to keep the list of which parts.'}
+                </div>
+            )}
 
             {!running && !rec.hasData && (
                 <div className="note note--tight">Start the receiver to record.</div>

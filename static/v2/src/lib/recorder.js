@@ -73,6 +73,9 @@ export class Recorder extends Emitter {
         this.notice = '';           // why a recording ended on its own
         this.meta = null;           // tuning/receiver snapshot taken at start
         this.signal = [];           // one entry per second
+        // Stretches of the recording that were not live: the timeshift was
+        // replaying or paused while it ran. See _noteShift.
+        this.shifts = [];
 
         this._chunks = [];          // webm: Blob parts
         this._pcm = [];             // wav: Float32Array frames
@@ -87,6 +90,8 @@ export class Recorder extends Emitter {
         this._timer = null;
         this._lastSignalAt = 0;
         this._sample = null;        // () => meters snapshot
+        this._unshift = null;       // unsubscribes from the timeshift
+        this._shiftKey = '';        // what the open stretch in `shifts` is
         // Resolves when the encoder has handed over its last chunk. MediaRecorder
         // finishes asynchronously, so a download taken straight after Stop would
         // otherwise be short by up to a second.
@@ -162,6 +167,20 @@ export class Recorder extends Emitter {
         if (!iq) this.preferredFormat = this.format;
         this.notice = '';
         this.meta = meta || {};
+        // Started part-way through a replay: the file opens on what is being
+        // heard, which a retune since may have left on another frequency. The
+        // dial is what the panel passed, and the dial is not what this is.
+        const ts = this._timeshift();
+        const heard = ts && ts.replayTuning;
+        if (heard) {
+            this.meta = {
+                ...this.meta,
+                frequency: heard.frequency,
+                mode: heard.mode,
+                bandwidthLow: heard.bandwidthLow,
+                bandwidthHigh: heard.bandwidthHigh,
+            };
+        }
         this._sample = typeof sample === 'function' ? sample : null;
         this._epoch = player.contextEpoch;
         this._rate = player.ctx.sampleRate;
@@ -182,8 +201,80 @@ export class Recorder extends Emitter {
         // v1 starts a 1 Hz interval here, so the first row lands one second
         // in rather than immediately.
         this._lastSignalAt = this.startedAt;
+        this._watchTimeshift();
         this._runTimer();
         this._changed();
+    }
+
+    // The timeshift buffer, when one is attached and this recording follows
+    // it. IQ never does: it is taken from the decoded stream ahead of the
+    // graph (see _startIQ), which is always live whatever is being replayed.
+    _timeshift() {
+        if (this._iq || !this.player) return null;
+        const ts = this.player.timeshift;
+        return ts && ts.enabled ? ts : null;
+    }
+
+    // Timeshift and the recorder, together.
+    //
+    // A recording holds what is heard, and during a replay what is heard is
+    // the replay — the same audio again, or silence while paused, and on going
+    // back to live the stretch that was skipped is not in the file at all. That
+    // is the right audio to keep: it is what the panel promises, and what the
+    // operator was listening to when they pressed the button. What is wrong is
+    // a file that then reads as one continuous live capture. So every stretch
+    // that was not live is written down — when in the recording, how far
+    // behind, and what it was tuned to — and the signal log follows the audio:
+    // across a replay it holds the readings the timeshift kept with the
+    // replayed blocks, and across a pause, where the file is silence, none.
+    _watchTimeshift() {
+        this._shiftKey = '';
+        const ts = this.player && this.player.timeshift;
+        if (!ts || this._iq) return;
+        this._unshift = ts.on('change', () => this._noteShift(Date.now()));
+        this._noteShift(Date.now());
+    }
+
+    // Opens, closes or replaces the stretch in progress to match the timeshift
+    // now. Called on every change it announces and on every tick, since a
+    // replay crossing an old retune moves on to another tuning without saying.
+    _noteShift(now) {
+        if (this.state !== 'recording') return;
+        const ts = this._timeshift();
+        let key = '';
+        let next = null;
+        if (ts && ts.replaying) {
+            const tun = ts.replayTuning;
+            const behind = ts.behindMs;
+            next = {
+                from: now,
+                to: 0,
+                paused: ts.paused,
+                behindMs: behind,
+                // Wall-clock time of the audio at the start of the stretch —
+                // for a pause, the moment it is held on.
+                audioAt: now - behind,
+                frequency: tun ? tun.frequency : null,
+                mode: tun ? tun.mode : null,
+            };
+            // A playing replay keeps a fixed delay; a pause holds a fixed
+            // moment while the delay grows. Either changing is a skip.
+            key = [
+                next.paused ? 'p' : 'r',
+                next.paused ? Math.round(ts.pausedAt) : Math.round(ts.delayMs),
+                next.frequency, next.mode,
+            ].join('|');
+        }
+        if (key === this._shiftKey) return;
+        this._closeShift(now);
+        this._shiftKey = key;
+        if (next) this.shifts.push(next);
+    }
+
+    _closeShift(now) {
+        const open = this._shiftKey && this.shifts[this.shifts.length - 1];
+        if (open && !open.to) open.to = now;
+        this._shiftKey = '';
     }
 
     _startWebm() {
@@ -276,6 +367,13 @@ export class Recorder extends Emitter {
             numberOfInputs: 1,
             numberOfOutputs: 1,
             outputChannelCount: [1],
+            // Silence is written as silence. With nothing playing upstream —
+            // a timeshift pause, an underrun — the worklet's input has no
+            // channels at all, and without this the WAV would simply lose that
+            // time: shorter than its own Duration line, with every later
+            // second of the signal log landing early against it. The Opus path
+            // has no such gap; a stream destination runs on regardless.
+            processorOptions: { fillSilence: true },
         });
         const pcm = this._pcm;   // captured, for the reason given in _startWebm
         this._worklet.port.onmessage = (e) => {
@@ -293,6 +391,7 @@ export class Recorder extends Emitter {
         if (this.state !== 'recording') return;
         this.state = 'ready';
         this.endedAt = Date.now();
+        this._closeShift(this.endedAt);
         this.notice = notice;
         this._teardown();
         this._changed();
@@ -312,6 +411,8 @@ export class Recorder extends Emitter {
         this.notice = '';
         this.meta = null;
         this.signal = [];
+        this.shifts = [];
+        this._shiftKey = '';
         this._chunks = [];
         this._pcm = [];
         this._flush = Promise.resolve();
@@ -376,6 +477,10 @@ export class Recorder extends Emitter {
             this._untap();
             this._untap = null;
         }
+        if (this._unshift) {
+            this._unshift();
+            this._unshift = null;
+        }
         this._sample = null;
     }
 
@@ -400,7 +505,16 @@ export class Recorder extends Emitter {
     //     it away would log "0.00" for both a dead band and a signal sitting
     //     at the noise floor.
     _pushSignal(now) {
-        const m = this._sample() || {};
+        // Over a replay the readings are the replayed moment's, kept with its
+        // audio, so a row describes the second of the file it sits against
+        // rather than the live stream underneath — see _watchTimeshift. A
+        // pause is silence in the file and gets no reading. The timestamp
+        // stays the wall clock: it is the position in the recording, and the
+        // metadata says which moment each replayed stretch came from.
+        const ts = this._timeshift();
+        let m;
+        if (ts && ts.replaying) m = (!ts.paused && ts.replaySignal) || {};
+        else m = this._sample() || {};
         const bp = m.basebandPower == null ? -999 : m.basebandPower;
         const np = m.noisePower == null ? -999 : m.noisePower;
         const known = bp > -900 && np > -900;
@@ -434,6 +548,7 @@ export class Recorder extends Emitter {
             }
 
             const now = Date.now();
+            this._noteShift(now);
             // Nothing is logged in IQ, and an empty log is the honest answer.
             //
             // The readings behind it come from the packet header, and the server
@@ -561,13 +676,43 @@ Frequency: ${m.frequency} Hz (${formatFrequencyV1(m.frequency)})
 Mode: ${String(m.mode || 'unknown').toUpperCase()}
 Bandwidth Low: ${m.bandwidthLow} Hz
 Bandwidth High: ${m.bandwidthHigh} Hz
-
+${this._shiftText()}
 Recording Format:
 ----------------
 ${formatLine}
 
 Generated by UberSDR Web Client
 `;
+    }
+
+    // The stretches that were not live, as a section of their own between the
+    // radio settings and the format. Nothing at all for a recording that was
+    // live throughout, which keeps that file byte-for-byte v1's.
+    _shiftText() {
+        if (!this.shifts.length) return '';
+        const end = this.endedAt || Date.now();
+        const at = (t) => formatElapsed(t - this.startedAt);
+        const utc = (t) => `${new Date(t).toISOString().slice(11, 19)} UTC`;
+        const lines = this.shifts.map((s) => {
+            const span = `${at(s.from)}-${at(s.to || end)}`;
+            const tuned = s.frequency == null ? ''
+                : ` on ${formatFrequencyV1(s.frequency)} ${String(s.mode || '').toUpperCase()}`.trimEnd();
+            return s.paused
+                ? `${span}  Paused at ${utc(s.audioAt)}${tuned} (silence)`
+                : `${span}  Replay from ${utc(s.audioAt)}, ${(s.behindMs / 1000).toFixed(1)} s behind live${tuned}`;
+        });
+        return [
+            '',
+            'Timeshift:',
+            '---------',
+            'Parts of this recording were replayed from the timeshift buffer rather than',
+            'heard live. Times are offsets into the recording. On going back to live, the',
+            'audio between the replay and live is not in the file. Over a replay the',
+            'signal log holds the readings taken with the replayed audio; over a pause',
+            'it reads N/A.',
+            ...lines,
+            '',
+        ].join('\n');
     }
 
     // The rows are already v1-shaped strings — see _pushSignal. The middle

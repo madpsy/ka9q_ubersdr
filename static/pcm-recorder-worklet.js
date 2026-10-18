@@ -4,9 +4,14 @@
  * Collects Float32 PCM samples and posts them to the main thread in batches.
  */
 class PcmRecorderProcessor extends AudioWorkletProcessor {
-    constructor() {
+    constructor(options) {
         super();
         this._recording = false;
+        // Opt-in, so v1 is unchanged: write silence when nothing is playing
+        // upstream. The input then has no channels at all, and skipping those
+        // quanta shortens the file against the wall clock.
+        this._fillSilence = !!(options && options.processorOptions
+            && options.processorOptions.fillSilence);
 
         this.port.onmessage = (event) => {
             if (event.data.command === 'start') {
@@ -27,6 +32,9 @@ class PcmRecorderProcessor extends AudioWorkletProcessor {
             const copy = new Float32Array(channelData.length);
             copy.set(channelData);
             this.port.postMessage({ samples: copy }, [copy.buffer]);
+        } else if (this._fillSilence) {
+            const silence = new Float32Array(128);
+            this.port.postMessage({ samples: silence }, [silence.buffer]);
         }
 
         return true; // Keep processor alive

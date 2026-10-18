@@ -349,4 +349,39 @@ t('tuning: no clock estimate yet is now plus the queue, and stays that', () => {
     near(r.ts.tunings[0].stamp, 5150, 1e-6, 'provisional kept');
 });
 
+t('signal readings ride with the audio they came with, and replay with it', () => {
+    const r = rig();
+    // Each block preceded by its packet's reading, as RadioContext does it.
+    let next = r.ctx.currentTime + 0.2;
+    for (let n = 0; n < 500; n++) {
+        r.ts.noteSignal({ basebandPower: -n, noisePower: -200, squelchOpen: n % 2 === 0 });
+        r.block(n, next);
+        next += 0.02;
+        r.advance(20);
+    }
+    const mid = r.ts.audio[200];
+    assert.strictEqual(r.ts.signalAt(mid.stamp + 1).basebandPower, -mid.planes[0][0], 'each block its own');
+    assert.strictEqual(r.ts.signalAt(r.ts.audio[0].stamp - 50), null, 'nothing held before the history');
+    assert.strictEqual(r.ts.replaySignal, null, 'live has no replay reading');
+
+    r.ts.seekBehind(5000);
+    const heard = r.ts.replaySignal;
+    assert.ok(heard, 'a replay has one');
+    // The block playing at the replay position, whatever its index.
+    const at = r.ts.audio.find((c) => c.stamp <= r.ts.position && c.end > r.ts.position);
+    assert.strictEqual(heard.basebandPower, -at.planes[0][0]);
+    assert.ok(heard.basebandPower > -499, 'not the newest, live reading');
+
+    r.ts.pause();
+    const held = r.ts.replaySignal;
+    r.advance(1000);
+    assert.strictEqual(r.ts.replaySignal, held, 'a pause holds its moment');
+
+    r.ts.clear();
+    r.ts.noteSignal({ basebandPower: -1, noisePower: -2, squelchOpen: true });
+    r.ts.setEnabled(false);
+    r.ts.noteSignal({ basebandPower: -3, noisePower: -4, squelchOpen: true });
+    assert.strictEqual(r.ts._signal, null, 'off keeps nothing');
+});
+
 console.log(`\n${pass} passed`);

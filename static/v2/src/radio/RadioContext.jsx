@@ -605,6 +605,8 @@ export function RadioProvider({ children }) {
             } else {
                 m.squelchOpen = now - m.lastGateOpenAt < SQUELCH_HANG_MS;
             }
+            // Kept with the audio it came with, so a replay can show it.
+            getTimeshift().noteSignal({ basebandPower, noisePower, squelchOpen: m.squelchOpen });
         }));
         offs.push(audioConn.on('message', (msg) => {
             if (msg.type === 'status') {
@@ -1960,11 +1962,32 @@ export function useRadio() {
 }
 
 // Samples the mutable meters object at `hz` and re-renders only the caller.
+//
+// During a timeshift replay the signal readings are the replayed moment's, so
+// the S-meter and the SNR describe the audio being heard rather than the live
+// stream underneath it — see lib/timeshift.js noteSignal. `replay` says which.
+// No reading held for that moment is no reading, not the live one.
 export function useMeters(hz = 12) {
     const { meters } = useRadio();
-    const [snapshot, setSnapshot] = useState(() => ({ ...meters.current }));
+    const read = () => {
+        const m = meters.current;
+        const ts = getTimeshift();
+        if (!ts.replaying) return { ...m, replay: false };
+        const r = ts.replaySignal;
+        const bp = r ? r.basebandPower : null;
+        const np = r ? r.noisePower : null;
+        return {
+            ...m,
+            basebandPower: bp,
+            noisePower: np,
+            snr: bp != null && np != null ? bp - np : null,
+            squelchOpen: r ? r.squelchOpen : m.squelchOpen,
+            replay: true,
+        };
+    };
+    const [snapshot, setSnapshot] = useState(read);
     useEffect(() => {
-        const t = setInterval(() => setSnapshot({ ...meters.current }), 1000 / hz);
+        const t = setInterval(() => setSnapshot(read()), 1000 / hz);
         return () => clearInterval(t);
     }, [hz]);
     return snapshot;

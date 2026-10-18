@@ -367,6 +367,116 @@ function expectedSignalCsv(v1Csv) {
         assert.ok(runV2('webm', RECEIVERS.full, CASES[0][2]).csv.split('\n').length > 5);
     });
 
+    // --- timeshift -----------------------------------------------------------
+    //
+    // A recording holds what is heard, so during a replay it holds the replay.
+    // These pin what the archive then says about it. The timeshift is a stand-in
+    // carrying only what the recorder reads off lib/timeshift.js.
+
+    function fakeShift() {
+        const handlers = new Set();
+        return {
+            enabled: true, mode: 'live', delayMs: 0, pausedAt: 0, behindMs: 0, replayTuning: null,
+            get replaying() { return this.mode !== 'live'; },
+            get paused() { return this.mode === 'paused'; },
+            on(_e, fn) { handlers.add(fn); return () => handlers.delete(fn); },
+            emit() { for (const fn of handlers) fn(); },
+            handlers,
+        };
+    }
+    const TUNED = { frequency: 7074000, mode: 'usb', bandwidthLow: 50, bandwidthHigh: 2700 };
+    function recording(ts) {
+        const r = new Recorder({ timeshift: ts });
+        r.format = 'webm';
+        r.state = 'recording';
+        r.startedAt = T0;
+        r._rate = RATE;
+        r.meta = { frequency: 14074000, mode: 'usb', bandwidthLow: 50, bandwidthHigh: 2700, receiver: null };
+        r._sample = () => ({ basebandPower: -60, noisePower: -90 });
+        const now = Date.now;
+        Date.now = () => T0;
+        try { r._watchTimeshift(); } finally { Date.now = now; }
+        return r;
+    }
+    const finish = (r, at) => { r.state = 'ready'; r.endedAt = at; r._closeShift(at); r._teardown(); };
+
+    t('a recording made entirely live has no timeshift section', () => {
+        const ts = fakeShift();
+        const r = recording(ts);
+        r._noteShift(T0 + 5000);
+        r._pushSignal(T0 + 1000);
+        finish(r, T0 + 10000);
+        assert.ok(!r._metadataText().includes('Timeshift'));
+        assert.ok(r._signalCsv().includes(',-60.00,-90.00,30.00'));
+        assert.strictEqual(ts.handlers.size, 0, 'unsubscribed on stop');
+    });
+
+    t('a replay is listed, and the log carries the replayed readings; a pause logs none', () => {
+        const ts = fakeShift();
+        const r = recording(ts);
+        r._pushSignal(T0 + 1000);
+        Object.assign(ts, {
+            mode: 'playing', delayMs: 20000, behindMs: 20000, replayTuning: TUNED,
+            replaySignal: { basebandPower: -70, noisePower: -95, squelchOpen: true },
+        });
+        r._noteShift(T0 + 30000);
+        r._pushSignal(T0 + 31000);
+        // A replay over a moment with no audio held has no reading — not the live one.
+        ts.replaySignal = null;
+        r._pushSignal(T0 + 32000);
+        Object.assign(ts, {
+            mode: 'paused', pausedAt: 1234, behindMs: 25000,
+            replaySignal: { basebandPower: -70, noisePower: -95, squelchOpen: true },
+        });
+        r._noteShift(T0 + 35000);
+        r._pushSignal(T0 + 36000);
+        Object.assign(ts, { mode: 'live', behindMs: 0, replayTuning: null, replaySignal: null });
+        r._noteShift(T0 + 40000);
+        r._pushSignal(T0 + 41000);
+        finish(r, T0 + 60000);
+
+        const txt = r._metadataText();
+        assert.ok(txt.includes('00:30-00:35  Replay from 12:00:10 UTC, 20.0 s behind live on 7.074 MHz USB'), txt);
+        assert.ok(txt.includes('00:35-00:40  Paused at 12:00:10 UTC on 7.074 MHz USB (silence)'), txt);
+        const rows = r._signalCsv().trim().split('\n').slice(1);
+        assert.deepStrictEqual(rows.map((x) => x.split(',').slice(1).join(',')), [
+            '-60.00,-90.00,30.00', '-70.00,-95.00,25.00', 'N/A,N/A,N/A', 'N/A,N/A,N/A', '-60.00,-90.00,30.00',
+        ]);
+    });
+
+    t('a skip within a replay starts a new stretch; an unchanged replay does not', () => {
+        const ts = fakeShift();
+        const r = recording(ts);
+        Object.assign(ts, { mode: 'playing', delayMs: 20000, behindMs: 20000, replayTuning: TUNED });
+        r._noteShift(T0 + 1000);
+        r._noteShift(T0 + 2000);
+        Object.assign(ts, { delayMs: 10000, behindMs: 10000 });
+        r._noteShift(T0 + 3000);
+        finish(r, T0 + 4000);
+        assert.strictEqual(r.shifts.length, 2);
+        assert.deepStrictEqual(r.shifts.map((s) => [s.from - T0, s.to - T0]), [[1000, 3000], [3000, 4000]]);
+    });
+
+    t('a replay still running at Stop is closed at the end of the recording', () => {
+        const ts = fakeShift();
+        Object.assign(ts, { mode: 'playing', delayMs: 5000, behindMs: 5000, replayTuning: TUNED });
+        const r = recording(ts);
+        finish(r, T0 + 9000);
+        assert.ok(r._metadataText().includes('00:00-00:09  Replay from 11:59:55 UTC, 5.0 s behind live'));
+    });
+
+    t('IQ ignores the timeshift: it records the live stream', () => {
+        const ts = fakeShift();
+        Object.assign(ts, { mode: 'playing', delayMs: 5000, behindMs: 5000, replayTuning: TUNED });
+        const r = new Recorder({ timeshift: ts });
+        r._iq = true;
+        r.state = 'recording';
+        r._watchTimeshift();
+        r._noteShift(T0);
+        assert.strictEqual(r.shifts.length, 0);
+        assert.strictEqual(ts.handlers.size, 0);
+    });
+
     if (process.exitCode) console.log('\nrecorder ZIP parity tests FAILED');
     else console.log(`\nall ${pass} recorder ZIP parity tests passed`);
 })();

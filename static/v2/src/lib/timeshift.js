@@ -24,8 +24,12 @@
 // and SpectrumView, the IF panel, Measure and the bridge all follow it without
 // knowing it exists.
 //
-// What does not rewind is everything the server measures: the S-meter, the SNR,
-// the squelch state and the decoders are fed by the live stream throughout.
+// The signal readings rewind with the audio. Each block carries the baseband
+// power, noise power and squelch state that arrived with it, so a meter reading
+// through useMeters shows the moment being heard, and a recording made during
+// a replay logs it. The meters object itself stays live — the squelch auto-set,
+// the SAM fallback and the bridge are about the receiver now — and so do the
+// decoders, which are fed by the live stream throughout.
 //
 // Nor does the tuning. The frequency, mode and passband are live server state,
 // and the stream being recorded underneath a replay depends on them, so a
@@ -175,7 +179,8 @@ export class Timeshift extends Emitter {
         // Where a paused replay is stopped, as a stamp.
         this.pausedAt = 0;
 
-        // { stamp, end, rate, frames, planes, rms } — `end` is a stamp too.
+        // { stamp, end, rate, frames, planes, rms, signal } — `end` is a stamp
+        // too, and `signal` the reading that came with it (see noteSignal).
         this.audio = [];
         this.audioBytes = 0;
         // { stamp, centre, bw, bins }
@@ -191,6 +196,8 @@ export class Timeshift extends Emitter {
         // perf ms = ctx seconds * 1000 + offset. See _offset.
         this._offEpoch = -1;
         this._off = null;
+        // The newest signal reading, for the next block to carry.
+        this._signal = null;
 
         // Replay state. `_cursor` is the next block to schedule, `_lastEnd`
         // where the last one scheduled ends on the context clock, `_epoch` the
@@ -260,6 +267,7 @@ export class Timeshift extends Emitter {
     }
 
     clear() {
+        this._signal = null;
         // The tuning in force now still is, history or not.
         this.tunings = this.tunings.slice(-1);
         this._stopSources();
@@ -323,6 +331,7 @@ export class Timeshift extends Emitter {
             frames,
             planes: kept,
             rms: Math.sqrt(sum / frames),
+            signal: this._signal,
         });
         this.audioBytes += frames * planes.length * 4;
         if (captureMs != null) this._placeTunings(stamp, captureMs, (frames / rate) * 1000);
@@ -330,6 +339,34 @@ export class Timeshift extends Emitter {
         // Live packets arrive every 20 ms whatever the timers are doing, so
         // they are the steadiest clock a replay has to top itself up from.
         if (this.mode === 'playing') this._pump();
+    }
+
+    /**
+     * The reading that arrived with the packet now being decoded —
+     * { basebandPower, noisePower, squelchOpen } — from RadioContext's
+     * 'quality' handler. Every packet's header is read before its audio is
+     * scheduled, so the next block recorded is the one it describes; an Opus
+     * decode still in flight can leave it a packet late, 20 ms, which no meter
+     * can show. A fresh object each time, never mutated, so blocks can share it.
+     */
+    noteSignal(signal) {
+        if (this.enabled) this._signal = signal || null;
+    }
+
+    /** The reading carried by the block playing at `stamp`, or null. */
+    signalAt(stamp) {
+        const i = firstEndingAfter(this.audio, stamp, (c) => c.end);
+        const c = this.audio[i];
+        return c && c.stamp <= stamp ? c.signal || null : null;
+    }
+
+    /**
+     * What the meters would have read at the moment now playing — or, paused,
+     * the moment held on screen. Null while live, and null in a replay with no
+     * audio held there, which is no reading rather than the live one.
+     */
+    get replaySignal() {
+        return this.replaying ? this.signalAt(this.position) : null;
     }
 
     // A frame the spectrum connection has decoded. `bins` is its reused

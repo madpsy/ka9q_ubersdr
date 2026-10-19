@@ -89,7 +89,7 @@ RUN apt-get update && apt-get install -y \
     && cp /tmp/wsprd-m0lte-extract/usr/bin/wsprd /usr/bin/wsprd-m0lte \
     && chmod +x /usr/bin/wsprd-m0lte \
     && rm -rf /tmp/wsprd-m0lte.deb /tmp/wsprd-m0lte-extract \
-    && wget https://github.com/madpsy/jt9-decode/releases/download/1.0.0/jt9_decode_${TARGETARCH} -O /usr/local/bin/jt9_decode \
+    && wget https://github.com/madpsy/jt9-decode/releases/download/1.1.0/jt9_decode_${TARGETARCH} -O /usr/local/bin/jt9_decode \
     && chmod +x /usr/local/bin/jt9_decode \
     && wget https://github.com/madpsy/ka9q_ubersdr/releases/download/latest/cw-decoder_${TARGETARCH} -O /usr/local/bin/cw-decoder \
     && chmod +x /usr/local/bin/cw-decoder \

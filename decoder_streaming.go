@@ -92,14 +92,7 @@ func NewStreamingDecoder(binaryPath string, band *DecoderBand, config *DecoderCo
 	// Build command arguments based on mode
 	var args []string
 	if band.Config.Mode == ModeFT2 || band.Config.Mode == ModeFT8 || band.Config.Mode == ModeFT4 {
-		// FT2/FT8/FT4 use jt9_wrapper with specific arguments
-		// jt9_wrapper reads from stdin by default when -s is specified
-		args = []string{
-			"-m", band.Config.Mode.String(),
-			"-j", config.JT9Path,
-			"-s",
-			"-d", fmt.Sprintf("%d", band.Config.Depth),
-		}
+		args = config.JT9DecodeArgs(&band.Config)
 	} else {
 		// JS8 and other streaming modes
 		args = []string{
@@ -214,14 +207,7 @@ func (sd *StreamingDecoder) restart() error {
 	// Build command arguments based on mode
 	var args []string
 	if sd.band.Config.Mode == ModeFT2 || sd.band.Config.Mode == ModeFT8 || sd.band.Config.Mode == ModeFT4 {
-		// FT2/FT8/FT4 use jt9_wrapper with specific arguments
-		// jt9_wrapper reads from stdin by default when -s is specified
-		args = []string{
-			"-m", sd.band.Config.Mode.String(),
-			"-j", sd.config.JT9Path,
-			"-s",
-			"-d", fmt.Sprintf("%d", sd.band.Config.Depth),
-		}
+		args = sd.config.JT9DecodeArgs(&sd.band.Config)
 	} else {
 		// JS8 and other streaming modes
 		args = []string{

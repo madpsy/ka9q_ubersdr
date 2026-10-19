@@ -225,6 +225,20 @@ type DecoderConfig struct {
 	maxFrequency uint64 `yaml:"-"`
 }
 
+// JT9DecodeArgs returns jt9_decode's arguments for an FT2/FT8/FT4 band.
+// jt9_decode reads from stdin when -s is specified. --fast-subtract gives
+// WSJT-X's decodes for less CPU; it needs jt9_decode 1.1.0 and the
+// ubersdr_wsprd jt9.
+func (dc *DecoderConfig) JT9DecodeArgs(band *DecoderBandConfig) []string {
+	return []string{
+		"-m", band.Mode.String(),
+		"-j", dc.JT9Path,
+		"-s",
+		"-d", fmt.Sprintf("%d", band.Depth),
+		"--fast-subtract",
+	}
+}
+
 // Validate checks if the decoder configuration is valid
 // wsprdM0LTEDefaultPath is where the container image installs the M0LTE wsprd
 // build; it sits alongside stock wsprd so both are always available.

@@ -368,6 +368,7 @@ async function connectInstance(desc, { query = '' } = {}) {
     // page's first script runs.
     win.loadURL(proxy.localOrigin + page);
     watchMenuFocus(rec);
+    watchControllerFocus(rec);
     store.recordUse(entry.id);
     notifyChooser();
     // Not awaited: the receiver is usable the moment its window is up, and the
@@ -978,6 +979,30 @@ function watchMenuFocus(rec) {
     rec.win.on('blur', () => Menu.setApplicationMenu(Menu.buildFromTemplate(menuTemplate())));
 }
 
+// Which receiver a game controller drives.
+//
+// Chromium hands pad input to every visible window, focused or not — which is
+// what lets a controller overlay work in OBS, and here would mean one stick
+// retuning every receiver open side by side, since they share the SDR Control
+// settings. So the pad follows the receiver window used last: focusing one
+// takes it, and switching to a logger leaves it where it was. The page is told
+// over `pad:active` and asks on load with `pad:is-active` — see
+// receiver-preload.js and the v2 driver, static/v2/src/controls/gamepad.js.
+//
+// Held as a webContents id rather than the record, so a window that has gone
+// is simply never matched again.
+let padReceiver = null;
+
+function watchControllerFocus(rec) {
+    rec.win.on('focus', () => {
+        if (rec.win.isDestroyed()) return;
+        padReceiver = rec.win.webContents.id;
+        for (const r of running.values()) {
+            if (!r.win.isDestroyed()) r.win.webContents.send('pad:active', r === rec);
+        }
+    });
+}
+
 /** The record for a window, by its webContents — how an IPC message finds it. */
 function recordFor(contents) {
     for (const rec of running.values()) {
@@ -1426,6 +1451,12 @@ function setupIpc() {
         const rec = recordFor(sender);
         return rec ? rec.entry.id : null;
     };
+    // Before any receiver has been focused, every one may take the pad: with
+    // one window open that is the right answer, and the first focus settles
+    // it for more.
+    ipcMain.on('pad:is-active', (event) => {
+        event.returnValue = padReceiver === null || padReceiver === event.sender.id;
+    });
     ipcMain.on('prefs:seed', (event) => {
         event.returnValue = { prefs: prefs.snapshot(prefsIdFor(event.sender)) };
     });

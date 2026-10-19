@@ -240,6 +240,12 @@ export class GamepadControl extends Emitter {
         this._win = env.window !== undefined ? env.window : (typeof window !== 'undefined' ? window : null);
         this._frame = null;
         this._opened = false;
+        // Whether this window is the one the pad drives. Always, in a browser;
+        // in the desktop client every visible receiver window is handed the
+        // pad's input, so the host says which one should act on it — see
+        // setActive and clients/electron/main.js.
+        this.active = true;
+        this._hostWatched = false;
         // Keys whose mapped function wants a stream — see the top of the file.
         // Set by ControlWatch from the mapping table.
         this.continuous = {};
@@ -267,10 +273,28 @@ export class GamepadControl extends Emitter {
         this.continuous = map || {};
     }
 
+    // Off: frames are still read, so what is held is known, but nothing is
+    // sent. Back on, whatever is held at that moment is the new baseline — a
+    // button down when the window was focused is not a press in it.
+    setActive(on) {
+        const next = !!on;
+        if (next === this.active) return;
+        this.active = next;
+        const pad = this.connected ? this._pad(this.deviceId) : null;
+        this._reset();
+        if (pad) this._prime(pad);
+        this.emit('active', next);
+    }
+
     // Nothing to ask for: the Gamepad API has no permission. This only starts
     // listening for pads appearing, which is the hotplug signal.
     async open() {
         if (!gamepadAvailable()) return false;
+        const host = this._win && this._win.ubersdrDesktop;
+        if (!this._hostWatched && host && typeof host.onControllerActive === 'function') {
+            this._hostWatched = true;
+            try { host.onControllerActive((on) => this.setActive(on)); } catch (e) { /* stays active */ }
+        }
         if (!this._opened && this._win && this._win.addEventListener) {
             this._win.addEventListener('gamepadconnected', this._onConnected);
             this._win.addEventListener('gamepaddisconnected', this._onDisconnected);
@@ -361,7 +385,7 @@ export class GamepadControl extends Emitter {
     rumble(name, strength = DEFAULT_RUMBLE.strength) {
         const pattern = RUMBLE_PATTERNS[name];
         const pad = this.connected ? this._pad(this.deviceId) : null;
-        if (!pattern || !pad) return false;
+        if (!pattern || !pad || !this.active) return false;
         if (name === 'tick') {
             const now = this._now();
             if (now - (this._tickAt || -Infinity) < TICK_GAP_MS) return true;
@@ -434,6 +458,13 @@ export class GamepadControl extends Emitter {
         // which has its own event.
         if (!pad) return;
         const now = this._now();
+        if (!this.active) {
+            this._prime(pad);
+            this._axisPressed = {};
+            this._accum = {};
+            this._repeatAt = {};
+            return;
+        }
         const dt = this._last === null ? 0 : Math.min(0.25, Math.max(0, (now - this._last) / 1000));
         this._last = now;
         this._readButtons(pad, now);

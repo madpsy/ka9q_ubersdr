@@ -330,6 +330,9 @@ function SurfaceControl({ id, cfg, update, dspSchemas, hw, onMessage, minimal })
     // The pad's last control, shown with what it is mapped to — the answer
     // to "which one is the right bumper?" without opening a manual.
     const [lastKey, setLastKey] = useState(null);
+    // In the desktop client the pad drives one receiver window at a time —
+    // see GamepadControl.setActive. False while another window has it.
+    const [padActive, setPadActive] = useState(() => !isPad || surface.active !== false);
     const [pick, setPick] = useState('');
     const [limit, setLimit] = useState(PAGE);
 
@@ -469,6 +472,7 @@ function SurfaceControl({ id, cfg, update, dspSchemas, hw, onMessage, minimal })
             // Releases and repeats are not a new control, and a stick sends a
             // stream — the same key again is no re-render.
             offs.push(surface.on('input', (e) => { if (!e.isNoteOff && !e.repeat) setLastKey(e.key); }));
+            offs.push(surface.on('active', setPadActive));
         }
         // A surface that was not attached at load appears in this list when it
         // is plugged in. Connecting to it on the strength of that is
@@ -662,7 +666,13 @@ function SurfaceControl({ id, cfg, update, dspSchemas, hw, onMessage, minimal })
 
             {auto}
 
-            {isPad && connected && !learn && !assign && (
+            {isPad && connected && !padActive && (
+                <div className="note note--tight">
+                    Another receiver window has the controller. Click this window to take it.
+                </div>
+            )}
+
+            {isPad && connected && padActive && !learn && !assign && (
                 <div className="note note--tight" aria-live="polite">
                     {lastKey
                         ? <>Last: <strong>{keyLabel(lastKey)}</strong> → {lastMapping

@@ -408,4 +408,44 @@ t('autoconnect finds the remembered pad by name', () => {
     assert.strictEqual(surface.connected, false, 'choosing another surface lets the pad go');
 });
 
+t('in another window\'s turn the pad is read but sends nothing, and a held button is not a press on return', () => {
+    const pad = makePad();
+    const r = rig([pad]);
+    r.c.connect('0');
+    r.c.setContinuous({ 'a:0+': true });
+    const seen = [];
+    r.c.on('active', (on) => seen.push(on));
+    r.c.setActive(false);
+    press(pad, 0); pad.axes[0] = 1;
+    for (let i = 0; i < 10; i++) r.frame();
+    assert.deepStrictEqual(r.inputs, []);
+    assert.strictEqual(r.c.rumble('on'), false, 'no rumble from a window without the pad');
+    r.c.setActive(true);
+    r.frame();
+    assert.ok(!r.inputs.some((e) => e.key === 'b:0'), 'still held, not pressed');
+    assert.ok(r.inputs.some((e) => e.key === 'a:0+'), 'the stick is a rate, so it carries on');
+    press(pad, 0, false); r.frame();
+    press(pad, 0); r.frame();
+    assert.strictEqual(r.inputs.filter((e) => e.key === 'b:0').length, 1);
+    assert.deepStrictEqual(seen, [false, true]);
+});
+
+t('the desktop client says which window has the pad', () => {
+    let tell = null;
+    let subs = 0;
+    const pad = makePad();
+    const r = rig([pad], {
+        window: {
+            addEventListener() {}, removeEventListener() {},
+            ubersdrDesktop: { onControllerActive: (fn) => { subs++; tell = fn; fn(false); } },
+        },
+    });
+    r.c.open();
+    assert.strictEqual(r.c.active, false);
+    tell(true);
+    assert.strictEqual(r.c.active, true);
+    r.c.open();
+    assert.strictEqual(subs, 1, 'subscribed once, not per open');
+});
+
 console.log(`\n${pass} passed`);

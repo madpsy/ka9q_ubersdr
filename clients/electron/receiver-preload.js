@@ -790,6 +790,17 @@ if (location.pathname.startsWith('/v2')) {
     // Read-only, and nothing that can act on the main process — a receiver
     // serves its operator's own pages, and this window is the one place that
     // must not become a way for a page to reach the desktop.
+    // See onControllerActive below.
+    let padActive = true;
+    try { padActive = ipcRenderer.sendSync('pad:is-active') !== false; } catch { /* stays true */ }
+    const padListeners = new Set();
+    ipcRenderer.on('pad:active', (_event, on) => {
+        padActive = !!on;
+        for (const fn of padListeners) {
+            try { fn(padActive); } catch { /* as above */ }
+        }
+    });
+
     try {
         contextBridge.exposeInMainWorld('ubersdrDesktop', {
             upstreamOrigin: context.upstreamOrigin || null,
@@ -832,6 +843,17 @@ if (location.pathname.startsWith('/v2')) {
             // which is not what the page asks a translator for, so the page
             // says itself that lines are shown as spoken.
             ...(context.stt ? { stt: createSttBridge({ ipc: ipcRenderer, win: window, models: !!context.sttModels }) } : {}),
+            // Whether a game controller should drive this window. Every
+            // visible window gets the pad's input, so the main process picks
+            // one — the receiver focused last — and the page's driver ignores
+            // the pad everywhere else (static/v2/src/controls/gamepad.js).
+            // Called now with the answer and again whenever it changes. Takes
+            // a callback and sends nothing, so it is as narrow as the rest.
+            onControllerActive(fn) {
+                if (typeof fn !== 'function') return;
+                padListeners.add(fn);
+                try { fn(padActive); } catch { /* the page's own fault */ }
+            },
         });
     } catch { /* nothing here is worth failing the whole preload for */ }
 

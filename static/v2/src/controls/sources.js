@@ -12,18 +12,20 @@
 // or hidden panel keeps its connection, which is the behaviour you want from a
 // rig that is tracking your receiver.
 //
-// FlexControl, the RC-28 and MIDI are the mapped surfaces and exclude each
+// FlexControl, the RC-28, MIDI and a game controller are the mapped surfaces and exclude each
 // other — two of them mapped to frequency would fight. Radio Sync excludes neither: it is a
 // panel of its own and can run alongside whichever surface is chosen.
 
 import { FlexControl, flexKeyLabel } from './flexcontrol.js';
 import { MIDIControl, midiKeyLabel } from './webmidi.js';
+import { GamepadControl, gamepadKeyLabel } from './gamepad.js';
 import { RC28Control, rc28KeyLabel } from './rc28.js';
 import { RadioSync } from './radiosync.js';
 
 let flex = null;
 let midi = null;
 let rc28 = null;
+let gamepad = null;
 let sync = null;
 
 export function getFlex() {
@@ -34,6 +36,11 @@ export function getFlex() {
 export function getRc28() {
     if (!rc28) rc28 = new RC28Control();
     return rc28;
+}
+
+export function getGamepad() {
+    if (!gamepad) gamepad = new GamepadControl();
+    return gamepad;
 }
 
 export function getMidi() {
@@ -51,6 +58,7 @@ export function getSync() {
 export function getSurface(id) {
     if (id === 'midi') return getMidi();
     if (id === 'rc28') return getRc28();
+    if (id === 'gamepad') return getGamepad();
     return getFlex();
 }
 
@@ -58,6 +66,7 @@ export function getSurface(id) {
 export function surfaceKeyLabel(id) {
     if (id === 'midi') return midiKeyLabel;
     if (id === 'rc28') return rc28KeyLabel;
+    if (id === 'gamepad') return gamepadKeyLabel;
     return flexKeyLabel;
 }
 
@@ -69,4 +78,5 @@ export function releaseSurfaceExcept(keep) {
     if (keep !== 'flexcontrol' && flex) flex.disconnect();
     if (keep !== 'midi' && midi) midi.close();
     if (keep !== 'rc28' && rc28) rc28.disconnect();
+    if (keep !== 'gamepad' && gamepad) gamepad.close();
 }

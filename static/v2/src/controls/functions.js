@@ -694,6 +694,15 @@ export function functionRepeats(id, dspSchemas, hw) {
     return !!(fn && fn.repeat);
 }
 
+// Whether a function wants a stream of events rather than one per press: an
+// encoder, a step that repeats when held, or a level that a rate can walk.
+// A game controller asks this to decide whether a stick half is a rate or a
+// button, and whether a held button repeats — see controls/gamepad.js.
+export function functionIsContinuous(id, dspSchemas, hw) {
+    const fn = findFunction(id, dspSchemas, hw);
+    return !!fn && (!!fn.repeat || !!fn.encoder || fn.accepts.includes(ABS));
+}
+
 // True for the functions that are a dial and nothing else — the frequency
 // encoders and the zoom dial, which read the sign of a detent. A CC mapped to
 // one of these is an endless encoder by construction: a fader's position means

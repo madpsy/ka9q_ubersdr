@@ -1,10 +1,11 @@
 // SDR Control — drive this receiver from a hardware surface.
 //
-// Three of them, one at a time:
+// Four of them, one at a time:
 //
 //   FlexControl   a FlexRadio USB dial, over Web Serial
 //   RC-28         an Icom USB dial with three buttons, over WebHID
 //   MIDI          any USB MIDI surface — DJ controller, knob box, fader bank
+//   Gamepad       a game controller, USB or Bluetooth, over the Gamepad API
 //
 // They are the same idea — a control moves, a mapped function runs — and share
 // everything but their transport, so they share a mapping table here too. Only
@@ -30,7 +31,7 @@ import { SURFACES, isMappedSurface } from '../controls/mappings.js';
 import { useRadio } from '../radio/RadioContext.jsx';
 import { TUNING_STEPS, stepLabel } from '../radio/constants.js';
 import {
-    catalogue, functionLabel, isEncoderFunction, isUnavailable, RETIRED,
+    catalogue, functionIsContinuous, functionLabel, isEncoderFunction, isUnavailable, RETIRED,
 } from '../controls/functions.js';
 import { hardwareMessages } from '../controls/hardware.js';
 import { pickFile } from '../lib/pickFile.js';
@@ -42,6 +43,9 @@ import { flexAvailable } from '../controls/flexcontrol.js';
 import { rc28Available } from '../controls/rc28.js';
 import { TX_LED_SOURCES, ledSettings } from '../controls/rc28leds.js';
 import { isCCKey, midiAvailable } from '../controls/webmidi.js';
+import {
+    GAMEPAD_DEFAULT_MAPPINGS, gamepadAvailable, gamepadKeyRank, isAxisKey, otherHalf, rumbleSettings,
+} from '../controls/gamepad.js';
 import { getSurface, surfaceKeyLabel } from '../controls/sources.js';
 import {
     bridgeAttached, bridgeSettings, onBridgeAttached, onBridgeSettings, setBridgeSettings,
@@ -55,6 +59,20 @@ const SURFACE_OPTIONS = [
     { value: 'flexcontrol', label: 'FlexControl' },
     { value: 'rc28', label: 'RC-28' },
     { value: 'midi', label: 'MIDI' },
+    { value: 'gamepad', label: 'Gamepad', title: 'A game controller — Xbox, PlayStation, Switch Pro, 8BitDo — over USB or Bluetooth' },
+];
+
+// A pad's id string carries its vendor and product in brackets — "Xbox
+// Wireless Controller (STANDARD GAMEPAD Vendor: 045e Product: 0b13)". The
+// whole of it is what is remembered; only the name is worth showing.
+function padName(name) {
+    return String(name || '').replace(/\s*\(.*\)\s*$/, '') || String(name || '');
+}
+
+const RUMBLE_STRENGTHS = [
+    { value: 0.25, label: 'Light' },
+    { value: 0.5, label: 'Medium' },
+    { value: 1, label: 'Strong' },
 ];
 
 // Where the bridge extension itself comes from. The switch below only says the
@@ -286,6 +304,11 @@ function BridgeSwitch({ minimal }) {
 function SurfaceControl({ id, cfg, update, dspSchemas, hw, onMessage, minimal }) {
     const isMidi = id === 'midi';
     const isRc28 = id === 'rc28';
+    const isPad = id === 'gamepad';
+    // The two that list their devices and remember one by name.
+    const listed = isMidi || isPad;
+    // The two whose buttons send a release as well as a press.
+    const pressRelease = isMidi || isPad;
     const keyLabel = surfaceKeyLabel(id);
     const conf = cfg[id];
     const mappings = conf.mappings;
@@ -296,10 +319,17 @@ function SurfaceControl({ id, cfg, update, dspSchemas, hw, onMessage, minimal })
     const surface = getSurface(id);
 
     const [connected, setConnected] = useState(() => surface.connected);
-    const [devices, setDevices] = useState(() => (isMidi ? surface.devices() : []));
-    const [deviceId, setDeviceId] = useState(() => (isMidi && surface.deviceId) || '');
+    const [devices, setDevices] = useState(() => (listed ? surface.devices() : []));
+    const [deviceId, setDeviceId] = useState(() => (listed && surface.deviceId) || '');
     // Learn: null when idle, otherwise { fn, mapBoth, pressKey }.
     const [learn, setLearn] = useState(null);
+    // The pad's setup mode, the other way round from learn: press a control,
+    // then say what it does. Null when off, otherwise { key } — the key last
+    // pressed, or null before anything has been.
+    const [assign, setAssign] = useState(null);
+    // The pad's last control, shown with what it is mapped to — the answer
+    // to "which one is the right bumper?" without opening a manual.
+    const [lastKey, setLastKey] = useState(null);
     const [pick, setPick] = useState('');
     const [limit, setLimit] = useState(PAGE);
 
@@ -314,11 +344,17 @@ function SurfaceControl({ id, cfg, update, dspSchemas, hw, onMessage, minimal })
     // see it: while learning, every control on the surface is being offered up
     // rather than acted on.
     const onInput = useRef(null);
-    onInput.current = ({ key, isNoteOn, isNoteOff }) => {
+    onInput.current = ({ key, isNoteOn, isNoteOff, repeat }) => {
+        if (assign) {
+            // Releases and repeats are the same control again, not a new one.
+            if (!isNoteOff && !repeat) setAssign((a) => (a && a.key === key ? a : { key }));
+            return true;
+        }
         if (!learn) return false;
         // "Map both" waits for the release so one button can fire the same
         // function twice — press to mute, release to unmute.
-        if (learn.mapBoth && isNoteOn && !learn.pressKey) {
+        // A stick half has no release to wait for, so it maps as one.
+        if (learn.mapBoth && isNoteOn && !learn.pressKey && !isAxisKey(key)) {
             setLearn({ ...learn, pressKey: key });
             return true;
         }
@@ -335,7 +371,9 @@ function SurfaceControl({ id, cfg, update, dspSchemas, hw, onMessage, minimal })
     const commit = (keys, fn) => {
         // The RC-28 paces its own dial (see rc28.js), so a limit here would
         // only drop the counts it gathered.
-        const record = { function: fn, ...(isRc28 ? { throttleMs: 0, mode: 'none' } : defaultThrottle(fn)) };
+        // A pad paces itself as well: its sticks send at a rate, and a limit
+        // would drop detents rather than slow them.
+        const record = { function: fn, ...(isRc28 || isPad ? { throttleMs: 0, mode: 'none' } : defaultThrottle(fn)) };
         // Learn cannot tell an encoder from a fader by watching one message, but
         // the function can: the frequency encoders and the zoom dial take
         // nothing else, so a CC landing on one is an encoder and is recorded as
@@ -343,6 +381,12 @@ function SurfaceControl({ id, cfg, update, dspSchemas, hw, onMessage, minimal })
         // a position, and the wheel does nothing.
         const encoder = isMidi && isEncoderFunction(fn, dspSchemas);
         const recordFor = (k) => (encoder && isCCKey(k) ? { ...record, relative: true } : record);
+        // A stick learned for something it can turn up and down takes both
+        // directions: pushing right to tune up, and left had better tune down.
+        // For a press — "Next mode" — only the way it was pushed.
+        if (isPad && functionIsContinuous(fn, dspSchemas, hw)) {
+            keys = keys.flatMap((k) => (isAxisKey(k) ? [k, otherHalf(k)] : [k]));
+        }
         const next = update((prev) => ({
             ...prev,
             [id]: {
@@ -357,11 +401,40 @@ function SurfaceControl({ id, cfg, update, dspSchemas, hw, onMessage, minimal })
         // list pages, so a new mapping can sort past the end of the page — and
         // learning a control only to watch nothing appear is exactly the
         // failure the message log exists to prevent.
-        const sorted = sortRows(Object.entries(next[id].mappings), isMidi, keyLabel);
+        const sorted = sortRows(Object.entries(next[id].mappings), id, keyLabel);
         const last = Math.max(...keys.map((k) => sorted.findIndex(([rk]) => rk === k)));
         setLimit((n) => Math.max(n, last + 1));
         onMessage(`Mapped ${keys.map(keyLabel).join(' + ')} → ${functionLabel(fn, dspSchemas, hw)}`, 'good');
         setLearn(null);
+        if (isPad) padConfirm();
+    };
+
+    const padConfirm = () => {
+        const r = rumbleSettings(conf.rumble);
+        if (r.enabled && r.confirm) surface.rumble('confirm', r.strength);
+    };
+
+    // Setup mode's own write: one control, one function, or none. A stick
+    // half given something it can turn up and down takes its other half too,
+    // as in learn; clearing one clears only it.
+    const assignTo = (key, fn) => {
+        update((prev) => {
+            const next = { ...prev[id].mappings };
+            if (!fn) {
+                delete next[key];
+            } else {
+                const record = { function: fn, throttleMs: 0, mode: 'none' };
+                next[key] = record;
+                if (isAxisKey(key) && functionIsContinuous(fn, dspSchemas, hw)) next[otherHalf(key)] = record;
+            }
+            return { ...prev, [id]: { ...prev[id], mappings: next } };
+        });
+        if (fn) {
+            onMessage(`Mapped ${keyLabel(key)} → ${functionLabel(fn, dspSchemas, hw)}`, 'good');
+            padConfirm();
+        } else {
+            onMessage(`Cleared ${keyLabel(key)}`, 'info');
+        }
     };
 
     // Autoconnect, when the operator has asked for it.
@@ -389,18 +462,23 @@ function SurfaceControl({ id, cfg, update, dspSchemas, hw, onMessage, minimal })
                 // Whoever connected it — this panel, or ControlWatch on load or
                 // on a hotplug — the picker shows what is actually open.
                 setDeviceId(surface.deviceId || '');
-                if (!s.connected) setLearn(null);
+                if (!s.connected) { setLearn(null); setAssign(null); }
             }),
         ];
+        if (isPad) {
+            // Releases and repeats are not a new control, and a stick sends a
+            // stream — the same key again is no re-render.
+            offs.push(surface.on('input', (e) => { if (!e.isNoteOff && !e.repeat) setLastKey(e.key); }));
+        }
         // A surface that was not attached at load appears in this list when it
         // is plugged in. Connecting to it on the strength of that is
         // ControlWatch's — it has to happen with the panel closed too — so all
         // that is left here is showing it in the picker.
-        if (isMidi) offs.push(surface.on('devices', setDevices));
+        if (listed) offs.push(surface.on('devices', setDevices));
         // Unsubscribe only. The device stays claimed: releasing it belongs to
         // the surface switch, not to this component going away.
         return () => offs.forEach((off) => off());
-    }, [surface, isMidi, onMessage]);
+    }, [surface, listed, isPad, onMessage]);
 
     // The rotator and the antenna switch answer over HTTP, long after the press
     // that asked them to, and their failures are the ones an operator cannot
@@ -427,22 +505,33 @@ function SurfaceControl({ id, cfg, update, dspSchemas, hw, onMessage, minimal })
     // Connecting to it is ControlWatch's, which asks for access too — this only
     // needs the list once it is there.
     useEffect(() => {
-        if (!isMidi) return;
+        if (!listed) return;
         surface.open().then((ok) => {
             if (!ok || surface.connected || !conf.device) return;
             const match = surface.devices().find((d) => d.name === conf.device);
             if (match) setDeviceId(match.id);
         });
-    }, [isMidi, surface]);   // eslint-disable-line react-hooks/exhaustive-deps
+    }, [listed, surface]);   // eslint-disable-line react-hooks/exhaustive-deps
 
-    const available = isMidi ? midiAvailable() : (isRc28 ? rc28Available() : flexAvailable());
+    // A pad appears only once a button on it is pressed, and usually there is
+    // one. Whatever turns up is chosen for the operator — the remembered one
+    // if it is among them — so pressing a button and then Connect is all of it.
+    useEffect(() => {
+        if (!isPad || connected || !devices.length) return;
+        if (devices.some((d) => d.id === deviceId)) return;
+        const match = devices.find((d) => d.name === conf.device) || devices[0];
+        setDeviceId(match.id);
+    }, [isPad, connected, devices, deviceId, conf.device]);
+
+    const available = isMidi ? midiAvailable()
+        : (isRc28 ? rc28Available() : (isPad ? gamepadAvailable() : flexAvailable()));
     if (!available) {
         // Chrome hides WebHID, Web Serial and Web MIDI from plain-http pages,
         // so there the browser is right and the address is what is wrong.
         if (typeof window !== 'undefined' && window.isSecureContext === false) {
             return (
                 <div className="note note--warn">
-                    {isMidi ? 'MIDI devices' : (isRc28 ? 'The RC-28' : 'Serial ports')} need this receiver to be opened over https — browsers only offer them to secure pages.
+                    {isMidi ? 'MIDI devices' : (isRc28 ? 'The RC-28' : (isPad ? 'Game controllers' : 'Serial ports'))} need this receiver to be opened over https — browsers only offer them to secure pages.
                 </div>
             );
         }
@@ -450,7 +539,8 @@ function SurfaceControl({ id, cfg, update, dspSchemas, hw, onMessage, minimal })
             <div className="note note--warn">
                 {isMidi && 'This browser has no Web MIDI API. Chrome or Edge is needed — Firefox has never shipped it.'}
                 {isRc28 && 'This browser has no WebHID API. Chrome or Edge is needed — Firefox and Safari have not shipped it.'}
-                {!isMidi && !isRc28 && 'This browser has no Web Serial API. Chrome or Edge is needed.'}
+                {isPad && 'This browser has no Gamepad API.'}
+                {!isMidi && !isRc28 && !isPad && 'This browser has no Web Serial API. Chrome or Edge is needed.'}
             </div>
         );
     }
@@ -460,7 +550,8 @@ function SurfaceControl({ id, cfg, update, dspSchemas, hw, onMessage, minimal })
             <span className={`dot dot--${connected ? 'good' : 'bad'}`} />
             <span className="rc-conn__state">
                 {connected
-                    ? (isMidi ? surface.deviceName : `${isRc28 ? 'RC-28' : 'FlexControl'} connected`)
+                    ? (isMidi ? surface.deviceName
+                        : (isPad ? padName(surface.deviceName) : `${isRc28 ? 'RC-28' : 'FlexControl'} connected`))
                     : 'Not connected'}
             </span>
         </div>
@@ -481,13 +572,13 @@ function SurfaceControl({ id, cfg, update, dspSchemas, hw, onMessage, minimal })
         <Button
             variant="primary"
             size="sm"
-            disabled={isMidi && !deviceId}
+            disabled={listed && !deviceId}
             onClick={() => {
                 setManualOff(id, false);
-                if (!isMidi) { surface.connect(); return; }
+                if (!listed) { surface.connect(); return; }
                 const d = surface.devices().find((x) => x.id === deviceId);
                 if (surface.connect(deviceId) && d) {
-                    update((prev) => ({ ...prev, midi: { ...prev.midi, device: d.name } }));
+                    update((prev) => ({ ...prev, [id]: { ...prev[id], device: d.name } }));
                 }
             }}
         >
@@ -498,8 +589,8 @@ function SurfaceControl({ id, cfg, update, dspSchemas, hw, onMessage, minimal })
     // What autoconnect will reach for, said plainly: it can only ever be the
     // remembered MIDI device or a serial port already granted, and if there is
     // none the switch is honest about having nothing to do yet.
-    const autoHint = isMidi
-        ? (conf.device ? `Reconnects to ${conf.device}` : 'Connect once first, so there is a device to remember')
+    const autoHint = listed
+        ? (conf.device ? `Reconnects to ${isPad ? padName(conf.device) : conf.device}` : 'Connect once first, so there is a device to remember')
         : (isRc28
             ? 'Reopens the dial once you have picked it here'
             : 'Reopens the dial once you have picked its port here');
@@ -529,14 +620,15 @@ function SurfaceControl({ id, cfg, update, dspSchemas, hw, onMessage, minimal })
     }
 
     const groups = groupCatalogue(dspSchemas, hw);
-    const rows = sortRows(Object.entries(mappings), isMidi, keyLabel);
+    const rows = sortRows(Object.entries(mappings), id, keyLabel);
+    const lastMapping = lastKey ? mappings[lastKey] : null;
 
     return (
         <>
             {conn}
 
-            {isMidi && (
-                <Field label="Device">
+            {listed && (
+                <Field label={isPad ? 'Controller' : 'Device'}>
                     <select
                         className="select"
                         value={deviceId}
@@ -544,16 +636,57 @@ function SurfaceControl({ id, cfg, update, dspSchemas, hw, onMessage, minimal })
                         onChange={(e) => setDeviceId(e.target.value)}
                     >
                         <option value="">
-                            {devices.length ? 'Choose a device…' : 'No MIDI devices found'}
+                            {devices.length
+                                ? 'Choose a device…'
+                                : (isPad ? 'Press a button on the controller…' : 'No MIDI devices found')}
                         </option>
-                        {devices.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
+                        {devices.map((d) => (
+                            <option key={d.id} value={d.id}>{isPad ? padName(d.name) : d.name}</option>
+                        ))}
                     </select>
                 </Field>
+            )}
+
+            {/* The browser shows no controller until one of its buttons is
+                pressed, so the empty list above is the first thing everybody
+                sees. These are the steps out of it. */}
+            {isPad && !connected && (
+                <ol className="note note--tight pad-steps">
+                    <li>Pair the controller in your computer&rsquo;s Bluetooth settings, or plug it in.</li>
+                    <li>Press any button on it, so the browser lets this page see it.</li>
+                    <li>Press Connect. It arrives mapped — sticks tune, the D-pad steps and zooms.</li>
+                </ol>
             )}
 
             <div className="chip-row">{button}</div>
 
             {auto}
+
+            {isPad && connected && !learn && !assign && (
+                <div className="note note--tight" aria-live="polite">
+                    {lastKey
+                        ? <>Last: <strong>{keyLabel(lastKey)}</strong> → {lastMapping
+                            ? functionLabel(lastMapping.function, dspSchemas, hw)
+                            : 'nothing mapped'}</>
+                        : 'Press a control to see what it does. Works while this page is on screen.'}
+                </div>
+            )}
+
+            {isPad && (
+                <PadRumble
+                    rumble={rumbleSettings(conf.rumble)}
+                    connected={connected}
+                    canRumble={connected && surface.canRumble()}
+                    onTest={() => {
+                        const r = rumbleSettings(conf.rumble);
+                        if (!surface.rumble('on', r.strength)) onMessage('This controller has no motor the browser can reach', 'warn');
+                    }}
+                    onChange={(patch) => update((prev) => ({
+                        ...prev,
+                        gamepad: { ...prev.gamepad, rumble: { ...rumbleSettings(prev.gamepad.rumble), ...patch } },
+                    }))}
+                />
+            )}
 
             {isRc28 && (
                 <RC28Leds
@@ -588,7 +721,7 @@ function SurfaceControl({ id, cfg, update, dspSchemas, hw, onMessage, minimal })
                 <select
                     className="select"
                     value={pick}
-                    disabled={!connected || !!learn}
+                    disabled={!connected || !!learn || !!assign}
                     onChange={(e) => setPick(e.target.value)}
                 >
                     <option value="">Choose a function…</option>
@@ -600,16 +733,25 @@ function SurfaceControl({ id, cfg, update, dspSchemas, hw, onMessage, minimal })
                 </select>
             </Field>
 
-            {isMidi && !learn && (
+            {pressRelease && !learn && !assign && (
                 <Switch
-                    checked={!!cfg.midi.mapBoth}
-                    onChange={(v) => update((prev) => ({ ...prev, midi: { ...prev.midi, mapBoth: v } }))}
+                    checked={!!conf.mapBoth}
+                    onChange={(v) => update((prev) => ({ ...prev, [id]: { ...prev[id], mapBoth: v } }))}
                     label="Map press and release"
                     disabled={!connected}
                 />
             )}
 
-            {learn ? (
+            {assign ? (
+                <PadAssign
+                    assignKey={assign.key}
+                    mapping={assign.key ? mappings[assign.key] : null}
+                    keyLabel={keyLabel}
+                    groups={groups}
+                    onPick={(fn) => assignTo(assign.key, fn)}
+                    onDone={() => setAssign(null)}
+                />
+            ) : learn ? (
                 <div className="rc-learn">
                     <div className="rc-learn__msg">
                         {learn.mapBoth && learn.pressKey
@@ -624,10 +766,24 @@ function SurfaceControl({ id, cfg, update, dspSchemas, hw, onMessage, minimal })
                         variant="primary"
                         size="sm"
                         disabled={!connected || !pick}
-                        onClick={() => setLearn({ fn: pick, mapBoth: isMidi && !!cfg.midi.mapBoth, pressKey: null })}
+                        onClick={() => setLearn({ fn: pick, mapBoth: pressRelease && !!conf.mapBoth, pressKey: null })}
                     >
                         Learn
                     </Button>
+                    {/* The other way round, for a pad: press a control and
+                        choose what it does, one after another, with nothing
+                        reaching the receiver meanwhile. */}
+                    {isPad && (
+                        <Button
+                            variant="ghost"
+                            size="sm"
+                            disabled={!connected}
+                            title="Press each control in turn and pick what it does — the receiver ignores the pad meanwhile"
+                            onClick={() => setAssign({ key: null })}
+                        >
+                            Set up by pressing
+                        </Button>
+                    )}
                 </div>
             )}
 
@@ -648,6 +804,7 @@ function SurfaceControl({ id, cfg, update, dspSchemas, hw, onMessage, minimal })
                             mapKey={key}
                             mapping={m}
                             isMidi={isMidi}
+                            isPad={isPad}
                             keyLabel={keyLabel}
                             dspSchemas={dspSchemas}
                             hw={hw}
@@ -720,6 +877,20 @@ function SurfaceControl({ id, cfg, update, dspSchemas, hw, onMessage, minimal })
                 >
                     Import
                 </Button>
+                {isPad && (
+                    <Button
+                        size="sm"
+                        variant="ghost"
+                        title="Put back the mapping the controller arrives with"
+                        onClick={() => {
+                            update((prev) => ({ ...prev, gamepad: { ...prev.gamepad, mappings: GAMEPAD_DEFAULT_MAPPINGS } }));
+                            setLimit(PAGE);
+                            onMessage('Restored the default controller mapping', 'info');
+                        }}
+                    >
+                        Defaults
+                    </Button>
+                )}
                 <Button
                     size="sm"
                     variant="danger"
@@ -734,6 +905,106 @@ function SurfaceControl({ id, cfg, update, dspSchemas, hw, onMessage, minimal })
                     Clear
                 </Button>
             </div>
+        </>
+    );
+}
+
+// The pad's setup mode: press a control, pick what it does, press the next.
+// Learn asks for the function first, which suits a knob box whose controls
+// have no names; a pad's controls do have names, and somebody holding one
+// thinks "what should this button do", not "which button should do this".
+// The function list writes as soon as it changes, so there is no save step to
+// forget, and nothing reaches the receiver while the mode is on.
+function PadAssign({ assignKey, mapping, keyLabel, groups, onPick, onDone }) {
+    return (
+        <div className="rc-learn rc-learn--assign">
+            <div className="rc-learn__msg">
+                {assignKey
+                    ? <>
+                        <strong>{keyLabel(assignKey)}</strong>
+                        {isAxisKey(assignKey) && ' — a function that goes up and down takes both directions'}
+                    </>
+                    : 'Press or move any control on the controller'}
+            </div>
+            {assignKey && (
+                <select
+                    className="select"
+                    value={mapping ? mapping.function : ''}
+                    onChange={(e) => onPick(e.target.value)}
+                    aria-label={`What ${keyLabel(assignKey)} does`}
+                >
+                    <option value="">Nothing</option>
+                    {groups.map(([name, items]) => (
+                        <optgroup key={name} label={name}>
+                            {items.map((f) => <option key={f.id} value={f.id}>{f.label}</option>)}
+                        </optgroup>
+                    ))}
+                </select>
+            )}
+            <Button variant="primary" size="sm" onClick={onDone}>Done</Button>
+        </div>
+    );
+}
+
+// Rumble, all of it optional. Shown before connecting so it can be set up
+// first; the note about a missing motor only once there is a pad to ask.
+function PadRumble({ rumble, connected, canRumble, onTest, onChange }) {
+    return (
+        <>
+            <div className="divider" />
+            <span className="section-label">Rumble</span>
+            <Switch
+                checked={rumble.enabled}
+                onChange={(v) => onChange({ enabled: v })}
+                label="Rumble for feedback"
+                title="Short pulses from the controller's motors — only for the things ticked below"
+            />
+            {rumble.enabled && (
+                <>
+                    <Field label="Strength" inline>
+                        <Segmented
+                            options={RUMBLE_STRENGTHS}
+                            value={RUMBLE_STRENGTHS.reduce((best, o) => (
+                                Math.abs(o.value - rumble.strength) < Math.abs(best.value - rumble.strength) ? o : best
+                            )).value}
+                            onChange={(v) => onChange({ strength: v })}
+                            size="sm"
+                        />
+                    </Field>
+                    <Switch
+                        checked={rumble.toggles}
+                        onChange={(v) => onChange({ toggles: v })}
+                        label="On/off: one pulse for on, two for off"
+                        title="For toggles — mute, tuning lock, squelch and the like — so you know which way it went without looking"
+                    />
+                    <Switch
+                        checked={rumble.refused}
+                        onChange={(v) => onChange({ refused: v })}
+                        label="Buzz when a control is ignored"
+                        title="The control is mapped to something it cannot drive"
+                    />
+                    <Switch
+                        checked={rumble.confirm}
+                        onChange={(v) => onChange({ confirm: v })}
+                        label="Pulse on connect and when a control is mapped"
+                    />
+                    <Switch
+                        checked={rumble.ticks}
+                        onChange={(v) => onChange({ ticks: v })}
+                        label="Tick at each step while tuning"
+                        title="Like the detents of a dial: a tick each time the frequency crosses a multiple of the step size"
+                    />
+                    <div className="chip-row">
+                        <Button size="sm" variant="ghost" disabled={!connected} onClick={onTest}>Test</Button>
+                    </div>
+                    {connected && !canRumble && (
+                        <div className="note note--tight">
+                            The browser cannot reach a motor on this controller. Chrome and Edge drive
+                            Xbox and PlayStation pads; others vary.
+                        </div>
+                    )}
+                </>
+            )}
         </>
     );
 }
@@ -785,7 +1056,7 @@ function RC28Leds({ leds, onChange }) {
 // "Passb…". So the function goes on top with the full width to itself and wraps
 // rather than truncates, and the address drops to a second line with the chips
 // it qualifies. Nothing is hidden at any width the panel can be dragged to.
-function MappingRow({ mapKey, mapping, isMidi, keyLabel, dspSchemas, hw, onRelative, onDelete }) {
+function MappingRow({ mapKey, mapping, isMidi, isPad, keyLabel, dspSchemas, hw, onRelative, onDelete }) {
     const retired = RETIRED[mapping.function];
     const label = functionLabel(mapping.function, dspSchemas, hw);
     // A mapping that came from a receiver with a rotator, an antenna past
@@ -795,6 +1066,10 @@ function MappingRow({ mapKey, mapping, isMidi, keyLabel, dspSchemas, hw, onRelat
     // A CC could be either a fader or an endless encoder and one message cannot
     // tell them apart, so the row carries the switch rather than guessing.
     const isCC = isMidi && isCCKey(mapKey);
+    // A stick half is a rate or a single press depending on its function —
+    // see controls/gamepad.js — and that is worth seeing on the row.
+    const stick = isPad && isAxisKey(mapKey);
+    const rate = stick && functionIsContinuous(mapping.function, dspSchemas, hw);
 
     return (
         <div className="rc-map__row">
@@ -815,6 +1090,14 @@ function MappingRow({ mapKey, mapping, isMidi, keyLabel, dspSchemas, hw, onRelat
                     >
                         {mapping.relative ? 'encoder' : 'fader'}
                     </button>
+                )}
+                {stick && (
+                    <span
+                        className="tag tag--ghost"
+                        title={rate ? 'Sends faster the further it is pushed' : 'One press each time it is pushed over'}
+                    >
+                        {rate ? 'rate' : 'press'}
+                    </span>
                 )}
                 {mapping.mode === 'rate_limit' && mapping.throttleMs > 0 && (
                     <span className="tag tag--ghost" title="Rate limited">{mapping.throttleMs}ms</span>
@@ -839,15 +1122,21 @@ function MappingRow({ mapKey, mapping, isMidi, keyLabel, dspSchemas, hw, onRelat
 // what keeps a "map both" pair adjacent, since a button's press and release
 // share a number and differ only in type. Anything unparseable sorts last
 // rather than throwing the order out.
-function sortRows(entries, isMidi, keyLabel) {
-    if (!isMidi) {
+function sortRows(entries, id, keyLabel) {
+    if (id === 'gamepad') return sortByRank(entries, gamepadKeyRank);
+    if (id !== 'midi') {
         return entries.slice().sort((a, b) => keyLabel(a[0]).localeCompare(keyLabel(b[0])));
     }
-    const rank = (key) => {
+    return sortByRank(entries, (key) => {
         const [type, channel, number] = String(key).split(':').map(Number);
         if (![type, channel, number].every(Number.isFinite)) return null;
         return [channel, isCCKey(key) ? 0 : 1, number, type];
-    };
+    });
+}
+
+// A pad sorts sticks first, then buttons in the order the pad numbers them —
+// which puts the D-pad's four together and each release beside its press.
+function sortByRank(entries, rank) {
     return entries.slice().sort((a, b) => {
         const ra = rank(a[0]);
         const rb = rank(b[0]);

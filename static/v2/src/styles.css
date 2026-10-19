@@ -8442,6 +8442,15 @@ a.btn { text-decoration: none; }
 }
 .rc-learn__msg { flex: 1; font-size: calc(11.5px * var(--ui-scale)); color: var(--accent); }
 
+/* A pad's press-to-assign: the control's name, then the function list on a
+   line of its own — at docked width the two never fit side by side. */
+.rc-learn--assign { flex-wrap: wrap; }
+.rc-learn--assign .rc-learn__msg { flex-basis: 100%; }
+.rc-learn--assign .select { flex: 1; min-width: 0; }
+
+.pad-steps { margin: 0; padding-left: 18px; }
+.pad-steps li + li { margin-top: 2px; }
+
 /* One card per mapping, two lines: the function it runs, then the control that
    runs it and the chips describing that control.
 

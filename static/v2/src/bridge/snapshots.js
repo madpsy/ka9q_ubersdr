@@ -365,7 +365,7 @@ export function radioControlSnapshot(src) {
 export function sdrControlSnapshot(src) {
     const cfg = src.controlSettings || {};
     const surface = cfg.surface || 'off';
-    const external = !['off', 'flexcontrol', 'rc28', 'midi'].includes(surface);
+    const external = !['off', 'flexcontrol', 'rc28', 'midi', 'gamepad'].includes(surface);
     return {
         surface,
         // Whether this page is asking that surface to run. The built-in ones

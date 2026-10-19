@@ -98,7 +98,7 @@ export const SECTIONS = [
     },
     {
         id: 'controls',
-        label: 'MIDI, FlexControl & RC-28',
+        label: 'MIDI, FlexControl, RC-28 & gamepad',
         // v1's keys travel with v2's: the mapping record is the same in both
         // frontends, and someone restoring a backup wants their knobs working
         // in whichever one they open.

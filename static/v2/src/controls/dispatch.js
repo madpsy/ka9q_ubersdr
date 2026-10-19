@@ -30,6 +30,10 @@ let learn = null;
 // schemas and the hardware list. Installed by ControlWatch; without it the
 // warning is still emitted, just less specific.
 let describe = null;
+// Told of every mapped control that ran, and whether it was taken. For
+// feedback on the surface itself — a game controller's rumble — which has to
+// know what a press did, not just that there was one.
+const resultListeners = new Set();
 
 function dispatcherFor(id) {
     let d = dispatchers.get(id);
@@ -43,6 +47,9 @@ function dispatcherFor(id) {
         // when the panel is open and nothing is lost when it is not.
         const warned = new Set();
         d.onResult = (key, fn, ok) => {
+            for (const l of Array.from(resultListeners)) {
+                try { l(id, key, fn, ok); } catch (e) { console.error('[ubersdr] control result listener threw', e); }
+            }
             if (ok) { warned.delete(key); return; }
             if (warned.has(key)) return;
             warned.add(key);
@@ -62,6 +69,12 @@ export function setControlContext(ctx) {
 
 export function setSurfaceMappings(id, mappings) {
     dispatcherFor(id).setMappings(mappings);
+}
+
+/** `fn(surfaceId, key, functionId, ok)` after each mapped control. Returns an unsubscribe. */
+export function onControlResult(fn) {
+    resultListeners.add(fn);
+    return () => resultListeners.delete(fn);
 }
 
 export function setControlDescriber(fn) {
@@ -100,10 +113,10 @@ export function watchSurface(id) {
 // panel and reminded it to. Here it runs from ControlWatch, which means a page
 // loaded with everything collapsed still comes up with the dial live.
 //
-// Only ever to hardware already granted: a MIDI input whose name was remembered
-// from a Connect, a serial port already picked out of the OS dialog. Neither can
-// be claimed without that first deliberate act, which is what makes doing it
-// unattended reasonable. Nothing here reports a failure — no dial plugged in is
+// Only ever to hardware already granted: a MIDI input or a game controller whose
+// name was remembered from a Connect, a serial port already picked out of the
+// OS dialog. None of them can be claimed without that first deliberate act,
+// which is what makes doing it unattended reasonable. Nothing here reports a failure — no dial plugged in is
 // the normal state of a receiver nobody is sitting at, not an error worth a line
 // in the log.
 
@@ -121,7 +134,9 @@ export function tryAutoConnect(id, conf) {
     if (!id || id === 'off' || !conf || !conf.autoConnect || manualOff.has(id)) return;
     const surface = getSurface(id);
     if (!surface || surface.connected) return;
-    if (id !== 'midi') { surface.autoConnect(); return; }
+    // MIDI and a game controller list their devices and are matched to the one
+    // remembered by name; the serial and HID ones reopen what was granted.
+    if (id !== 'midi' && id !== 'gamepad') { surface.autoConnect(); return; }
     if (!conf.device) return;
     const match = surface.devices().find((d) => d.name === conf.device);
     if (match) surface.connect(match.id);
@@ -134,4 +149,5 @@ export function _resetDispatch() {
     context = null;
     learn = null;
     describe = null;
+    resultListeners.clear();
 }

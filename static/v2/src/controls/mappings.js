@@ -16,6 +16,7 @@ import { isEncoderFunction, runFunction } from './functions.js';
 import { isCCKey } from './webmidi.js';
 import { RC28_DEFAULT_MAPPINGS, RC28_DIAL_MAPPING, RC28_OLD_DIAL_MAPPING } from './rc28.js';
 import { DEFAULT_LEDS, ledSettings } from './rc28leds.js';
+import { GAMEPAD_DEFAULT_MAPPINGS, rumbleSettings } from './gamepad.js';
 import { saveFile } from '../lib/saveFile.js';
 
 const STORE_KEY = 'ubersdr.v2.radioControl';
@@ -33,7 +34,7 @@ const V1_KEYS = {
 // Not the whole list any more. A surface may also be registered from outside
 // (controls/surfaces.js), and its id goes in the same setting, so anything
 // validating this must ask the registry rather than only this array.
-export const SURFACES = ['off', 'flexcontrol', 'rc28', 'midi'];
+export const SURFACES = ['off', 'flexcontrol', 'rc28', 'midi', 'gamepad'];
 
 /**
  * Whether a chosen surface is one this page opens itself, and so has mappings,
@@ -47,7 +48,7 @@ export const SURFACES = ['off', 'flexcontrol', 'rc28', 'midi'];
  * should ask this first.
  */
 export function isMappedSurface(id) {
-    return id === 'flexcontrol' || id === 'rc28' || id === 'midi';
+    return id === 'flexcontrol' || id === 'rc28' || id === 'midi' || id === 'gamepad';
 }
 
 export const DEFAULT_STATE = {
@@ -65,6 +66,10 @@ export const DEFAULT_STATE = {
     // `leds` is what its four lamps show — see controls/rc28leds.js.
     rc28: { mappings: RC28_DEFAULT_MAPPINGS, autoConnect: false, leds: DEFAULT_LEDS },
     midi: { mappings: {}, device: '', autoConnect: false },
+    // Arrives mapped, like the RC-28: a pad's layout is known in advance.
+    // `device` is the pad's id string, remembered the way MIDI remembers a
+    // name. `rumble` is the feedback — see controls/gamepad.js.
+    gamepad: { mappings: GAMEPAD_DEFAULT_MAPPINGS, device: '', autoConnect: false, rumble: rumbleSettings() },
     radiosync: {
         rig: '', baud: 0, direction: 'sdr-to-radio', muteOnTx: true,
         syncFrequency: true, syncMode: true,
@@ -162,6 +167,7 @@ export function loadState() {
         flexcontrol: { ...DEFAULT_STATE.flexcontrol, ...((saved && saved.flexcontrol) || {}) },
         rc28: { ...DEFAULT_STATE.rc28, ...((saved && saved.rc28) || {}) },
         midi: { ...DEFAULT_STATE.midi, ...((saved && saved.midi) || {}) },
+        gamepad: { ...DEFAULT_STATE.gamepad, ...((saved && saved.gamepad) || {}) },
         radiosync: { ...DEFAULT_STATE.radiosync, ...((saved && saved.radiosync) || {}) },
         surfaces: { ...((saved && saved.surfaces) || {}) },
     };
@@ -185,6 +191,7 @@ export function loadState() {
     // a `leds` without it, and the spread above would take that whole.
     state.rc28.leds = ledSettings(state.rc28.leds);
     state.rc28.mappings = upgradeRc28Dial(state.rc28.mappings);
+    state.gamepad.rumble = rumbleSettings(state.gamepad.rumble);
     const out = saved ? state : adoptV1(state);
     out.midi.mappings = normaliseMidiMappings(out.midi.mappings);
     return out;

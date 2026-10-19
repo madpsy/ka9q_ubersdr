@@ -2,7 +2,7 @@
 //
 // A collapsed section is unmounted, so anything a panel owns stops when it is
 // collapsed. That is right for a mapping table and wrong for the mapping itself:
-// a MIDI surface, a FlexControl or an RC-28 is enabled once and then expected to keep
+// a MIDI surface, a FlexControl, an RC-28 or a game controller is enabled once and then expected to keep
 // working, and the badge above the spectrum says it is — so it has to be true.
 // The same for a synced radio, whose live view of the receiver was owned by the
 // Radio control panel and froze when that panel closed.
@@ -16,9 +16,10 @@ import { useEffect, useRef } from '../react.js';
 import { useRadio } from '../radio/RadioContext.jsx';
 import { useControlContext, useControlState, useHardware } from '../controls/panel.jsx';
 import {
-    setControlContext, setControlDescriber, setSurfaceMappings, tryAutoConnect, watchSurface,
+    onControlResult, setControlContext, setControlDescriber, setSurfaceMappings, tryAutoConnect, watchSurface,
 } from '../controls/dispatch.js';
-import { functionLabel } from '../controls/functions.js';
+import { functionIsContinuous, functionLabel, functionLit } from '../controls/functions.js';
+import { rumbleSettings } from '../controls/gamepad.js';
 import { isCCKey } from '../controls/webmidi.js';
 import { flexAvailable } from '../controls/flexcontrol.js';
 import { rc28Available } from '../controls/rc28.js';
@@ -26,7 +27,7 @@ import { indicatorLeds, ledSettings } from '../controls/rc28leds.js';
 import { squelchEnabled } from '../radio/constants.js';
 import { getRecorder } from '../lib/recorder.js';
 import {
-    getRc28, getSurface, getSync, releaseSurfaceExcept, surfaceKeyLabel,
+    getGamepad, getRc28, getSurface, getSync, releaseSurfaceExcept, surfaceKeyLabel,
 } from '../controls/sources.js';
 
 // How often the RC-28's lamps are brought up to date. Polled rather than
@@ -35,6 +36,14 @@ import {
 // recorder — and a quarter-second late is not late for a lamp. The driver only
 // writes when the byte changes, so a poll that finds nothing new costs nothing.
 const LED_POLL_MS = 250;
+
+// How long after a control on the pad the receiver's own state is read back
+// for a toggle's rumble. Long enough for the render the action caused.
+const LIT_READ_MS = 80;
+// Tuning ticks only follow the pad: a retune from the spectrum or a bookmark
+// within this long of the last stick movement is still the stick's.
+const TICK_WINDOW_MS = 400;
+const REFUSED_GAP_MS = 1500;
 
 export default function ControlWatch() {
     const radio = useRadio();
@@ -75,6 +84,19 @@ export default function ControlWatch() {
         getSurface('midi').setRelative(rel);
     }, [surface, cfg]);
 
+    // Which of a game controller's controls send a stream rather than single
+    // presses — a stick half as a rate, a held button repeating. Decided by
+    // the function each is mapped to, which only the catalogue knows; the
+    // driver needs it before the first frame. See controls/gamepad.js.
+    useEffect(() => {
+        if (surface !== 'gamepad') return;
+        const cont = {};
+        for (const [key, m] of Object.entries(cfg.gamepad?.mappings || {})) {
+            if (m && functionIsContinuous(m.function, dspSchemas, hw)) cont[key] = true;
+        }
+        getGamepad().setContinuous(cont);
+    }, [surface, cfg, dspSchemas, hw]);
+
     // Named here because naming a function needs the DSP schemas and the
     // hardware list, and dispatch.js has neither.
     useEffect(() => {
@@ -113,10 +135,11 @@ export default function ControlWatch() {
         const attempt = () => tryAutoConnect(surface, confRef.current);
         attempt();
 
-        if (surface === 'midi') {
+        if (surface === 'midi' || surface === 'gamepad') {
             const s = getSurface(surface);
-            // MIDI has no device list until access is granted, and the list
-            // changing is also the hotplug signal.
+            // MIDI has no device list until access is granted, and a pad none
+            // until a button on it is pressed; either list changing is also
+            // the hotplug signal.
             s.open().then((granted) => { if (granted) attempt(); }).catch(() => {});
             return s.on('devices', attempt);
         }
@@ -166,6 +189,68 @@ export default function ControlWatch() {
         const t = setInterval(update, LED_POLL_MS);
         return () => clearInterval(t);
     }, [surface, ctx]);
+
+    // A game controller's rumble: what a press did, felt rather than seen.
+    // Every part of it is the operator's to turn off, and none of it runs for
+    // a pad without a motor — rumble() is quiet then. Settings through a ref,
+    // because the subscriptions are made once per surface.
+    const rumbleRef = useRef(null);
+    rumbleRef.current = rumbleSettings(cfg.gamepad && cfg.gamepad.rumble);
+    const padInputAt = useRef(0);
+    useEffect(() => {
+        if (surface !== 'gamepad') return undefined;
+        const pad = getGamepad();
+        const buzz = (name) => {
+            const r = rumbleRef.current;
+            if (r.enabled) pad.rumble(name, r.strength);
+        };
+        const timers = new Set();
+        let refusedAt = 0;
+        const offs = [
+            pad.on('state', (st) => { if (st.connected && rumbleRef.current.confirm) buzz('confirm'); }),
+            pad.on('input', () => { padInputAt.current = Date.now(); }),
+            onControlResult((id, key, fn, ok) => {
+                if (id !== 'gamepad') return;
+                const r = rumbleRef.current;
+                if (!ok) {
+                    // A stick refused sends a refusal per frame; one buzz says it.
+                    const now = Date.now();
+                    if (r.refused && now - refusedAt > REFUSED_GAP_MS) { refusedAt = now; buzz('refused'); }
+                    return;
+                }
+                if (!r.toggles) return;
+                // Whether a toggle is now on can only be read once the render
+                // its action caused has happened.
+                const t = setTimeout(() => {
+                    timers.delete(t);
+                    const lit = functionLit(fn, ctx);
+                    if (lit === true) buzz('on');
+                    else if (lit === false) buzz('off');
+                }, LIT_READ_MS);
+                timers.add(t);
+            }),
+        ];
+        return () => {
+            offs.forEach((off) => off());
+            timers.forEach((t) => clearTimeout(t));
+        };
+    }, [surface, ctx]);
+
+    // The detent feel: a tick each time the pad tunes across a multiple of the
+    // step size. Off by default — a matter of taste.
+    const frequency = radio.tuning.frequency;
+    const tickedAt = useRef(null);
+    useEffect(() => {
+        const step = cfg.stepHz > 0 ? cfg.stepHz : 1000;
+        const cell = Math.floor(frequency / step);
+        const prev = tickedAt.current;
+        tickedAt.current = cell;
+        if (surface !== 'gamepad' || prev === null || prev === cell) return;
+        const r = rumbleRef.current;
+        if (!r.enabled || !r.ticks) return;
+        if (Date.now() - padInputAt.current > TICK_WINDOW_MS) return;
+        getGamepad().rumble('tick', r.strength);
+    }, [surface, frequency, cfg.stepHz]);
 
     // What the sync does with a link, as opposed to how it opens one. These were
     // the Radio control panel's, which meant a page loaded with that panel

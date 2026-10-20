@@ -3560,6 +3560,159 @@ func (ah *AdminHandler) HandleBannedUserAgents(w http.ResponseWriter, r *http.Re
 	}
 }
 
+// HandleUserAgents lists the distinct User-Agents seen in the session history
+// over the last ?days= days (default 7, 0 = all history) plus those currently
+// connected, each flagged with the ban that already covers it, so the admin can
+// pick agents to ban in bulk.
+func (ah *AdminHandler) HandleUserAgents(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	days := 7
+	if s := r.URL.Query().Get("days"); s != "" {
+		d, err := strconv.Atoi(s)
+		if err != nil || d < 0 {
+			http.Error(w, "Invalid days parameter", http.StatusBadRequest)
+			return
+		}
+		days = d
+	}
+
+	type agentEntry struct {
+		UserAgentUsage
+		Active    bool   `json:"active"`
+		Self      bool   `json:"self"`
+		BannedBy  string `json:"banned_by,omitempty"` // the pattern that already blocks it
+		HasRecord bool   `json:"has_record"`          // false = only seen live, not yet in history
+	}
+
+	var since time.Time
+	if days > 0 {
+		since = time.Now().Add(-time.Duration(days) * 24 * time.Hour)
+	}
+
+	var usage []UserAgentUsage
+	historyAvailable := ah.dbManager != nil && ah.dbManager.ReadDB() != nil
+	if historyAvailable {
+		var err error
+		usage, err = LoadUserAgentUsage(ah.dbManager.ReadDB(), since)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("Failed to load User-Agents: %v", err), http.StatusInternalServerError)
+			return
+		}
+	}
+
+	agents := make([]agentEntry, 0, len(usage))
+	index := make(map[string]int, len(usage))
+	for _, u := range usage {
+		index[u.UserAgent] = len(agents)
+		agents = append(agents, agentEntry{UserAgentUsage: u, HasRecord: true})
+	}
+	for _, ua := range ah.sessions.GetActiveUserAgents() {
+		if i, ok := index[ua]; ok {
+			agents[i].Active = true
+			continue
+		}
+		index[ua] = len(agents)
+		agents = append(agents, agentEntry{UserAgentUsage: UserAgentUsage{UserAgent: ua}, Active: true})
+	}
+
+	self := r.Header.Get("User-Agent")
+	for i := range agents {
+		agents[i].Self = agents[i].UserAgent == self
+		if ban := ah.ipBanManager.MatchingUserAgentBan(agents[i].UserAgent); ban != nil {
+			agents[i].BannedBy = ban.Pattern
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(map[string]interface{}{
+		"user_agents":       agents,
+		"count":             len(agents),
+		"days":              days,
+		"history_available": historyAvailable,
+	}); err != nil {
+		log.Printf("Error encoding User-Agents: %v", err)
+	}
+}
+
+// HandleBanUserAgentsBulk bans a list of exact User-Agent strings in one go.
+// Each becomes its own anchored, case-sensitive pattern so it blocks that agent
+// and nothing else, and can be unbanned individually later. The admin's own
+// User-Agent is refused unless "force" is set, like HandleBanUserAgent.
+func (ah *AdminHandler) HandleBanUserAgentsBulk(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		UserAgents []string `json:"user_agents"`
+		Reason     string   `json:"reason"`
+		Force      bool     `json:"force"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	self := r.Header.Get("User-Agent")
+	seen := make(map[string]bool, len(req.UserAgents))
+	patterns := make([]string, 0, len(req.UserAgents))
+	for _, ua := range req.UserAgents {
+		if ua == "" || seen[ua] {
+			continue
+		}
+		seen[ua] = true
+		if ua == self && !req.Force {
+			http.Error(w, "The selection includes your own browser's User-Agent — banning it would block you from using the receiver. Re-submit with force to ban it anyway.", http.StatusBadRequest)
+			return
+		}
+		patterns = append(patterns, ExactUserAgentPattern(ua))
+	}
+
+	if len(patterns) == 0 {
+		http.Error(w, "No User-Agents given", http.StatusBadRequest)
+		return
+	}
+
+	if req.Reason == "" {
+		req.Reason = "Banned by admin"
+	}
+
+	if err := ah.ipBanManager.BanUserAgentPatterns(patterns, req.Reason, "admin", true); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to ban User-Agents: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// Kick matching sessions (bypassed users are skipped)
+	kicked := 0
+	for _, pattern := range patterns {
+		re, err := CompileUserAgentPattern(pattern, true)
+		if err != nil {
+			continue
+		}
+		n, err := ah.sessions.KickUsersByUserAgent(re)
+		if err != nil {
+			log.Printf("Error kicking sessions for banned User-Agent %q: %v", pattern, err)
+		}
+		kicked += n
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(map[string]interface{}{
+		"status":           "success",
+		"message":          fmt.Sprintf("Banned %d User-Agent(s) and kicked %d session(s)", len(patterns), kicked),
+		"banned":           len(patterns),
+		"sessions_removed": kicked,
+	}); err != nil {
+		log.Printf("Error encoding bulk ban User-Agent response: %v", err)
+	}
+}
+
 // HandleTestUserAgentRegex validates a User-Agent pattern and tests it against
 // sample strings, the User-Agents of currently connected sessions, and the
 // caller's own browser.

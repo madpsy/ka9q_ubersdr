@@ -600,3 +600,53 @@ func SessionBucketsFromRecords(records []SessionHistoryRecord, startTime, endTim
 	}
 	return out
 }
+
+// UserAgentUsage summarises one distinct User-Agent seen in the session history.
+type UserAgentUsage struct {
+	UserAgent string    `json:"user_agent"`
+	Browser   string    `json:"browser"`
+	OS        string    `json:"os"`
+	Sessions  int       `json:"sessions"`
+	IPs       int       `json:"ips"`
+	LastSeen  time.Time `json:"last_seen"`
+}
+
+// LoadUserAgentUsage returns every distinct non-empty User-Agent belonging to a
+// session active at or after since (zero = all history), busiest first.
+func LoadUserAgentUsage(db *sql.DB, since time.Time) ([]UserAgentUsage, error) {
+	if db == nil {
+		return nil, fmt.Errorf("session database not configured")
+	}
+
+	var sinceUnix int64
+	if !since.IsZero() {
+		sinceUnix = since.Unix()
+	}
+
+	rows, err := db.Query(`
+		SELECT user_agent.ua, user_agent.browser, user_agent.os,
+		       COUNT(*), COUNT(DISTINCT session.client_ip),
+		       MAX(COALESCE(session.ended_at, session.last_seen))
+		FROM session
+		JOIN user_agent ON user_agent.id = session.user_agent_id
+		WHERE user_agent.ua != ''
+		  AND (session.ended_at IS NULL OR session.ended_at >= ?)
+		GROUP BY user_agent.id
+		ORDER BY COUNT(*) DESC, user_agent.ua`, sinceUnix)
+	if err != nil {
+		return nil, fmt.Errorf("user agent query: %w", err)
+	}
+	defer rows.Close()
+
+	var usage []UserAgentUsage
+	for rows.Next() {
+		var u UserAgentUsage
+		var lastSeen int64
+		if err := rows.Scan(&u.UserAgent, &u.Browser, &u.OS, &u.Sessions, &u.IPs, &lastSeen); err != nil {
+			return nil, fmt.Errorf("user agent scan: %w", err)
+		}
+		u.LastSeen = time.Unix(lastSeen, 0).UTC()
+		usage = append(usage, u)
+	}
+	return usage, rows.Err()
+}

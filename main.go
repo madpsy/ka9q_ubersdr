@@ -3241,6 +3241,8 @@ func main() {
 	http.HandleFunc("/admin/unban-user-agent", adminHandler.AuthMiddleware(adminHandler.HandleUnbanUserAgent))
 	http.HandleFunc("/admin/banned-user-agents", adminHandler.AuthMiddleware(adminHandler.HandleBannedUserAgents))
 	http.HandleFunc("/admin/test-user-agent-regex", adminHandler.AuthMiddleware(adminHandler.HandleTestUserAgentRegex))
+	http.HandleFunc("/admin/user-agents", adminHandler.AuthMiddleware(adminHandler.HandleUserAgents))
+	http.HandleFunc("/admin/ban-user-agents", adminHandler.AuthMiddleware(adminHandler.HandleBanUserAgentsBulk))
 	http.HandleFunc("/admin/ban-country", adminHandler.AuthMiddleware(adminHandler.HandleBanCountry))
 	http.HandleFunc("/admin/unban-country", adminHandler.AuthMiddleware(adminHandler.HandleUnbanCountry))
 	http.HandleFunc("/admin/banned-countries", adminHandler.AuthMiddleware(adminHandler.HandleBannedCountries))

@@ -1148,6 +1148,7 @@
                                 <div style="display: flex; gap: 8px; align-items: flex-start; padding-top: 22px;">
                                     <button class="btn btn-secondary" onclick="openUARegexTester()">Test</button>
                                     <button class="btn btn-danger" onclick="addUserAgentBan()">Ban</button>
+                                    <button class="btn btn-secondary" onclick="openUAPicker()" title="List the User-Agents seen in session history and ban several at once">Browse Seen…</button>
                                 </div>
                             </div>
                             <label style="display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: #666; margin-top: 10px;">
@@ -4405,6 +4406,51 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
                         <button class="btn btn-secondary" onclick="closeUARegexTester()">Close</button>
                     </div>
                 </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- User-Agent picker: lists the distinct User-Agents seen in session
+         history (and connected now) so several can be banned in one go. Each
+         selected agent is banned as its own exact, anchored pattern. -->
+    <div id="uaPickerModal" class="modal">
+        <div class="modal-content" style="max-width: 1200px; height: 85vh;">
+            <div class="modal-header">
+                <h2>🕵️ Seen User-Agents</h2>
+                <button class="modal-close" onclick="closeUAPicker()">&times;</button>
+            </div>
+            <div style="padding: 15px 20px; border-bottom: 1px solid #dee2e6; display: flex; flex-wrap: wrap; gap: 10px; align-items: center;">
+                <select id="uaPickerDays" onchange="loadUAPicker()" style="padding: 6px; border: 1px solid #ddd; border-radius: 5px;">
+                    <option value="1">Last 24 hours</option>
+                    <option value="7" selected>Last 7 days</option>
+                    <option value="30">Last 30 days</option>
+                    <option value="0">All history</option>
+                </select>
+                <input type="text" id="uaPickerFilter" placeholder="Filter (substring, case-insensitive)" oninput="renderUAPicker()"
+                       style="flex: 1; min-width: 200px; padding: 6px; border: 1px solid #ddd; border-radius: 5px; font-family: monospace;">
+                <label style="display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: #666;">
+                    <input type="checkbox" id="uaPickerHideBanned" checked onchange="renderUAPicker()" style="width: auto; margin: 0;">
+                    Hide already banned
+                </label>
+                <label style="display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: #666;">
+                    <input type="checkbox" id="uaPickerLiveOnly" onchange="renderUAPicker()" style="width: auto; margin: 0;">
+                    Connected now only
+                </label>
+            </div>
+            <div style="padding: 8px 20px; font-size: 13px; color: #666; display: flex; flex-wrap: wrap; gap: 12px; align-items: center;">
+                <span id="uaPickerSummary"></span>
+                <a href="#" onclick="uaPickerSelectVisible(true); return false;">Select all shown</a>
+                <a href="#" onclick="uaPickerSelectVisible(false); return false;">Clear shown</a>
+                <a href="#" onclick="uaPickerClearAll(); return false;">Clear all</a>
+                <span style="color: #999;">Shift-click to select a range</span>
+            </div>
+            <div id="uaPickerList" style="flex: 1; overflow-y: auto; padding: 0 20px; min-height: 0;"></div>
+            <div style="padding: 15px 20px; border-top: 1px solid #dee2e6; display: flex; flex-wrap: wrap; gap: 10px; align-items: center;">
+                <strong id="uaPickerSelectedCount">0 selected</strong>
+                <input type="text" id="uaPickerReason" placeholder="Reason (e.g. Scraper, abuse)"
+                       style="flex: 1; min-width: 200px; padding: 6px; border: 1px solid #ddd; border-radius: 5px;">
+                <button class="btn btn-danger" id="uaPickerBanBtn" onclick="banSelectedUserAgents()" disabled>Ban Selected</button>
+                <button class="btn btn-secondary" onclick="closeUAPicker()">Close</button>
             </div>
         </div>
     </div>
@@ -10202,6 +10248,216 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
             document.getElementById('newBanUACaseSensitive').checked = caseSensitive;
             closeUARegexTester();
             await submitUserAgentBan(pattern, reason, caseSensitive, false);
+        }
+
+        // ── User-Agent picker modal (bulk ban) ────────────────────────────────
+        let uaPickerAgents = [];          // as returned by /admin/user-agents
+        let uaPickerSelected = new Set(); // selected User-Agent strings
+        let uaPickerVisible = [];         // agents currently rendered, in order
+        let uaPickerLastClicked = -1;     // index into uaPickerVisible, for shift-click
+
+        function openUAPicker() {
+            uaPickerSelected = new Set();
+            uaPickerLastClicked = -1;
+            document.getElementById('uaPickerFilter').value = '';
+            document.getElementById('uaPickerReason').value = '';
+            document.getElementById('uaPickerModal').style.display = 'block';
+            loadUAPicker();
+        }
+
+        function closeUAPicker() {
+            document.getElementById('uaPickerModal').style.display = 'none';
+        }
+
+        async function loadUAPicker() {
+            const listEl = document.getElementById('uaPickerList');
+            listEl.innerHTML = '<div class="loading"><div class="spinner"></div><p>Loading User-Agents...</p></div>';
+            const days = document.getElementById('uaPickerDays').value;
+            try {
+                const response = await authenticatedFetch(`/admin/user-agents?days=${encodeURIComponent(days)}`);
+                if (!response) return;
+                if (!response.ok) throw new Error((await response.text()) || 'Failed to load User-Agents');
+                const data = await response.json();
+                uaPickerAgents = data.user_agents || [];
+                if (!data.history_available) {
+                    showAlert('Session history is not available — only connected User-Agents are listed', 'warning');
+                }
+                // Drop selections that are no longer in the list
+                const present = new Set(uaPickerAgents.map(a => a.user_agent));
+                uaPickerSelected = new Set([...uaPickerSelected].filter(ua => present.has(ua)));
+                renderUAPicker();
+            } catch (error) {
+                listEl.innerHTML = `<p style="color: #dc3545; padding: 20px;">Error: ${escapeHtml(error.message)}</p>`;
+            }
+        }
+
+        function renderUAPicker() {
+            const filter = document.getElementById('uaPickerFilter').value.trim().toLowerCase();
+            const hideBanned = document.getElementById('uaPickerHideBanned').checked;
+            const liveOnly = document.getElementById('uaPickerLiveOnly').checked;
+            const listEl = document.getElementById('uaPickerList');
+
+            uaPickerVisible = uaPickerAgents.filter(a =>
+                (!hideBanned || !a.banned_by) &&
+                (!liveOnly || a.active) &&
+                (!filter || a.user_agent.toLowerCase().includes(filter) ||
+                    `${a.browser} ${a.os}`.toLowerCase().includes(filter)));
+            uaPickerLastClicked = -1;
+
+            const bannedCount = uaPickerAgents.filter(a => a.banned_by).length;
+            document.getElementById('uaPickerSummary').textContent =
+                `Showing ${uaPickerVisible.length} of ${uaPickerAgents.length} User-Agent(s)` +
+                (bannedCount ? ` · ${bannedCount} already banned` : '');
+
+            if (uaPickerVisible.length === 0) {
+                listEl.innerHTML = '<p style="text-align: center; color: #666; padding: 20px;"><em>No User-Agents match</em></p>';
+                updateUAPickerSelection();
+                return;
+            }
+
+            const th = 'padding: 8px; text-align: left; position: sticky; top: 0; background: #f8f9fa; border-bottom: 2px solid #dee2e6; z-index: 1;';
+            const table = document.createElement('table');
+            table.style.cssText = 'width: 100%; border-collapse: collapse; font-size: 12px;';
+            table.innerHTML = `
+                <thead>
+                    <tr>
+                        <th style="${th} width: 30px;"><input type="checkbox" id="uaPickerAllBox" style="width: auto; margin: 0;"></th>
+                        <th style="${th}">User-Agent</th>
+                        <th style="${th} width: 140px;">Browser / OS</th>
+                        <th style="${th} width: 70px; text-align: right;">Sessions</th>
+                        <th style="${th} width: 50px; text-align: right;">IPs</th>
+                        <th style="${th} width: 150px;">Last Seen</th>
+                    </tr>
+                </thead>
+                <tbody></tbody>
+            `;
+            const tbody = table.querySelector('tbody');
+
+            uaPickerVisible.forEach((a, i) => {
+                const row = document.createElement('tr');
+                row.style.borderBottom = '1px solid #dee2e6';
+                row.style.cursor = 'pointer';
+                row.dataset.index = i;
+
+                const badges = [];
+                if (a.active) badges.push('<span style="background: #28a745; color: white; padding: 1px 6px; border-radius: 3px; font-size: 10px;">LIVE</span>');
+                if (a.self) badges.push('<span style="background: #ffc107; color: #333; padding: 1px 6px; border-radius: 3px; font-size: 10px;">YOU</span>');
+                if (a.banned_by) badges.push(`<span style="background: #dc3545; color: white; padding: 1px 6px; border-radius: 3px; font-size: 10px;" title="Blocked by ${escapeHtml(a.banned_by)}">BANNED</span>`);
+
+                const lastSeen = a.has_record ? new Date(a.last_seen).toLocaleString() : 'Now';
+                const browserOS = [a.browser, a.os].filter(Boolean).join(' / ') || '-';
+
+                row.innerHTML = `
+                    <td style="padding: 8px;"><input type="checkbox" style="width: auto; margin: 0; pointer-events: none;"></td>
+                    <td style="padding: 8px; font-family: monospace; word-break: break-all;">${badges.length ? badges.join(' ') + ' ' : ''}${escapeHtml(a.user_agent)}</td>
+                    <td style="padding: 8px; color: #666;">${escapeHtml(browserOS)}</td>
+                    <td style="padding: 8px; text-align: right;">${a.has_record ? a.sessions : '-'}</td>
+                    <td style="padding: 8px; text-align: right;">${a.has_record ? a.ips : '-'}</td>
+                    <td style="padding: 8px; color: #666; white-space: nowrap;">${lastSeen}</td>
+                `;
+                row.addEventListener('click', (e) => uaPickerRowClick(i, e.shiftKey));
+                tbody.appendChild(row);
+            });
+
+            listEl.innerHTML = '';
+            listEl.appendChild(table);
+            document.getElementById('uaPickerAllBox').addEventListener('change', (e) => uaPickerSelectVisible(e.target.checked));
+            updateUAPickerSelection();
+        }
+
+        // Click toggles one row; shift-click applies that row's new state to the
+        // whole range from the previously clicked row.
+        function uaPickerRowClick(index, shift) {
+            const ua = uaPickerVisible[index].user_agent;
+            const select = !uaPickerSelected.has(ua);
+            if (shift && uaPickerLastClicked >= 0) {
+                const [from, to] = [Math.min(uaPickerLastClicked, index), Math.max(uaPickerLastClicked, index)];
+                for (let i = from; i <= to; i++) {
+                    if (select) uaPickerSelected.add(uaPickerVisible[i].user_agent);
+                    else uaPickerSelected.delete(uaPickerVisible[i].user_agent);
+                }
+                window.getSelection()?.removeAllRanges(); // shift-click selects text otherwise
+            } else if (select) {
+                uaPickerSelected.add(ua);
+            } else {
+                uaPickerSelected.delete(ua);
+            }
+            uaPickerLastClicked = index;
+            updateUAPickerSelection();
+        }
+
+        function uaPickerSelectVisible(select) {
+            uaPickerVisible.forEach(a => {
+                if (select) uaPickerSelected.add(a.user_agent);
+                else uaPickerSelected.delete(a.user_agent);
+            });
+            updateUAPickerSelection();
+        }
+
+        function uaPickerClearAll() {
+            uaPickerSelected.clear();
+            updateUAPickerSelection();
+        }
+
+        function updateUAPickerSelection() {
+            document.querySelectorAll('#uaPickerList tbody tr').forEach(row => {
+                const selected = uaPickerSelected.has(uaPickerVisible[row.dataset.index].user_agent);
+                row.querySelector('input').checked = selected;
+                row.style.background = selected ? '#fff5f5' : '';
+            });
+
+            const allBox = document.getElementById('uaPickerAllBox');
+            if (allBox) {
+                const shownSelected = uaPickerVisible.filter(a => uaPickerSelected.has(a.user_agent)).length;
+                allBox.checked = shownSelected > 0 && shownSelected === uaPickerVisible.length;
+                allBox.indeterminate = shownSelected > 0 && shownSelected < uaPickerVisible.length;
+            }
+
+            const n = uaPickerSelected.size;
+            document.getElementById('uaPickerSelectedCount').textContent = `${n} selected`;
+            const btn = document.getElementById('uaPickerBanBtn');
+            btn.disabled = n === 0;
+            btn.textContent = n > 0 ? `Ban ${n} Selected` : 'Ban Selected';
+        }
+
+        async function banSelectedUserAgents(force = false) {
+            const userAgents = [...uaPickerSelected];
+            if (userAgents.length === 0) return;
+            const reason = document.getElementById('uaPickerReason').value.trim() || 'Banned by admin';
+
+            if (!force) {
+                const preview = userAgents.slice(0, 10).join('\n') +
+                    (userAgents.length > 10 ? `\n… and ${userAgents.length - 10} more` : '');
+                if (!confirm(`Ban ${userAgents.length} User-Agent(s) (exact match each):\n\n${preview}\n\nThis will block matching clients and kick any active (non-bypassed) sessions.`)) {
+                    return;
+                }
+            }
+
+            try {
+                const response = await fetch('/admin/ban-user-agents', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ user_agents: userAgents, reason, force })
+                });
+
+                if (!response.ok) {
+                    const errorText = (await response.text()).trim();
+                    if (!force && errorText.includes('your own browser')) {
+                        if (confirm(`${errorText}\n\nBan it anyway?`)) {
+                            await banSelectedUserAgents(true);
+                        }
+                        return;
+                    }
+                    throw new Error(errorText || 'Failed to ban User-Agents');
+                }
+
+                const result = await response.json();
+                showAlert(result.message || 'User-Agents have been banned', 'success');
+                uaPickerSelected.clear();
+                await Promise.all([loadBannedUserAgents(), loadUAPicker()]);
+            } catch (error) {
+                showAlert('Error banning User-Agents: ' + error.message, 'error');
+            }
         }
 
         // Pre-fill the ASN ban form from the IP lookup card or GeoIP modal
@@ -31021,6 +31277,9 @@ const tooltipLine2 = timeStr;
             }
             if (event.target === document.getElementById('uaRegexTesterModal')) {
                 closeUARegexTester();
+            }
+            if (event.target === document.getElementById('uaPickerModal')) {
+                closeUAPicker();
             }
         });
 

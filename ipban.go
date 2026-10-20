@@ -455,6 +455,55 @@ func (ibm *IPBanManager) BanUserAgentWithDuration(pattern, reason, bannedBy stri
 	return nil
 }
 
+// BanUserAgentPatterns permanently bans several User-Agent patterns at once.
+// Every pattern is validated before any is stored, and the ban file is written
+// once, so a bulk ban of hundreds of agents is a single save rather than one
+// per pattern.
+func (ibm *IPBanManager) BanUserAgentPatterns(patterns []string, reason, bannedBy string, caseSensitive bool) error {
+	entries := make([]*bannedUAEntry, 0, len(patterns))
+	now := time.Now()
+	for _, pattern := range patterns {
+		re, err := ValidateUserAgentPattern(pattern, caseSensitive)
+		if err != nil {
+			return fmt.Errorf("pattern %q: %w", pattern, err)
+		}
+		entries = append(entries, &bannedUAEntry{
+			BannedUserAgent: BannedUserAgent{
+				Pattern:       pattern,
+				CaseSensitive: caseSensitive,
+				Reason:        reason,
+				BannedAt:      now,
+				BannedBy:      bannedBy,
+			},
+			re: re,
+		})
+	}
+	if len(entries) == 0 {
+		return nil
+	}
+
+	ibm.mu.Lock()
+	for _, e := range entries {
+		ibm.uaEntries[e.Pattern] = e
+	}
+	ibm.mu.Unlock()
+
+	log.Printf("User-Agents permanently banned: %d pattern(s) (reason: %s, by: %s)", len(entries), reason, bannedBy)
+
+	if err := ibm.saveToFile(); err != nil {
+		log.Printf("Error saving banned User-Agents to file: %v", err)
+		return err
+	}
+
+	return nil
+}
+
+// ExactUserAgentPattern returns the case-sensitive pattern that matches exactly
+// one User-Agent string and nothing else.
+func ExactUserAgentPattern(userAgent string) string {
+	return "^" + regexp.QuoteMeta(userAgent) + "$"
+}
+
 // UnbanUserAgent removes a User-Agent pattern from the ban list
 func (ibm *IPBanManager) UnbanUserAgent(pattern string) error {
 	ibm.mu.Lock()

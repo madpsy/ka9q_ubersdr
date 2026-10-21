@@ -689,6 +689,8 @@ type InstanceReportingConfig struct {
 	CreateDomain               bool                   `yaml:"create_domain"`                // Request automatic DNS subdomain creation
 	GenerateTLS                bool                   `yaml:"generate_tls"`                 // Generate TLS certificate with Caddy (default: false)
 	RedirectToHTTPS            bool                   `yaml:"redirect_to_https"`            // Redirect HTTP to HTTPS when TLS is enabled (default: true)
+	ExtraHosts                 []string               `yaml:"extra_hosts"`                  // Additional hostnames Caddy serves and certifies alongside instance.host (default: none)
+	ExtraProxies               []string               `yaml:"extra_proxies"`                // "host upstream" lines: hostnames Caddy serves and proxies elsewhere, e.g. "kiwisdr.example.com 192.168.1.50:8073" (default: none)
 	Hostname                   string                 `yaml:"hostname"`                     // Central server hostname
 	Port                       int                    `yaml:"port"`                         // Central server port
 	ReportIntervalSec          int                    `yaml:"report_interval_sec"`          // Seconds between reports

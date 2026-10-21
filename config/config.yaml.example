@@ -1764,6 +1764,62 @@ instance_reporting:
   # Default: false
   generate_tls: false
 
+  # Extra hostnames served by Caddy alongside instance.host (default: none)
+  # Each name gets its own Let's Encrypt certificate and is proxied to UberSDR
+  # exactly like instance.host, so this receiver answers on every name listed
+  # here (including /ads.txt from server.custom_ads_txt). Use it when the same
+  # receiver must also answer on a bare domain or a second name, for example
+  # for Google AdSense verification on the root domain.
+  # Requirements:
+  #   - generate_tls must be true and HTTPS configured as above
+  #   - each name needs its own DNS A (or AAAA) record pointing at this
+  #     server's public IP, the same address instance.host resolves to. A
+  #     CNAME to instance.host also works. Caddy does not create DNS records.
+  #   - ports 80 and 443 must be forwarded to this server for every name:
+  #     Let's Encrypt verifies each name by connecting back to it on port 80,
+  #     so a name that points elsewhere gets no certificate (see the caddy
+  #     container logs) while the other names still work
+  #   - bare hostnames only, e.g. "example.com" (one per line in the admin UI)
+  # Entries that are not a plain hostname (an IP address, a wildcard, a
+  # scheme, port or path, non-ASCII characters) are logged and skipped at
+  # startup; the remaining names are still served.
+  # With redirect_to_https, HTTP requests for these names redirect to the
+  # same name over HTTPS, not to instance.host.
+  # Hostnames that should go somewhere other than UberSDR belong in
+  # extra_proxies below, not here.
+  # Example:
+  # extra_hosts:
+  #   - "example.com"
+  #   - "www.example.com"
+  extra_hosts: []
+
+  # Extra hostnames Caddy serves and proxies to something other than UberSDR
+  # (default: none), for example a KiwiSDR on another machine. One entry per
+  # line in the form "hostname upstream", separated by a space. Caddy obtains
+  # and renews a Let's Encrypt certificate for the hostname in HTTPS mode, and
+  # in HTTP-only mode serves it over plain HTTP. WebSockets pass straight
+  # through, so KiwiSDR and WebSDR clients work unchanged.
+  # Requirements:
+  #   - hostname: a bare hostname with its own DNS record pointing at this
+  #     server's public IP (the same as instance.host) and ports 80 and 443
+  #     forwarded here, exactly as for extra_hosts. It must not also appear
+  #     in instance.host, extra_hosts or another proxy.
+  #   - upstream: host:port of the device or service to send it to, optionally
+  #     prefixed with http:// or https://. Inside the Caddy container
+  #     "localhost" is the container itself, so use the device's LAN IP, or a
+  #     service name on the Docker network (e.g. "ubersdr:8901" for the WebSDR
+  #     emulation listener).
+  # Entries that are not "hostname upstream" or have an invalid hostname or
+  # upstream are logged and skipped at startup; the remaining entries still
+  # work.
+  # With redirect_to_https, HTTP requests for these names redirect to the
+  # same name over HTTPS.
+  # Example:
+  # extra_proxies:
+  #   - "kiwisdr.example.com 192.168.1.50:8073"
+  #   - "websdr.example.com ubersdr:8901"
+  extra_proxies: []
+
   # Redirect HTTP to HTTPS (default: true)
   # When true and TLS is enabled, HTTP requests on port 80 will be redirected to HTTPS
   # When false, both HTTP and HTTPS will serve content directly (no redirect)

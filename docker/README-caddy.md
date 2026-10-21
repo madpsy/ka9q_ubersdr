@@ -85,6 +85,82 @@ sudo ufw allow 443/tcp
 sudo ufw allow 8080/tcp  # Optional
 ```
 
+## Extra Hostnames and Custom Site Blocks
+
+The generated Caddyfile only ever has a site block for `instance.host`. Caddy
+refuses TLS connections for any name it has no site block for, so a second
+name pointed at the same server (a bare domain, a `www`, a KiwiSDR on another
+box) fails with "no certificates found" until it is given one. There are two
+ways to add names, both in `config.yaml`, and both survive updates and restarts.
+
+### Extra names for UberSDR itself: `extra_hosts`
+
+If the extra name should simply be another way to reach this receiver, list it
+in `config.yaml`. Each name is added to the same HTTPS site block as
+`instance.host`, gets its own Let's Encrypt certificate, and is proxied to
+UberSDR identically:
+
+```yaml
+instance_reporting:
+  generate_tls: true
+  instance:
+    host: "ubersdr.example.com"
+    tls: true
+  extra_hosts:
+    - "example.com"
+    - "www.example.com"
+```
+
+Each name needs its own DNS A (or AAAA) record pointing at this server's
+public IP, the same address `instance.host` resolves to; a CNAME to
+`instance.host` also works. Caddy does not create DNS records. Ports 80 and
+443 must be forwarded to this server for every name, because Let's Encrypt
+verifies each name by connecting back to it on port 80. A name that points
+elsewhere simply gets no certificate (the caddy container logs say why) and
+the other names keep working.
+
+Entries must be bare hostnames; IP addresses, wildcards, schemes, ports and
+paths are logged and ignored so a typo cannot take Caddy down. With
+`redirect_to_https: true`, HTTP requests for an extra name redirect to the
+same name over HTTPS (not to `instance.host`).
+
+This is the fix for Google AdSense on a root domain: set `server.custom_ads_txt`
+in `config.yaml`, add the root domain and `www` to `extra_hosts`, and
+`https://example.com/ads.txt` is served by UberSDR with a 200.
+
+### Other services: `extra_proxies`
+
+For a name that should go somewhere other than UberSDR, such as a KiwiSDR on
+another machine, add a proxy entry. Caddy obtains and renews a certificate
+for the name like any other site, so it needs the same DNS record and port
+forwarding as an `extra_hosts` entry above. WebSockets pass straight through,
+so the Kiwi's audio and waterfall work unchanged.
+
+```yaml
+instance_reporting:
+  extra_proxies:
+    - "kiwisdr.example.com 192.168.1.50:8073"
+```
+
+Each entry is one line, `hostname upstream`, separated by a space, so the
+list edits in the admin Config tab the same way `extra_hosts` does.
+
+Notes:
+
+- The upstream is `host:port`, optionally prefixed with `http://` or `https://`.
+  `localhost` inside the container is the container itself, so use the LAN IP
+  of the other device, or a service name on the same Docker network (for
+  example `ubersdr:8901` for the WebSDR emulation listener).
+- A hostname may appear once across `instance.host`, `extra_hosts` and
+  `extra_proxies`.
+- Entries that are not `hostname upstream`, or have an invalid hostname or
+  upstream, are logged and skipped at startup; the rest still work.
+- In HTTP-only mode the name is served over plain HTTP; with
+  `redirect_to_https: true` it redirects to itself over HTTPS.
+- The generated Caddyfile is rewritten on every UberSDR start. Do not edit
+  `/etc/caddy-shared/Caddyfile` directly; everything is driven from
+  `config.yaml`.
+
 ## Usage
 
 Caddy is now included in both main Docker Compose files:

@@ -7,7 +7,7 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/websocket v1.5.3
 	github.com/hashicorp/go-version v1.8.0
-	github.com/klauspost/compress v1.17.9
+	github.com/klauspost/compress v1.18.7
 	github.com/mark3labs/mcp-go v0.43.2
 	github.com/oschwald/geoip2-golang v1.13.0
 	github.com/paulmach/orb v0.13.0

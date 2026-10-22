@@ -1111,6 +1111,9 @@ export default function SpectrumView() {
     tuneRef.current = tuning;
     const dispRef = useRef(display);
     dispRef.current = display;
+    // The draw loop's paint, for the frame handler to call while the tab is
+    // hidden — see the data effect. Null while the loop is not running.
+    const paintRef = useRef(null);
 
     const [hoverInfo, setHoverInfo] = useState(null);
     const hovering = hoverInfo != null;
@@ -1367,6 +1370,15 @@ export default function SpectrumView() {
             // taken per frame, so it changes where the history does. Live
             // frames clear it.
             g.ghost = replay ? getTimeshift().replayTuning : null;
+            // A hidden tab gets no animation frames, so the loop below never
+            // runs and every frame but the last is lost — the waterfall comes
+            // back with a gap the length of the absence. With "Update in
+            // background" on, the frame itself is the clock instead: socket
+            // messages are not throttled the way timers are. paint() applies
+            // the waterfall speed cap exactly as the loop would.
+            if (document.hidden && dispRef.current.backgroundWaterfall && paintRef.current) {
+                paintRef.current(performance.now());
+            }
         });
         return off;
     }, [spectrumConn]);
@@ -1584,6 +1596,7 @@ export default function SpectrumView() {
         // about to redraw. Before the arming, so that a burst of restarts —
         // which is what a splitter drag is — still paints on each of them.
         paint(performance.now());
+        paintRef.current = paint;
 
         // Straight in uncapped; through the measurement burst when capped, and
         // only when the interval is not already known. The burst draws nothing
@@ -1596,6 +1609,7 @@ export default function SpectrumView() {
         if (capMs > 0 && !vsyncMs) raf = requestAnimationFrame(calibrate);
         else arm();
         return () => {
+            paintRef.current = null;
             cancelAnimationFrame(raf);
             clearTimeout(timer);
             // A held `fill: forwards` animation outlives the loop that started

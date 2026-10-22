@@ -769,7 +769,11 @@ band is part guesswork, and which part matters.
   otherwise the socket returns a second later and the whole thing is a reconnect
   loop behind a hidden tab. Rules in `lib/visibilityPause.js` with the clock
   injected, since every case here happens off screen and none of them is worth
-  finding five seconds at a time.
+  finding five seconds at a time. The Display panel's **Update in background**
+  (`backgroundWaterfall`, off by default) opts out: the socket stays open, and
+  because a hidden tab gets no animation frames, SpectrumView's frame handler
+  calls the draw loop's `paint` itself while `document.hidden`, so rows are
+  still committed at the waterfall speed and the history is there on return.
 * **The frequency scale doubles as the splitter.** It sits exactly on the join
   between the two panes, so grabbing it is grabbing the edge, and it is already
   the one strip that is neither spectrum nor waterfall. Drag it to re-share the

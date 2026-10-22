@@ -496,6 +496,14 @@ export default function DisplayPanel() {
                             title="Slide each row into view instead of letting it step in. Most noticeable on a wide span, where the receiver sends fewer frames a second. Costs no extra work per frame, but the picture is very slightly softer while it is moving"
                         />
                     </Field>
+
+                    <Field label="Update in background" inline>
+                        <Switch
+                            checked={!!d.backgroundWaterfall}
+                            onChange={(v) => d.set({ backgroundWaterfall: v })}
+                            title="Keep the waterfall running while this tab is hidden, so switching back shows what happened in the meantime. Off, the spectrum connection closes five seconds after the tab is hidden and reopens when you return"
+                        />
+                    </Field>
                 </>
             )}
 

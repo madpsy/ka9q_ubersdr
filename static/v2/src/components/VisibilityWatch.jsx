@@ -27,17 +27,22 @@
 
 import { useEffect } from '../react.js';
 import { useRadio } from '../radio/RadioContext.jsx';
+import { useDisplay } from '../display/DisplayContext.jsx';
 import { HIDDEN_SUSPEND_MS } from '../radio/idle.js';
 import { visibilityPause } from '../lib/visibilityPause.js';
 import { resumeSpectrum, suspendSpectrum } from '../lib/spectrumPause.js';
 
 export default function VisibilityWatch() {
     const { running, spectrumConn } = useRadio();
+    // The Display panel's "Update in background": the listener has asked for
+    // the waterfall to keep running while hidden, so there is nothing to close.
+    // SpectrumView paints the rows itself while the tab is hidden.
+    const keep = !!useDisplay().backgroundWaterfall;
 
     useEffect(() => {
         // Nothing to suspend, and nothing to bring back: the sockets belong to a
         // session that is not up.
-        if (!running || !spectrumConn) return undefined;
+        if (!running || !spectrumConn || keep) return undefined;
 
         const pause = visibilityPause({
             delayMs: HIDDEN_SUSPEND_MS,
@@ -67,7 +72,7 @@ export default function VisibilityWatch() {
             // receiver stops, and the socket is meant to be closed then;
             // reopening it would hold the slot powerOff just gave up.
         };
-    }, [running, spectrumConn]);
+    }, [running, spectrumConn, keep]);
 
     return null;
 }

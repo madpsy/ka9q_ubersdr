@@ -48,6 +48,13 @@ export const DEFAULTS = {
     // row — but it is a switch because the browser resamples the picture while
     // it is in flight, which is very slightly soft on a non-HiDPI screen.
     smoothScroll: true,
+    // Keep the waterfall running while the tab is in the background, so coming
+    // back to it shows what happened in the meantime (issue #136). Off, because
+    // the default is to give the spectrum socket up five seconds after the tab
+    // is hidden — see components/VisibilityWatch.jsx — and this is the listener
+    // choosing to spend the server's bandwidth and their own CPU on a picture
+    // nobody is looking at yet.
+    backgroundWaterfall: false,
     // What the waterfall's history does when the view moves under it.
     //
     //   'follow' — the history is shifted with the axis, so a signal stays in

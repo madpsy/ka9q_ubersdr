@@ -29,6 +29,7 @@ import {
     chartPoints, chartSurface, curveThrough, strokeCurve, trimBefore, SPAN_MS,
 } from '../lib/rollingChart.js';
 import useStatsSample from '../lib/useStatsSample.js';
+import { useVfoLimit } from '../radio/useSubReceivers.js';
 import { formatHzPerBin, statsPlace, throughputSplit } from '../lib/spectrumStats.js';
 
 // A little more than the span is kept, because the chart is drawn slightly
@@ -144,8 +145,23 @@ function pctText(v) {
 const NET_SERIES = [
     { key: 'spec', letter: 'S', label: 'Spectrum', colour: '#7fbfff' },
     { key: 'audio', letter: 'A', label: 'Audio', colour: '#ffa657' },
+    // The audio of every VFO listened to beside the main one, summed: stacked on
+    // the main audio because it is more of the same kind of traffic. Named in the
+    // caption and the key only on a receiver that offers extra VFOs at all —
+    // see netSeries.
+    { key: 'vfos', letter: 'V', label: 'Extra VFOs', colour: '#7ee787' },
     { key: 'band', letter: 'B', label: 'Band', colour: '#c9a0ff' },
 ];
+
+/**
+ * The streams the caption and the key name. The extra VFOs' only where the
+ * receiver offers them: elsewhere they could never be anything but nought, and
+ * a "V: 0" in every caption on every receiver is a question nobody needs to ask.
+ * The chart draws all of them regardless — a band with no height costs nothing.
+ */
+export function netSeries(vfoLimit) {
+    return vfoLimit > 1 ? NET_SERIES : NET_SERIES.filter((x) => x.key !== 'vfos');
+}
 
 // One decimal below ten, none above — the corner readout's rule, and for the
 // same reason: "8.3" is a reading and "8" is a rounding, but "23.7" is a digit
@@ -346,7 +362,7 @@ function NetChart({ canvasRef, streams, bits, onSwap }) {
             type="button"
             className="sparkline sparkline--press"
             onClick={onSwap}
-            title={`Every stream this session is running — the main spectrum, the audio, and the band spectrum panel when it is open — stacked, so the height of the whole is what the connection is costing and each band is which part to do something about. ${hint}.`}
+            title={`Every stream this session is running — the main spectrum, the audio, the audio of any extra VFOs you are listening to, and the band spectrum panel when it is open — stacked, so the height of the whole is what the connection is costing and each band is which part to do something about. ${hint}.`}
         >
             <canvas ref={canvasRef} />
             <span className="sparkline__label sparkline__label--bottom">
@@ -364,8 +380,10 @@ function NetChart({ canvasRef, streams, bits, onSwap }) {
                         {' '}
                         <span className="sparkline__unit">{split.unit}</span>
                         {' ('}
-                        {/* All three, always, and a stream that is not running
-                            reads 0 rather than being left out.
+                        {/* Every stream named, always, and one that is not
+                            running reads 0 rather than being left out. (The
+                            extra VFOs' only on a receiver that offers them —
+                            see netSeries — which holds still for a session.)
 
                             The caption is anchored by its right edge, so a part
                             that comes and goes drags every word before it
@@ -391,10 +409,10 @@ function NetChart({ canvasRef, streams, bits, onSwap }) {
     );
 }
 
-function NetLegend() {
+function NetLegend({ series }) {
     return (
         <div className="stats-legend">
-            {NET_SERIES.map((s) => (
+            {series.map((s) => (
                 <span className="stats-legend__item" key={s.key}>
                     <i className="stats-legend__swatch" style={{ background: s.colour }} />
                     {s.label}
@@ -417,6 +435,7 @@ function NetLegend() {
 export default function StatsPanel({ minimal }) {
     const { running, audio } = useRadio();
     const display = useDisplay();
+    const series = netSeries(useVfoLimit());
     const touch = useMediaQuery(TOUCH_QUERY);
     const mobile = useMediaQuery(MOBILE_QUERY);
     const maxFps = resolveMaxFps(display.maxFps, touch);
@@ -486,9 +505,10 @@ export default function StatsPanel({ minimal }) {
         // which is exactly what it looks like.
         const spec = s.bytesIn >= 0 ? s.bytesIn : 0;
         const aud = s.audioBytes >= 0 ? s.audioBytes : 0;
+        const vfos = s.vfoBytes >= 0 ? s.vfoBytes : 0;
         const band = s.bandBytes >= 0 ? s.bandBytes : 0;
         push(netHistory, {
-            t, spec, audio: aud, band, total: spec + aud + band,
+            t, spec, audio: aud, vfos, band, total: spec + aud + vfos + band,
         });
         const app = s.app || {};
         if (app.cpu != null) push(cpuHistory, { t, v: app.cpu });
@@ -510,6 +530,7 @@ export default function StatsPanel({ minimal }) {
             // distinction formatThroughput draws in the corner readout.
             spec: s.bytesIn,
             audio: s.audioBytes,
+            vfos: s.vfoBytes,
             band: s.bandBytes,
             binCount: s.binCount,
             binHz: s.binHz,
@@ -581,11 +602,11 @@ export default function StatsPanel({ minimal }) {
         <div className="stack">
             <NetChart
                 canvasRef={netRef}
-                streams={NET_SERIES.map((x) => ({ ...x, value: facts[x.key] }))}
+                streams={series.map((x) => ({ ...x, value: facts[x.key] }))}
                 bits={!!display.netBits}
                 onSwap={() => display.set({ netBits: !display.netBits })}
             />
-            <NetLegend />
+            <NetLegend series={series} />
 
             {!minimal && (
                 <Chart

@@ -10,9 +10,9 @@
 // same figures the readout words, and it should ask the real formatter rather
 // than hard-code what it currently says.
 import { deep, render, reset, walk, words } from './hookStub.js';
-import StatsPanel from '../src/panels/StatsPanel.jsx';
+import StatsPanel, { netSeries } from '../src/panels/StatsPanel.jsx';
 import * as stats from '../src/lib/spectrumStats.js';
 
 module.exports = {
-    deep, render, reset, walk, words, StatsPanel, stats,
+    deep, render, reset, walk, words, StatsPanel, netSeries, stats,
 };

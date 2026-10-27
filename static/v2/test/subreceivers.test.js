@@ -199,6 +199,25 @@ const t = (name, fn) => queue.push([name, fn]);
 const rigs = [];
 const track = (r) => { rigs.push(r); return r; };
 
+// --- the byte counter the stats read -----------------------------------------
+
+t('bytesIn sums every lane and keeps counting after a VFO stops', () => {
+    const r = track(rig({ listening: ['B', 'C'] }));
+    up(r);
+    assert.strictEqual(r.subs.openCount(), 2);
+    const [b, c] = [r.byVfo(1), r.byVfo(2)];
+    b.bytesIn = 1000;
+    c.bytesIn = 500;
+    assert.strictEqual(r.subs.bytesIn(), 1500);
+    // A VFO stopping closes its socket but keeps its lane — and its counter — so
+    // the total never goes backwards, which a reader taking deltas relies on.
+    r.subs.setListening('C', false);
+    assert.strictEqual(r.subs.openCount(), 1);
+    assert.strictEqual(r.subs.bytesIn(), 1500);
+    b.bytesIn = 1800;
+    assert.strictEqual(r.subs.bytesIn(), 2300);
+});
+
 // --- connecting --------------------------------------------------------------
 
 t('nothing connects until the main socket is open', () => {

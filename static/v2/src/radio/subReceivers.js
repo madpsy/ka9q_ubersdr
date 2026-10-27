@@ -261,6 +261,26 @@ export class SubReceivers extends Emitter {
         return lane ? lane.conn : null;
     }
 
+    /**
+     * Bytes taken off every listening VFO's socket, ever: the sum of the lanes'
+     * counters, for the Stats panel and the corner readout. A lane is made once
+     * per index and never dropped, and its counter is never reset, so the sum
+     * only grows — which is what lets a reader take deltas of it exactly as it
+     * does of the main socket's.
+     */
+    bytesIn() {
+        let n = 0;
+        for (const lane of this.lanes.values()) n += lane.conn.bytesIn || 0;
+        return n;
+    }
+
+    /** How many listening VFOs hold a socket right now. */
+    openCount() {
+        let n = 0;
+        for (const lane of this.lanes.values()) if (lane.conn.ws) n++;
+        return n;
+    }
+
     // ---- what the UI reads --------------------------------------------
 
     /**

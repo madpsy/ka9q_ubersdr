@@ -286,7 +286,10 @@ export function statLines(s = {}) {
         .filter(Boolean).join('  ');
     add('fft', 'FFT', fft, 'Bins across the view, and what one bin is worth. The resolution decides whether two close carriers are one blob or two.');
 
-    add('net', 'NET', formatThroughput(s.bytesIn, s.audioBytes, s.bandBytes), 'Every stream this session is running — the main spectrum, the audio, and the band spectrum panel when it is open — and the total. What the connection is costing, and which part of it to do something about.');
+    // The extra VFOs' audio sits beside the main audio, and is left out of the
+    // line altogether while none is playing — formatThroughput drops an absent
+    // stream rather than showing "+ 0".
+    add('net', 'NET', formatThroughput(s.bytesIn, s.audioBytes, s.vfoBytes, s.bandBytes), 'Every stream this session is running — the main spectrum, the audio, the audio of any extra VFOs you are listening to, and the band spectrum panel when it is open — and the total. What the connection is costing, and which part of it to do something about.');
 
     // Everything about the audio on one line: how far behind live it is, what
     // stream that is, and whether any of it has been lost.

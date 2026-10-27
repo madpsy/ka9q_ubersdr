@@ -122,6 +122,15 @@ t('a third stream joins the line when the band panel is open', () => {
     assert.strictEqual(formatThroughput(41 * 1024, 6.2 * 1024), '41 + 6 = 47 kB/s');
 });
 
+t('the extra VFOs\' audio joins the line beside the main audio, and only while playing', () => {
+    const net = (s) => value(statLines(s), 'net');
+    const base = { bytesIn: 41 * 1024, audioBytes: 6 * 1024 };
+    assert.strictEqual(net({ ...base, vfoBytes: 12 * 1024 }), '41 + 6 + 12 = 59 kB/s');
+    assert.strictEqual(net({ ...base, vfoBytes: 12 * 1024, bandBytes: 3 * 1024 }), '41 + 6 + 12 + 3 = 62 kB/s');
+    // None listening: null, as a closed band panel is, so no "+ 0".
+    assert.strictEqual(net({ ...base, vfoBytes: null }), '41 + 6 = 47 kB/s');
+});
+
 t('the unit follows the total', () => {
     assert.ok(formatThroughput(300, 200).endsWith('B/s'));
     assert.ok(formatThroughput(300 * 1024, 20 * 1024).endsWith('kB/s'));

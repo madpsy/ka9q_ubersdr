@@ -57,7 +57,7 @@ globalThis.removeEventListener = () => {};
 // touchscreen — and the overlay control asks whether this is a phone.
 globalThis.matchMedia = () => ({ matches: false, addEventListener() {}, removeEventListener() {} });
 
-const { deep, render, reset, walk, StatsPanel, stats } = require('./.build/statspanel.cjs');
+const { deep, render, reset, walk, StatsPanel, netSeries, stats } = require('./.build/statspanel.cjs');
 
 let pass = 0;
 const t = (name, fn) => {
@@ -656,6 +656,22 @@ t('a running receiver does not', () => {
     const { tree } = mount();
     const note = deep(tree).find((n) => n && n.props && String(n.props.className || '').startsWith('note'));
     assert.ok(!note, 'told a running receiver to start itself');
+});
+
+// --- the extra VFOs' stream --------------------------------------------------
+
+t('the extra VFOs are named in the caption and key only where the receiver offers them', () => {
+    const keys = (n) => netSeries(n).map((x) => x.key);
+    assert.deepStrictEqual(keys(1), ['spec', 'audio', 'band']);
+    assert.deepStrictEqual(keys(2), ['spec', 'audio', 'vfos', 'band']);
+    assert.deepStrictEqual(keys(4), keys(2));
+    // Stacked on the main audio: same kind of traffic, so neighbours in the chart.
+    assert.strictEqual(keys(2).indexOf('vfos'), keys(2).indexOf('audio') + 1);
+});
+
+t('a receiver with one VFO draws no Extra VFOs key', () => {
+    const { tree } = mount();
+    assert.ok(!say(tree).includes('Extra VFOs'), 'offered a stream that cannot exist');
 });
 
 console.log(`${pass} ok`);

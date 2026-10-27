@@ -13303,6 +13303,11 @@ a.btn { text-decoration: none; }
     color: var(--text);
     cursor: pointer;
     text-align: left;
+    /* The row, not the column, is what its cells are measured against: with
+       simultaneous VFOs it shares its line with a speaker button (or the gap
+       that lines main up with them), so the column's width says nothing exact
+       about the room the cells actually have. See the narrow-dock rules. */
+    container-type: inline-size;
 }
 .vfos__row:hover { border-color: var(--accent); background: var(--surface-hover); }
 
@@ -13415,6 +13420,11 @@ a.btn { text-decoration: none; }
 .vfos__item { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .vfos__line { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; min-width: 0; }
 .vfos__line > .vfos__row { flex: 1 1 auto; min-width: 0; }
+/* A size container has no content width of its own, so in the compact view —
+   where the outputs share the line and wrap under it when there is no room —
+   the row would be squeezed to nothing instead of the outputs wrapping. This is
+   the letter, the frequency and the narrowest mode, plus the row's padding. */
+.vfos.is-compact .vfos__line > .vfos__row { min-width: 12em; }
 
 /* Heard: a stripe down the left of the row in the VFO's colour (main's is the
    accent), continued down its sound line so the two read as one block. */
@@ -13572,12 +13582,28 @@ a.btn { text-decoration: none; }
    about 249px of column to hold all five, 206px without the band and 159px
    without the filter width too. Each cut is made just before the row would
    otherwise have to clip the frequency — and above them the qualifiers grow into
-   the spare width rather than leaving it at the end of the row. */
-@container (max-width: 252px) {
+   the spare width rather than leaving it at the end of the row.
+   They are asked of the row itself (it is the container — see .vfos__row), so
+   they are those widths less the row's 14px of padding and border: 252 -> 238,
+   210 -> 196. One VFO, the row is the column and nothing changes; several, and
+   the cuts come where the cells really run out rather than 30px too late. */
+@container (max-width: 238px) {
     .vfos__band { display: none; }
 }
-@container (max-width: 210px) {
+@container (max-width: 196px) {
     .vfos__width { display: none; }
+}
+/* MAIN goes before anything else: the row already says it is the main one in
+   the accent, so the word is the cheapest thing on it. About 36px of row — the
+   word at 0.7em and the gap before it — on top of what the cells need, which
+   in the full view is all five (235px of row content) and in the compact one,
+   where the width and band are not drawn, the letter, frequency and mode
+   (about 151px). */
+@container (max-width: 274px) {
+    .vfos:not(.is-compact) .vfos__main { display: none; }
+}
+@container (max-width: 190px) {
+    .vfos.is-compact .vfos__main { display: none; }
 }
 
 /* The scan control: one toggle and a line saying what it will do, or why it

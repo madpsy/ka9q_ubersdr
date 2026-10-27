@@ -29,6 +29,7 @@ import { subscribeListeners } from './listeners.js';
 import { fetchMyIp, peekMyIp } from './myip.js';
 import { perSecond } from './spectrumStats.js';
 import { serverClock } from '../radio/serverClock.js';
+import { getSubReceivers } from '../radio/subReceivers.js';
 
 // How often the host is asked to measure itself, however often we sample.
 const APP_MS = 1000;
@@ -119,10 +120,17 @@ export default function useStatsSample(intervalMs, onSample) {
         prev.current = null;
         const tick = () => {
             const now = performance.now();
+            // Looked up per tick, not held: the engine is made by its watch,
+            // which may mount after this hook does.
+            const subs = getSubReceivers();
             const at = {
                 t: now,
                 bytes: spectrumConn.bytesIn || 0,
                 audio: (audioConn && audioConn.bytesIn) || 0,
+                // Every listening VFO's socket, summed. Kept apart from the main
+                // audio rather than folded into it: it is the part of the bill
+                // that is a choice, and the one to turn off when it is too much.
+                vfos: subs ? subs.bytesIn() : 0,
                 frames: spectrumConn.framesIn || 0,
                 ticks: frameTicks(),
                 v4: audioConn && audioConn.v4Stats ? { ...audioConn.v4Stats } : null,
@@ -152,6 +160,9 @@ export default function useStatsSample(intervalMs, onSample) {
                 framesIn: perSecond(at.frames - was.frames, ms),
                 bytesIn: perSecond(at.bytes - was.bytes, ms),
                 audioBytes: perSecond(at.audio - was.audio, ms),
+                // Null rather than zero while no extra VFO holds a socket, as a
+                // closed band panel is: an absent stream, not a stalled one.
+                vfoBytes: subs && subs.openCount() > 0 ? perSecond(at.vfos - was.vfos, ms) : null,
                 // The lossless path's counters over this interval, as deltas
                 // rather than rates: what anybody wants of them is a ratio or a
                 // share, which only means something summed over several

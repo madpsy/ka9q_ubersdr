@@ -156,6 +156,8 @@ export class AudioPlayer extends Emitter {
         this.recognitionWanted = false;
         this.duck = null;           // output gate, for decoders that play their own audio
         this.ducked = false;
+        this.txGate = null;         // speakers-only gate for a transmitting rig
+        this.txSilenced = false;
 
         // Listeners on the decoded audio, ahead of every gain stage — see
         // _schedule. A Set because more than one thing may want it, and each is
@@ -279,6 +281,17 @@ export class AudioPlayer extends Emitter {
         this.ducked = !!ducked;
         if (!this.duck || !this.ctx) return;
         this.duck.gain.setTargetAtTime(this.ducked ? 0 : 1, this.ctx.currentTime, 0.015);
+    }
+
+    // Silences the speakers while the rig transmits, without touching the
+    // user's mute — which sits upstream of the recorder tap, so muting for TX
+    // writes silence into a recording. Its own node rather than the duck: the
+    // duck is a single flag that decoders clear when they stop, and one of
+    // them stopping mid-over would put the receiver back in your headphones.
+    setTxSilenced(on) {
+        this.txSilenced = !!on;
+        if (!this.txGate || !this.ctx) return;
+        this.txGate.gain.setTargetAtTime(this.txSilenced ? 0 : 1, this.ctx.currentTime, 0.015);
     }
 
     setBufferSec(sec) {
@@ -492,6 +505,10 @@ export class AudioPlayer extends Emitter {
         this.duck = this.ctx.createGain();
         this.duck.gain.value = this.ducked ? 0 : 1;
         this.analyser.connect(this.duck);
+        // After the recorder tap, like the duck — see setTxSilenced.
+        this.txGate = this.ctx.createGain();
+        this.txGate.gain.value = this.txSilenced ? 0 : 1;
+        this.duck.connect(this.txGate);
         // The last node before whatever is playing the audio, and the only one
         // the output routing touches — see _applyOutput. It is also the gate
         // that goes to zero when something outside this graph has taken over
@@ -499,7 +516,7 @@ export class AudioPlayer extends Emitter {
         // speakers without disturbing the meters, the scope or the recorder.
         this.local = this.ctx.createGain();
         this.local.gain.value = this.external ? 0 : 1;
-        this.duck.connect(this.local);
+        this.txGate.connect(this.local);
         this.local.connect(this.ctx.destination);
         // Recorder tap, at the point v1 takes it (app.js "Step 10"): after the
         // filter chain and the volume/mute fader, but before the L/R output

@@ -261,7 +261,8 @@ export default function ControlWatch() {
     useEffect(() => {
         sync.setDirection(rs.direction);
         sync.setMuteOnTx(rs.muteOnTx);
-    }, [sync, rs.direction, rs.muteOnTx]);
+        sync.setRecordDuringTx(rs.recordDuringTx);
+    }, [sync, rs.direction, rs.muteOnTx, rs.recordDuringTx]);
 
     useEffect(() => {
         sync.setSyncFields({ frequency: rs.syncFrequency, mode: rs.syncMode });

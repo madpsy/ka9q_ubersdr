@@ -72,6 +72,9 @@ export class RadioSync extends Emitter {
         this._onPortOpen = null;    // armed only while a connect is in flight
         this.direction = 'sdr-to-radio';
         this.muteOnTx = true;
+        // Mute on TX through a speakers-only gate instead of the mute button,
+        // so a recording running across the over keeps the receiver's audio.
+        this.recordDuringTx = false;
         // Which of the two things are actually kept together. Either can be
         // turned off: a rig used as a transmitter for a fixed digital mode wants
         // its frequency followed and its mode left alone, and someone working
@@ -87,7 +90,9 @@ export class RadioSync extends Emitter {
         this.rig = { frequency: 0, mode: '---', tx: false };
         // What we last pushed, so a value we caused is not pushed back.
         this.lastSent = { frequency: 0, mode: '' };
-        this.wasMutedBeforeTx = false;
+        // What _beginTx actually did, so _endTx undoes that and nothing else.
+        this.txMuted = false;       // pressed the user's mute
+        this.txSilenced = false;    // closed the speakers-only gate
 
         this.ctx = null;            // radio facade, set by the panel
     }
@@ -404,6 +409,18 @@ export class RadioSync extends Emitter {
         this.emit('state', this.snapshot());
     }
 
+    // Switched mid-over, the rig is moved across to the other path rather than
+    // left silenced by one it no longer ends.
+    setRecordDuringTx(on) {
+        on = !!on;
+        if (on === this.recordDuringTx) return;
+        const live = this.rig.tx && this.muteOnTx;
+        if (live) this._endTx();
+        this.recordDuringTx = on;
+        if (live) this._beginTx();
+        this.emit('state', this.snapshot());
+    }
+
     // Turning a field back on has to re-assert it, not wait for the next time it
     // happens to change: the two ends have been free to drift apart while it was
     // off, and they may well have drifted to a value that still matches what was
@@ -422,6 +439,7 @@ export class RadioSync extends Emitter {
             busy: this.busy,
             direction: this.direction,
             muteOnTx: this.muteOnTx,
+            recordDuringTx: this.recordDuringTx,
             syncFrequency: this.syncFrequency,
             syncMode: this.syncMode,
             rig: { ...this.rig },
@@ -518,17 +536,35 @@ export class RadioSync extends Emitter {
         else if (!tx && wasTx) this._endTx();
     }
 
-    // Muting on transmit remembers whether the receiver was already muted, so
-    // dropping back to receive restores what the operator had rather than
-    // unmuting something they had deliberately silenced.
+    // Muting on transmit remembers whether it pressed the mute, so dropping
+    // back to receive restores what the operator had rather than unmuting
+    // something they had deliberately silenced. _endTx is called from places
+    // that do not know whether a transmission is under way — a settings
+    // change, a disconnect — so with nothing recorded it must do nothing.
+    //
+    // With recordDuringTx the mute button is left alone altogether: it sits
+    // upstream of the recorder tap, so the gate after the tap does the work.
     _beginTx() {
         if (!this.ctx) return;
-        this.wasMutedBeforeTx = this.ctx.state().audio.muted;
-        if (!this.wasMutedBeforeTx) this.ctx.actions.toggleMute();
+        if (this.recordDuringTx && this.ctx.actions.setTxSilenced) {
+            this.txSilenced = true;
+            this.ctx.actions.setTxSilenced(true);
+            return;
+        }
+        if (this.ctx.state().audio.muted) return;
+        this.txMuted = true;
+        this.ctx.actions.toggleMute();
     }
 
     _endTx() {
-        if (!this.ctx || this.wasMutedBeforeTx) return;
+        if (!this.ctx) return;
+        if (this.txSilenced) {
+            this.txSilenced = false;
+            this.ctx.actions.setTxSilenced(false);
+            return;
+        }
+        if (!this.txMuted) return;
+        this.txMuted = false;
         if (this.ctx.state().audio.muted) this.ctx.actions.toggleMute();
     }
 

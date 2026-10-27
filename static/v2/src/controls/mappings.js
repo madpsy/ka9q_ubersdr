@@ -71,7 +71,7 @@ export const DEFAULT_STATE = {
     // name. `rumble` is the feedback — see controls/gamepad.js.
     gamepad: { mappings: GAMEPAD_DEFAULT_MAPPINGS, device: '', autoConnect: false, rumble: rumbleSettings() },
     radiosync: {
-        rig: '', baud: 0, direction: 'sdr-to-radio', muteOnTx: true,
+        rig: '', baud: 0, direction: 'sdr-to-radio', muteOnTx: true, recordDuringTx: false,
         syncFrequency: true, syncMode: true,
         // Which transport the panel is using. 'serial' is the one the page can
         // host itself (Web Serial + Hamlib); anything else is the id of a

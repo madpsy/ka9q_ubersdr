@@ -301,6 +301,19 @@ export default function RadioControlPanel({ minimal }) {
                     ? 'Silence the receiver while the radio is transmitting'
                     : 'This radio does not report when it is transmitting, so there is nothing to mute on'}
             />
+
+            {/* Serial only. A provider silences the receiver through the
+                bridge's duck, which is already after the recorder tap, so a
+                recording carries on through its overs whatever this says. */}
+            {!provider && (
+                <Switch
+                    checked={!!cfg.radiosync.recordDuringTx && cfg.radiosync.muteOnTx && ptt}
+                    disabled={!ptt || !cfg.radiosync.muteOnTx}
+                    onChange={(v) => setSync({ recordDuringTx: v })}
+                    label="Keep recording while muted"
+                    title="Silence only the speakers while the radio transmits, so a recording goes on capturing the receiver"
+                />
+            )}
         </>
     );
 

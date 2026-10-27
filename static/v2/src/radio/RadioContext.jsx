@@ -211,6 +211,9 @@ export function RadioProvider({ children }) {
         // Transient, and deliberately not restored: a session that ended while
         // the rig was transmitting must not start silent.
         ducked: false,
+        // The same, for mute-on-TX with recording kept running — see
+        // setTxSilenced. Shown exactly like `ducked`.
+        txSilenced: false,
         bufferSec: saved.bufferSec != null ? saved.bufferSec : 0.2,
         // Whether that came from this browser or is just the built-in. The
         // operator's own default only applies to someone who has never chosen,
@@ -1522,6 +1525,14 @@ export function RadioProvider({ children }) {
                 const ducked = !!on;
                 player.setDucked(ducked);
                 setAudio((a) => (a.ducked === ducked ? a : { ...a, ducked }));
+            },
+
+            // Speakers only: the recorder tap is upstream, so a recording
+            // carries on through the transmission. See player.setTxSilenced.
+            setTxSilenced(on) {
+                const txSilenced = !!on;
+                player.setTxSilenced(txSilenced);
+                setAudio((a) => (a.txSilenced === txSilenced ? a : { ...a, txSilenced }));
             },
 
             toggleMute() {

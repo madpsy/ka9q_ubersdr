@@ -227,6 +227,103 @@ t('an unknown rig model is refused before anything is opened', async () => {
     assert.strictEqual(sync.busy, false);
 });
 
+// Mute on TX. The plain path presses the user's mute, which is upstream of the
+// recorder tap; recordDuringTx has to leave that alone and use the speakers-only
+// gate instead, or a recording across the over is a file of silence.
+function txRig() {
+    const calls = [];
+    const audio = { muted: false };
+    const sync = new RadioSync();
+    sync.setContext({
+        actions: {
+            toggleMute: () => { audio.muted = !audio.muted; calls.push(['mute', audio.muted]); },
+            setTxSilenced: (on) => calls.push(['gate', on]),
+        },
+        state: () => ({ tuning: { frequency: 0, mode: 'usb' }, audio }),
+    });
+    return { sync, calls, audio };
+}
+
+t('mute on TX presses the mute and gives it back', () => {
+    const { sync, calls, audio } = txRig();
+    sync._onPtt(true);
+    sync._onPtt(false);
+    assert.deepStrictEqual(calls, [['mute', true], ['mute', false]]);
+    assert.strictEqual(audio.muted, false);
+});
+
+t('recordDuringTx gates the speakers and never touches the mute', () => {
+    const { sync, calls, audio } = txRig();
+    sync.setRecordDuringTx(true);
+    sync._onPtt(true);
+    sync._onPtt(false);
+    assert.deepStrictEqual(calls, [['gate', true], ['gate', false]]);
+    assert.strictEqual(audio.muted, false);
+});
+
+t('switching recordDuringTx mid-over moves the silence to the other path', () => {
+    const { sync, calls, audio } = txRig();
+    sync._onPtt(true);
+    sync.setRecordDuringTx(true);
+    assert.strictEqual(audio.muted, false, 'still muted after moving to the gate');
+    sync.setRecordDuringTx(false);
+    sync._onPtt(false);
+    assert.deepStrictEqual(calls, [
+        ['mute', true], ['mute', false], ['gate', true], ['gate', false], ['mute', true], ['mute', false],
+    ]);
+    assert.strictEqual(audio.muted, false);
+});
+
+t('turning mute on TX off mid-over opens the gate', () => {
+    const { sync, calls } = txRig();
+    sync.setRecordDuringTx(true);
+    sync._onPtt(true);
+    sync.setMuteOnTx(false);
+    assert.deepStrictEqual(calls, [['gate', true], ['gate', false]]);
+});
+
+// The reported fault: ControlWatch hands the saved settings over on every load,
+// and with mute on TX off that ran _endTx with nothing transmitting — which
+// unmuted a receiver the operator had muted themselves.
+t('turning mute on TX off while receiving leaves a manual mute alone', () => {
+    const { sync, calls, audio } = txRig();
+    audio.muted = true;
+    sync.setMuteOnTx(false);
+    sync.setMuteOnTx(false);
+    assert.deepStrictEqual(calls, []);
+    assert.strictEqual(audio.muted, true);
+});
+
+t('a mute pressed during the over is not undone by a repeated settings push', () => {
+    const { sync, audio } = txRig();
+    sync.setMuteOnTx(false);
+    sync._onPtt(true);
+    audio.muted = true;         // the operator mutes by hand mid-over
+    sync.setMuteOnTx(false);
+    sync._onPtt(false);
+    assert.strictEqual(audio.muted, true);
+});
+
+t('a receiver already muted at the start of the over stays muted after it', () => {
+    const { sync, calls, audio } = txRig();
+    audio.muted = true;
+    sync._onPtt(true);
+    sync._onPtt(false);
+    assert.deepStrictEqual(calls, []);
+    assert.strictEqual(audio.muted, true);
+});
+
+t('a disconnect mid-over opens the gate', async () => {
+    const { sync, calls } = txRig();
+    sync.setRecordDuringTx(true);
+    sync._onPtt(true);
+    sync.connected = true;
+    sync.handle = 7;
+    sync.closeRig = () => Promise.resolve(0);
+    await sync.disconnect();
+    assert.deepStrictEqual(calls, [['gate', true], ['gate', false]]);
+});
+
 chain.then(() => {
     if (process.exitCode) console.log('\nradio sync tests FAILED');
     else console.log(`\nall ${pass} radio sync tests passed`);

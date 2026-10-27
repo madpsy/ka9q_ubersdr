@@ -400,6 +400,7 @@ export function StreamFormat() {
 
 export default function AudioPanel({ minimal }) {
     const { audio, actions } = useRadio();
+    const silenced = audio.ducked || audio.txSilenced;
 
     return (
         <div className="stack">
@@ -409,11 +410,11 @@ export default function AudioPanel({ minimal }) {
                 without touching the setting the button shows. Saying so
                 here is what stops "the audio stopped and the volume
                 control looks fine" from reading as a broken receiver. */}
-            <div className={`volume-row${audio.ducked ? ' is-ducked' : ''}`}>
+            <div className={`volume-row${silenced ? ' is-ducked' : ''}`}>
                 <Button
                     variant="ghost"
-                    icon={audio.muted || audio.ducked ? <Icon.Mute /> : <Icon.Volume />}
-                    title={audio.ducked
+                    icon={audio.muted || silenced ? <Icon.Mute /> : <Icon.Volume />}
+                    title={silenced
                         ? 'Silenced while the radio is transmitting — your mute is unchanged'
                         : (audio.muted ? 'Unmute' : 'Mute')}
                     active={audio.muted}
@@ -427,11 +428,11 @@ export default function AudioPanel({ minimal }) {
                     disabled={audio.muted}
                     onChange={(v) => actions.setVolume(v / 100)}
                 />
-                <span className={`volume-row__value${audio.muted || audio.ducked ? ' is-muted' : ''}`}>
+                <span className={`volume-row__value${audio.muted || silenced ? ' is-muted' : ''}`}>
                     {Math.round(audio.volume * 100)}
                 </span>
             </div>
-            {audio.ducked && !audio.muted && (
+            {silenced && !audio.muted && (
                 <div className="note note--tight">
                     Silenced while the radio transmits. Your mute and volume are untouched.
                 </div>

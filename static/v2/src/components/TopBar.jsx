@@ -228,6 +228,7 @@ function SpaceWeather() {
  */
 function VolumeSlider({ slider }) {
     const { audio, actions } = useRadio();
+    const silenced = audio.ducked || audio.txSilenced;
     // Ten a second, the same as the RF meter beside it, and smooth for the same
     // reason it is.
     //
@@ -272,14 +273,14 @@ function VolumeSlider({ slider }) {
         // a moment — a transmitting rig, an extension speaking — and the mute
         // setting is untouched. Without saying so, the audio stops while this
         // control sits there looking perfectly normal.
-        <div className={`topbar__volume${audio.ducked ? ' is-ducked' : ''}`}>
+        <div className={`topbar__volume${silenced ? ' is-ducked' : ''}`}>
             <Button
                 variant="ghost"
                 size="sm"
-                icon={audio.muted || audio.ducked ? <Icon.Mute /> : <Icon.Volume />}
+                icon={audio.muted || silenced ? <Icon.Mute /> : <Icon.Volume />}
                 onClick={toggleMute}
                 active={audio.muted}
-                title={audio.ducked
+                title={silenced
                     ? 'Silenced while the radio is transmitting — your mute is unchanged'
                     : (audio.muted
                         ? `Unmute${!slider && audio.volume < QUIET ? ' — the level is very low, so this turns it up' : ''}`

@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from '../react.js';
 import { useMeters, useRadio } from '../radio/RadioContext.jsx';
+import { useMultiVfoRouting } from '../radio/useSubReceivers.js';
 import { Button, Field, Icon, Readout, Segmented, Slider } from '../components/ui.jsx';
 import LosslessWarning from '../components/LosslessWarning.jsx';
 import {
@@ -230,9 +231,22 @@ export function FormatPicker() {
 // a real choice with a real consequence (it silences the other half of the
 // quadrature pair) rather than a seating preference, which is worth saying in
 // the label rather than leaving to be discovered.
+//
+// While more than one VFO is being heard the sides are not this control's: each
+// VFO, the main receiver included, is placed in the stereo field from the VFOs
+// panel (radio/subReceivers.js). The choice made here is kept and comes back
+// when the others stop, so the control stays but says where the setting went.
 function ChannelPicker() {
     const { audio, actions, tuning } = useRadio();
     const iq = isIQ(tuning.mode);
+    const routed = useMultiVfoRouting();
+    if (routed && !iq) {
+        return (
+            <Field label="Channel" inline>
+                <span className="note note--tight">Set per VFO in the VFOs panel</span>
+            </Field>
+        );
+    }
     return (
         <Field label="Channel" inline>
             <Segmented

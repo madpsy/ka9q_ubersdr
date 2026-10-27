@@ -318,6 +318,20 @@ server:
   # Covers legitimate bursts such as a few rapid page refreshes.
   # Minimum 1.
   session_create_burst: 3
+  # Simultaneous VFOs: how many audio channels one listener may hear at once.
+  # The first is their ordinary audio; each extra one is another radiod channel
+  # and another audio stream on the same user, mixed into their audio and
+  # panned left/right by the browser.
+  # Extra VFOs use the same audio format as the listener's main audio (Opus or
+  # lossless), so for a lossless listener each one is another lossless stream.
+  # Extra VFOs do not count against max_sessions or max_sessions_ip (the user
+  # already holds a slot), but each does use a radiod channel. They are never
+  # IQ, get no server-side noise reduction, and close on their own about 10
+  # seconds after the listener's main audio goes.
+  # Set to 1 to turn the feature off. 0 (or unset) means the default of 2.
+  # Maximum 4; out-of-range values are clamped with a warning.
+  # IPs in timeout_bypass_ips and users with a valid bypass_password always get 4.
+  audio_vfos: 2
 
   # List of IP addresses or CIDR ranges that bypass all session limits
   # Useful for trusted IPs like localhost, admin networks, or specific users

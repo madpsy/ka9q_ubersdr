@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"sync"
 	"time"
@@ -107,6 +108,18 @@ func (rlm *RateLimiterManager) AllowAudio(uuid string) bool {
 	rlm.mu.Unlock()
 
 	return limiters.audio.Allow()
+}
+
+// AllowAudioVFO is AllowAudio for one of a listener's audio VFOs.  VFO 0 is
+// the primary and shares AllowAudio's bucket; each secondary has a bucket of
+// its own, so a listener retuning four VFOs at once is not throttled as though
+// they were hammering one, and a secondary cannot use up the budget the main
+// VFO's tuning needs.
+func (rlm *RateLimiterManager) AllowAudioVFO(uuid string, vfo int) bool {
+	if vfo <= 0 {
+		return rlm.AllowAudio(uuid)
+	}
+	return rlm.AllowAudio(fmt.Sprintf("%s|vfo%d", uuid, vfo))
 }
 
 // AllowSpectrum checks if a spectrum command is allowed for the given UUID

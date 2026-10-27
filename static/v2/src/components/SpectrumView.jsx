@@ -19,7 +19,7 @@ import {
 } from '../lib/format.js';
 import {
     FILTER_WIDTH_STEP, MAX_FREQ, MIN_FREQ, MODE_BY_ID, SQUELCH_MIN,
-    edgesForEdgeDrag, edgesForWidth, stepLabel,
+    edgesForEdgeDrag, edgesForWidth, isIQ, stepLabel,
 } from '../radio/constants.js';
 import { DEFAULTS as DISPLAY_DEFAULTS, resolveMaxFps, resolveZoomAnchor, useDisplay } from '../display/DisplayContext.jsx';
 import { markColors } from '../display/uiConfig.js';
@@ -33,7 +33,15 @@ import {
 import MarkerBar from './MarkerBar.jsx';
 import SpectrumMenu from './SpectrumMenu.jsx';
 import AddBookmark from './AddBookmark.jsx';
-import { VFO_IDS, getVfos, setVfos, storeInto, vfoSnapshot } from '../lib/vfos.js';
+import { VFO_IDS, getVfos, setVfos, storeInto, tuneListening, vfoSnapshot } from '../lib/vfos.js';
+import {
+    alphaOf, easeLevel, listeningPassbands, markBoost, overlayAlpha, passbandAt, passbandsKey,
+    shiftTarget, touchVfo, washAlpha,
+} from '../lib/vfoMarks.js';
+import { vfoRgba } from '../lib/vfoColours.js';
+import { getSubReceivers } from '../radio/subReceivers.js';
+import { getVfoLimit } from '../radio/session.js';
+import { squelchBrightens } from '../radio/squelchState.js';
 import { useRoomFor } from '../lib/useRoomFor.js';
 import {
     RING_BG, RING_BG_RGB, RING_PAD, panTransform, ringHeightFor, ringKeepsHistory,
@@ -1111,6 +1119,14 @@ export default function SpectrumView() {
     tuneRef.current = tuning;
     const dispRef = useRef(display);
     dispRef.current = display;
+    // The VFOs listened to alongside the main receiver, and the squelch they
+    // share with it: read by the draw loop for their passbands and the
+    // squelch brighten, and by the pointer handlers to tune them. The engine
+    // is a page singleton, so this is the same one SubReceiversWatch drives.
+    const subsRef = useRef(null);
+    subsRef.current = getSubReceivers(radio.player);
+    const squelchRef = useRef(radio.squelch);
+    squelchRef.current = radio.squelch;
     // The draw loop's paint, for the frame handler to call while the tab is
     // hidden — see the data effect. Null while the loop is not running.
     const paintRef = useRef(null);
@@ -1561,6 +1577,12 @@ export default function SpectrumView() {
                 g.rowsPending = 0;
             }
 
+            // The listening VFOs and how bright each passband is, once per
+            // painted frame. See listeningNow and easeBrightness.
+            g.listen = listeningNow(subsRef.current, tuneRef.current);
+            easeBrightness(g, d, squelchRef.current, meters.current, tuneRef.current,
+                g.drawAt ? now - g.drawAt : 0);
+
             drawFrame(g, d, {
                 spec: specRef.current,
                 wf: wfRef.current,
@@ -1801,6 +1823,20 @@ export default function SpectrumView() {
         }
         return null;
     }, []);
+
+    // The listening VFO whose passband is under the pointer, or null — which
+    // a drag there retunes. Never over the main receiver's own dial or
+    // passband: those are what a press there has always been about, and a
+    // listening VFO tuned on top of the main one must not take them away.
+    const listenAtX = useCallback((clientX) => {
+        const el = wrapRef.current;
+        const g = gfx.current;
+        if (!el || !g.listen || !g.listen.length) return null;
+        const main = markAtX(clientX);
+        if (main === 'dial' || main === 'filter') return null;
+        const r = el.getBoundingClientRect();
+        return passbandAt(clientX - r.left, g.listen, cfgRef.current, r.width, EDGE_GRAB_PX);
+    }, [markAtX]);
 
     // Which passband edge is under the pointer, if either. The geometry and the
     // reasoning about the zone sizes are in lib/edgeHit.js; this is the part
@@ -2092,6 +2128,7 @@ export default function SpectrumView() {
             if (g.hold) { clearTimeout(g.hold.timer); g.hold = null; }
             g.drag = null;
             g.edge = null;
+            g.subDrag = null;
             // A second finger landing mid-measurement ends the drag rather than
             // abandoning it. Dropping `g.measure` alone would leave `drawing`
             // set in the store with no gesture left to clear it, and a region
@@ -2137,6 +2174,7 @@ export default function SpectrumView() {
             g.measure = beginMeasure(e.clientX);
             g.drag = null;
             g.edge = null;
+            g.subDrag = null;
             return;
         }
 
@@ -2156,16 +2194,30 @@ export default function SpectrumView() {
             // grabbed now is (see TOUCH_EDGE_MIN_PX).
             g.edge = { which: edge, pending: touch, startX: e.clientX };
             g.drag = null;
+            g.subDrag = null;
             return;
         }
 
-        g.drag = {
-            startX: e.clientX,
-            startCenter: cfgRef.current.centerFreq,
-            moved: false,
-            pointerId: e.pointerId,
-            panPace: newPanPace(),
-        };
+        // A listening VFO's passband: a drag there retunes that VFO instead of
+        // panning, and a press that never moves is still a tap that tunes —
+        // the main receiver, as a tap anywhere does. No early return, so a
+        // finger held there still opens the menu.
+        const sub = listenAtX(e.clientX);
+        const subVfo = sub ? (g.listen || []).find((v) => v.id === sub) : null;
+        if (subVfo) {
+            g.subDrag = { id: sub, startX: e.clientX, startHz: subVfo.frequency, moved: false };
+            g.drag = null;
+            touchVfo(sub);
+        } else {
+            g.subDrag = null;
+            g.drag = {
+                startX: e.clientX,
+                startCenter: cfgRef.current.centerFreq,
+                moved: false,
+                pointerId: e.pointerId,
+                panPace: newPanPace(),
+            };
+        }
 
         // A finger held still is a right-click, timed here rather than left to
         // the browser.
@@ -2193,11 +2245,12 @@ export default function SpectrumView() {
                     // from under it and tune on release.
                     now.drag = null;
                     now.edge = null;
+                    now.subDrag = null;
                     openMenu(e.clientX, e.clientY);
                 }, HOLD_MS),
             };
         }
-    }, [freqAtX, edgeAtX, openMenu, beginMeasure, endSelection]);
+    }, [freqAtX, edgeAtX, listenAtX, openMenu, beginMeasure, endSelection]);
 
     /// Nothing is being held any more — moved too far, lifted, or taken away.
     const dropHold = useCallback(() => {
@@ -2292,6 +2345,7 @@ export default function SpectrumView() {
             setHoverInfo({
                 freq: f, db, peakDb, peakFreq,
                 mark: markAtX(e.clientX),
+                listen: listenAtX(e.clientX),
                 x: e.clientX - r.left,
                 y: e.clientY - r.top,
             });
@@ -2360,7 +2414,25 @@ export default function SpectrumView() {
         if (e.pointerType !== 'touch') {
             el.style.cursor = measureRef.current
                 ? measureCursor(e.clientX)
-                : (edgeAtX(e.clientX) ? 'col-resize' : '');
+                : (edgeAtX(e.clientX) ? 'col-resize' : listenAtX(e.clientX) ? 'ew-resize' : '');
+        }
+
+        // A listening VFO's passband being dragged: its frequency follows the
+        // pointer, snapped to the tuning step as a click would be. Through the
+        // engine, which writes the store at once and the disk lazily — a drag
+        // is a stream of retunes.
+        if (g.subDrag) {
+            const sd = g.subDrag;
+            const dx = e.clientX - sd.startX;
+            if (!sd.moved && Math.abs(dx) > 3) {
+                sd.moved = true;
+                haptic('grab', 'spectrum');
+            }
+            if (sd.moved && cfg.span && r.width) {
+                const hz = sd.startHz + dx * (cfg.span / r.width);
+                tuneListeningVfo(subsRef.current, sd.id, snapToStep(hz, dispRef.current.tuneStep));
+            }
+            return;
         }
 
         if (g.drag) {
@@ -2396,14 +2468,26 @@ export default function SpectrumView() {
                 if (paced != null) actions.setSpectrumCenter(paced);
             }
         }
-    }, [actions, freqAtX, edgeAtX, markAtX, dropHold, measureCursor, pushSelection]);
+    }, [actions, freqAtX, edgeAtX, markAtX, listenAtX, dropHold, measureCursor, pushSelection]);
 
     // A release that means "tune here". Snapped to whatever the Receiver panel's
     // step is set to, so clicking the spectrum and pressing +/- agree about where
     // the channels are.
-    const tuneAt = useCallback((clientX, clientY) => {
+    //
+    // With shift held it tunes a listening VFO instead — the one last touched
+    // (lib/vfoMarks.js shiftTarget) — so a second station can be put on a
+    // signal without taking the main receiver off the one it is on. Nothing
+    // listening, and shift does what a plain click does.
+    const tuneAt = useCallback((clientX, clientY, shift = false) => {
         const f = freqAtX(clientX, clientY);
         if (f == null) return;
+        const target = shift && getVfoLimit() > 1 ? shiftTarget(getVfos()) : null;
+        if (target) {
+            touchVfo(target);
+            tuneListeningVfo(subsRef.current, target, snapToStep(f, dispRef.current.tuneStep));
+            haptic('tune', 'spectrum');
+            return;
+        }
         const step = dispRef.current.tuneStep || 1;
         actions.setFrequency(step > 1 ? Math.round(f / step) * step : f);
         // The receiver moved, and on a phone the finger is covering the place it
@@ -2424,6 +2508,7 @@ export default function SpectrumView() {
             g.held = false;
             g.drag = null;
             g.edge = null;
+            g.subDrag = null;
             if (g.measure) { g.measure = null; endSelection(); }
             return;
         }
@@ -2462,7 +2547,15 @@ export default function SpectrumView() {
         if (g.edge) {
             const tapped = g.edge.pending;
             g.edge = null;
-            if (tapped) tuneAt(e.clientX, e.clientY);
+            if (tapped) tuneAt(e.clientX, e.clientY, e.shiftKey);
+            return;
+        }
+
+        // A listening VFO's drag is finished; one that never moved was a tap.
+        if (g.subDrag) {
+            const sd = g.subDrag;
+            g.subDrag = null;
+            if (!sd.moved) tuneAt(e.clientX, e.clientY, e.shiftKey);
             return;
         }
 
@@ -2478,7 +2571,7 @@ export default function SpectrumView() {
             if (trailing != null) actions.setSpectrumCenter(trailing);
             return;
         }
-        tuneAt(e.clientX, e.clientY);
+        tuneAt(e.clientX, e.clientY, e.shiftKey);
     }, [actions, tuneAt, dropHold, endSelection]);
 
     // A gesture taken away from us — the browser claiming it, the window losing
@@ -2492,6 +2585,7 @@ export default function SpectrumView() {
         dropHold();
         g.held = false;
         g.edge = null;
+        g.subDrag = null;
         // A cancelled measurement keeps whatever the drag got to, and stops
         // being a drag: the edges the operator saw are the edges they get, and
         // leaving `drawing` set would stop the run for ever.
@@ -3177,6 +3271,14 @@ export default function SpectrumView() {
                                 {refTipText(radio.serverInfo, hoverInfo.mark)}
                             </div>
                         )}
+                        {!hoverInfo.mark && hoverInfo.listen && (() => {
+                            const v = (gfx.current.listen || []).find((x) => x.id === hoverInfo.listen);
+                            return v ? (
+                                <div className="spec-tip__mark">
+                                    VFO {v.id}: {formatFreqExact(v.frequency)} · drag to retune
+                                </div>
+                            ) : null;
+                        })()}
                         {hoverInfo.mark && !hoverInfo.mark.startsWith('ref-') && (
                             <div className="spec-tip__mark">
                                 {hoverInfo.mark === 'dial' ? 'Tuned' : 'Filter'}
@@ -3328,6 +3430,20 @@ export default function SpectrumView() {
                                 ),
                             };
                         }),
+                        // Retune a VFO being listened to, to the spot under the
+                        // pointer — the touch way to do what shift-click and a
+                        // drag on its passband do with a mouse. Read at the
+                        // moment the menu opens, like the entries above.
+                        ...(getVfoLimit() > 1 ? (gfx.current.listen || []).map((v) => ({
+                            key: `tune-${v.id}`,
+                            label: `Tune ${v.id} here — ${formatFreqShort(menu.freq, span)}`,
+                            title: `Move VFO ${v.id}, which is being listened to, to this frequency; the main receiver stays where it is`,
+                            onSelect: () => {
+                                touchVfo(v.id);
+                                tuneListeningVfo(subsRef.current, v.id,
+                                    snapToStep(menu.freq, dispRef.current.tuneStep));
+                            },
+                        })) : []),
                         // What the display shows, and how it draws it — the two
                         // toolbar buttons above the spectrum, as named choices.
                         //
@@ -3626,6 +3742,44 @@ function autoRange(px, trace, g, k) {
     // much as that pixel, and the eased decay takes it back.
     const hardCeil = peak + 3;
     if (g.autoCeil < hardCeil) g.autoCeil = hardCeil;
+}
+
+// A frequency on the tuning step's grid, as a click on the spectrum lands.
+function snapToStep(hz, step) {
+    const s = step || 1;
+    const f = s > 1 ? Math.round(hz / s) * s : Math.round(hz);
+    return clamp(f, MIN_FREQ, MAX_FREQ);
+}
+
+// Retune a listening VFO, through the engine when there is one.
+function tuneListeningVfo(subs, id, hz) {
+    if (subs) subs.tuneVfo(id, hz);
+    else tuneListening(id, hz);
+}
+
+// The VFOs being heard alongside the main receiver, as the spectrum draws them
+// — none where the server allows one stream, whatever the store remembers.
+function listeningNow(subs, tuning) {
+    if (getVfoLimit() <= 1) return [];
+    return listeningPassbands(getVfos(), subs ? subs.snapshot() : null, tuning);
+}
+
+// The squelch brighten, eased: g.bright holds a 0..1 level per passband — 'main'
+// and each listening VFO's letter — moved toward 1 while that passband's squelch
+// is open and toward 0 otherwise. Off entirely with the display setting, with
+// the squelch off, and in IQ, where nothing is gated (squelchBrightens).
+function easeBrightness(g, d, squelch, meters, tuning, dtMs) {
+    const enabled = d.squelchBrighten !== false && !!(squelch && squelch.enabled);
+    const iq = isIQ(tuning && tuning.mode);
+    const next = {};
+    const prev = g.bright || {};
+    next.main = easeLevel(prev.main,
+        squelchBrightens({ enabled, open: !!(meters && meters.squelchOpen), iq }) ? 1 : 0, dtMs);
+    for (const v of g.listen || []) {
+        next[v.id] = easeLevel(prev[v.id],
+            squelchBrightens({ enabled, open: v.open, iq }) ? 1 : 0, dtMs);
+    }
+    g.bright = next;
 }
 
 function drawFrame(g, d, ctx) {
@@ -4115,7 +4269,9 @@ function drawGhostBand(c, pxW, H, cfg, tuning, ghost, dpr, colour) {
     c.restore();
 }
 
-function drawTuningMarks(c, pxW, H, cfg, tuning, dpr, dialColor, edgeColor) {
+// `boost` thickens the lines a little for the squelch brighten (vfoMarks.js
+// markBoost); 1 is the ordinary weight.
+function drawTuningMarks(c, pxW, H, cfg, tuning, dpr, dialColor, edgeColor, boost = 1) {
     if (!cfg.span) return;
     const hzToX = (hz) => ((hz - (cfg.centerFreq - cfg.span / 2)) / cfg.span) * pxW;
 
@@ -4134,14 +4290,33 @@ function drawTuningMarks(c, pxW, H, cfg, tuning, dpr, dialColor, edgeColor) {
         // apart are not a passband, they are a thicker dial. Zooming back in
         // brings them back one at a time, in the order they became readable.
         if (Math.abs(x - dial) < gap) continue;
-        markLine(c, x, H, dpr, edgeColor, EDGE_DASH, 1.4);
+        markLine(c, x, H, dpr, edgeColor, EDGE_DASH, 1.4 * boost);
     }
 
     // Last, so where the passband collapses to nothing the dial is what is left
     // on top — it is the line you tune by.
     const x = hzToX(tuning.frequency);
-    if (x >= 0 && x <= pxW) markLine(c, x, H, dpr, dialColor, DIAL_DASH, 1.6);
+    if (x >= 0 && x <= pxW) markLine(c, x, H, dpr, dialColor, DIAL_DASH, 1.6 * boost);
 }
+
+// A listening VFO's dial and edges: the main receiver's filter shape on its own
+// frequency, in its own colour.
+function drawListenMarks(c, pxW, H, cfg, list, dpr, bright) {
+    for (const v of list || []) {
+        const t = {
+            frequency: v.frequency,
+            bandwidthLow: v.low,
+            bandwidthHigh: v.high,
+        };
+        drawTuningMarks(c, pxW, H, cfg, t, dpr, v.colour, vfoRgba(v.id, 0.75),
+            markBoost(bright ? bright[v.id] : 0));
+    }
+}
+
+// The resting alpha of a listening VFO's wash: a little under the usual
+// --spec-band's, since there can be three of them and the main one should
+// still read as the main one.
+const LISTEN_WASH_ALPHA = 0.16;
 
 // The frequency reference: where the standard station is, and where this
 // receiver hears it.
@@ -4491,7 +4666,9 @@ function drawWaterfallMarks(g, marks, wfH, pxW, cfg, tuning, colVfo, colEdge) {
         + `${g.drag ? 'd' : ''}${g.edge ? 'e' : ''}${g.measuring ? 'm' : ''}|`
         + `${colVfo}|${colEdge}|${colBand}|${g.blockedKey || ''}|`
         // The replay's ghost passband, by the entry it is drawn from.
-        + `${g.ghost ? `${g.ghost.stamp}` : ''}`;
+        + `${g.ghost ? `${g.ghost.stamp}` : ''}|`
+        // The listening VFOs' lines: where each is, and the filter it plays.
+        + passbandsKey(g.listen);
     if (g.marksKey === key) return;
     g.marksKey = key;
 
@@ -4518,6 +4695,9 @@ function drawWaterfallMarks(g, marks, wfH, pxW, cfg, tuning, colVfo, colEdge) {
         c.stroke();
     }
     drawFreqRefMarks(c, pxW, H, cfg, g.dpr, g.freqRef, REF_EXPECTED_COLOR, REF_ACTUAL_COLOR);
+    // Without the brighten: this canvas is cached on its key, and a level
+    // easing through it would redraw it every frame of every gate change.
+    drawListenMarks(c, pxW, H, cfg, g.listen, g.dpr, null);
     drawTuningMarks(c, pxW, H, cfg, tuning, g.dpr, colVfo, colEdge);
 }
 
@@ -4657,6 +4837,10 @@ function drawSpectrum(g, d, spec, specH, pxW, trace, floor, range, cfg, tuning, 
     }
 
     // Passband shading around the tuned frequency.
+    //
+    // Brightened while the squelch is passing audio (see easeBrightness): drawn
+    // a second time over itself, because --spec-band is whatever colour the
+    // theme says and a stronger version of it cannot be had any other way.
     if (cfg.span) {
         const hzToX = (hz) => ((hz - (cfg.centerFreq - cfg.span / 2)) / cfg.span) * pxW;
         const x0 = hzToX(tuning.frequency + tuning.bandwidthLow);
@@ -4664,6 +4848,23 @@ function drawSpectrum(g, d, spec, specH, pxW, trace, floor, range, cfg, tuning, 
         if (x1 > 0 && x0 < pxW) {
             c.fillStyle = colBand;
             c.fillRect(Math.min(x0, x1), 0, Math.abs(x1 - x0), H);
+            const lift = overlayAlpha(alphaOf(colBand), g.bright ? g.bright.main : 0);
+            if (lift > 0) {
+                c.save();
+                c.globalAlpha = lift;
+                c.fillRect(Math.min(x0, x1), 0, Math.abs(x1 - x0), H);
+                c.restore();
+            }
+        }
+        // The listening VFOs' passbands, each in its own colour and under the
+        // trace like the main one. Their own colour is ours to set, so the
+        // brighten is simply a stronger alpha.
+        for (const v of g.listen || []) {
+            const a = hzToX(v.frequency + v.low);
+            const b = hzToX(v.frequency + v.high);
+            if (Math.max(a, b) <= 0 || Math.min(a, b) >= pxW) continue;
+            c.fillStyle = vfoRgba(v.id, washAlpha(LISTEN_WASH_ALPHA, g.bright ? g.bright[v.id] : 0));
+            c.fillRect(Math.min(a, b), 0, Math.abs(b - a), H);
         }
     }
 
@@ -4740,7 +4941,10 @@ function drawSpectrum(g, d, spec, specH, pxW, trace, floor, range, cfg, tuning, 
     drawBlockedShade(c, g.blocked, pxW, H, cfg);
 
     drawFreqRefMarks(c, pxW, H, cfg, dpr, g.freqRef, REF_EXPECTED_COLOR, REF_ACTUAL_COLOR);
-    drawTuningMarks(c, pxW, H, cfg, tuning, dpr, colVfo, colEdge);
+    // Under the main receiver's, so where two land on one pixel the main dial
+    // is what is left on top.
+    drawListenMarks(c, pxW, H, cfg, g.listen, dpr, g.bright);
+    drawTuningMarks(c, pxW, H, cfg, tuning, dpr, colVfo, colEdge, markBoost(g.bright ? g.bright.main : 0));
 
     // Peak markers, over the trace they point at. Spectrum only: in waterfall-only
     // view there is no trace for a caret to sit on, and a row of frequencies floating

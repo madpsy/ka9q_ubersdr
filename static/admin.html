@@ -8594,6 +8594,13 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
                 if (session.is_spectrum) sessionsByUser[key].spectrum.push(session);
                 else                     sessionsByUser[key].audio.push(session);
             });
+            // A user can hold several audio sessions at once (simultaneous VFOs).
+            // Everything below reads audio[0] as "the user's audio", so the
+            // primary (vfo 0) has to be first; secondaries follow in VFO order
+            // and are listed under it in Details.
+            for (const g of Object.values(sessionsByUser)) {
+                g.audio.sort((a, b) => (a.vfo || 0) - (b.vfo || 0));
+            }
 
             const sortedEntries = Object.entries(sessionsByUser).sort((a, b) => a[0].localeCompare(b[0]));
 
@@ -8733,6 +8740,10 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
 
                 let details = '';
                 if (audioSession)    details += `<strong>A:</strong> ${(audioSession.frequency / 1e6).toFixed(3)} MHz, ${audioSession.mode.toUpperCase()}<br>`;
+                for (const sec of sessions.audio.slice(1)) {
+                    if (!sec.is_secondary) continue;
+                    details += `<span style="color:#666;" title="Additional VFO ${sec.vfo} (SSRC ${sec.ssrc}, ${sec.audio_kbps || 0} kbps)"><strong>V${sec.vfo}:</strong> ${(sec.frequency / 1e6).toFixed(3)} MHz, ${sec.mode.toUpperCase()}</span><br>`;
+                }
                 if (spectrumSession) details += `<strong>S:</strong> ${(spectrumSession.frequency / 1e6).toFixed(3)} MHz<br>`;
 
                 let actionButtons = '';

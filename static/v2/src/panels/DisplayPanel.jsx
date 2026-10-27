@@ -519,6 +519,16 @@ export default function DisplayPanel() {
                         <Switch checked={d.fill !== false} onChange={(v) => d.set({ fill: v })} />
                     </Field>
 
+                    {/* Spectrum only: the waterfall has no passband wash to
+                        brighten, just the dial and edge lines. */}
+                    <Field label="Brighten passband when squelch opens" inline>
+                        <Switch
+                            checked={d.squelchBrighten !== false}
+                            onChange={(v) => d.set({ squelchBrighten: v })}
+                            title="While the squelch is on and passing audio, its passband is drawn brighter — the main receiver's and any VFO being listened to — so you can see which one is getting through"
+                        />
+                    </Field>
+
                     <Field label="Peak hold" inline>
                         <Switch checked={d.peakHold} onChange={(v) => d.set({ peakHold: v })} />
                     </Field>

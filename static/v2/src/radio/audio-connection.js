@@ -17,7 +17,7 @@
 // The server falls back to JSON `audio` messages (base64 PCM) when Opus is
 // unavailable; that path is handled too so the UI still works on such a server.
 
-import { isWideIQ, marginFromSlider } from './constants.js';
+import { SQUELCH_SENTINEL, isWideIQ, marginFromSlider } from './constants.js';
 import { Emitter } from './emitter.js';
 import { failureKind } from '../lib/connectFailure.js';
 import { PCMStreamDecoder, isZstdFrame } from './pcm-stream.js';
@@ -72,8 +72,22 @@ let wasmRuntime = null;
 loadPCMv4Wasm().then((rt) => { wasmRuntime = rt; }, () => {});
 
 export class AudioConnection extends Emitter {
-    constructor() {
+    /**
+     * @param {{vfo?: number, primary?: boolean}} [opts]
+     *   `vfo` is which of the session's audio streams this is: 0 the main one,
+     *   1.. the extra VFOs listened to alongside it (radio/subReceivers.js).
+     *   `primary` false marks one of those extras. A secondary is a lesser
+     *   thing on the server — it lives on the main stream's session id and is
+     *   reaped when that has gone — and it must not claim the session as its
+     *   own here either: the server id in its `status` is its own session's,
+     *   and /stats hoists the listener row matching the *main* one. Left to
+     *   write it, the last secondary to connect would make somebody else's row
+     *   look like yours. See setServerSessionId.
+     */
+    constructor({ vfo = 0, primary = true } = {}) {
         super();
+        this.vfo = Math.max(0, Math.floor(Number(vfo)) || 0);
+        this.primary = primary !== false;
         this.ws = null;
         this.state = 'idle';        // idle | connecting | open | reconnecting | rejected
         this.params = null;         // last successful connect params, for reconnect
@@ -273,6 +287,17 @@ export class AudioConnection extends Emitter {
         // Omitted entirely when lossless, so the request looks exactly as it did
         // before the mode existed.
         if (this.minMargin > 0) q.set('min_margin', String(this.minMargin));
+        // Only when it is not the main stream, so the main stream's URL is
+        // exactly what it always was.
+        if (this.vfo > 0) q.set('vfo', String(this.vfo));
+        // A secondary is gated from its first packet. The main stream replays
+        // its gate as a command on open, and a few hundred milliseconds of
+        // unsquelched noise on connect is tolerable for one stream; for three
+        // VFOs coming up together it is a burst of hiss in both ears.
+        if (!this.primary && this.lastGate && this.lastGate.minSnr != null
+            && this.lastGate.minSnr !== SQUELCH_SENTINEL) {
+            q.set('min_snr', String(this.lastGate.minSnr));
+        }
         const password = getBypassPassword();
         if (password) q.set('password', password);
 
@@ -505,7 +530,7 @@ export class AudioConnection extends Emitter {
         abandon(ws);
         this.ws = null;
         this.opened = false;
-        setServerSessionId(null);
+        if (this.primary) setServerSessionId(null);
         this.emit('close', { code: 1006, reason, failure: null });
         if (this.closedByUser) {
             this._setState('idle');
@@ -554,7 +579,7 @@ export class AudioConnection extends Emitter {
         }
         // The server's own id for this session. Nothing here needs it, but
         // /stats does — see setServerSessionId.
-        if (msg.type === 'status' && msg.sessionId) setServerSessionId(msg.sessionId);
+        if (msg.type === 'status' && msg.sessionId && this.primary) setServerSessionId(msg.sessionId);
         if (msg.type === 'audio' && msg.data) {
             // JSON PCM fallback: base64 signed 16-bit little-endian.
             const raw = atob(msg.data);
@@ -748,7 +773,8 @@ export class AudioConnection extends Emitter {
         this.ws = null;
         this._disarm();
         // The session it belonged to is gone; a reconnect is given a new one.
-        setServerSessionId(null);
+        // A secondary never set it, and must not clear the main stream's.
+        if (this.primary) setServerSessionId(null);
         const failure = this.lastFailure;
         this.lastFailure = null;
         const opened = this.opened;

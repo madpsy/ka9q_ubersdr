@@ -55,6 +55,11 @@ export const DEFAULTS = {
     // choosing to spend the server's bandwidth and their own CPU on a picture
     // nobody is looking at yet.
     backgroundWaterfall: false,
+    // Draw a passband brighter while its squelch is open — the main receiver's
+    // and every VFO listened to alongside it — so the eye goes to the one that
+    // is getting through. Only with a squelch set: with none, "open" is every
+    // moment and there is nothing to show. See lib/vfoMarks.js.
+    squelchBrighten: true,
     // What the waterfall's history does when the view moves under it.
     //
     //   'follow' — the history is shifted with the axis, so a signal stays in

@@ -31,6 +31,7 @@ import { ExtensionsProvider } from './extensions/ExtensionsContext.jsx';
 import DXClusterWatch from './components/DXClusterWatch.jsx';
 import MeasureWatch from './components/MeasureWatch.jsx';
 import IQDemodWatch from './components/IQDemodWatch.jsx';
+import SubReceiversWatch from './components/SubReceiversWatch.jsx';
 import PlaygroundWatch from './components/PlaygroundWatch.jsx';
 import RecorderFormatWatch from './components/RecorderFormatWatch.jsx';
 import TimeshiftWatch from './components/TimeshiftWatch.jsx';
@@ -303,6 +304,10 @@ export default function App() {
                                     collapsed panel would leave both in place
                                     with nothing on screen to undo them. */}
                                 <IQDemodWatch />
+                                {/* And the VFOs listened to alongside the main
+                                    receiver, which go on playing whether or not
+                                    the VFO panel is open. */}
+                                <SubReceiversWatch />
                                 {/* And the playground's, which holds the
                                     receiver the same way from a window that
                                     can be closed. */}

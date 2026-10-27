@@ -17,7 +17,10 @@ import { bookmarkReachable, bookmarkTarget } from '../lib/bookmarkTune.js';
 import { MAX_FREQ, MIN_FREQ } from '../radio/constants.js';
 import { countryFlag, formatFreqShort, freqInRange, sinceLabel } from '../lib/format.js';
 import { activityLabel, dialFreq, subscribeVoiceActivity } from '../lib/voiceActivity.js';
-import { getVfos, markableVfos, onVfosChanged, selectVfo } from '../lib/vfos.js';
+import { getVfos, onVfosChanged, selectVfo } from '../lib/vfos.js';
+import { vfoMarkerItems } from '../lib/vfoMarks.js';
+import { vfoColour, vfoRgba } from '../lib/vfoColours.js';
+import { useVfoLimit } from '../radio/useSubReceivers.js';
 import { requestLookup } from '../lib/callsign.js';
 import { lookupCallsign } from '../compat/legacyBridge.js';
 import { subscribeSpots } from '../lib/spotStore.js';
@@ -277,6 +280,13 @@ export default function MarkerBar({ width }) {
     // marker appears the moment a VFO is stored and goes when it is switched to.
     const [vfos, setVfoState] = useState(getVfos);
     useEffect(() => onVfosChanged(setVfoState), []);
+    // Listening VFOs are marked whatever markerVfos says — see vfoMarkerItems —
+    // so the bar has something to draw even with every layer switched off.
+    const vfoLimit = useVfoLimit();
+    const vfoItems = useMemo(
+        () => vfoMarkerItems(vfos, tuning, { showParked: showVfos, limit: vfoLimit }),
+        [vfos, tuning.frequency, tuning.mode, showVfos, vfoLimit],
+    );
 
     // Read from the same store the Spots panel reads — see lib/spotStore.js.
     // Subscribing here only registers for updates; the stream is already up.
@@ -513,9 +523,9 @@ export default function MarkerBar({ width }) {
         // The drawing waits until the end so the circles sit on top of any
         // stem that crosses them — see the block at the foot of this function.
         let placedVfos = [];
-        if (showVfos) {
+        if (vfoItems.length) {
             const items = [];
-            for (const v of markableVfos(vfos, tuning.frequency)) {
+            for (const v of vfoItems) {
                 if (v.frequency < startFreq || v.frequency > endFreq) continue;
                 items.push({
                     vfo: v,
@@ -829,13 +839,24 @@ export default function MarkerBar({ width }) {
         // them; drawn here so the circles sit over any stem that crosses one.
         // Same rows, same baseline and same stem as every other marker — the
         // only difference is the shape and that they had first claim on a row.
+        //
+        // A listening VFO wears its own colour (lib/vfoColours.js), stem and
+        // all, so it matches its passband on the spectrum below; the main
+        // receiver, marked only while something else is listening, wears the
+        // accent its dial does. Parked VFOs keep the crimson.
         for (const p of placedVfos) {
             const y = BAND_H + 2 + (ROWS - 1 - p.row) * ROW_H;
             const x = p.x;
             const cy = y + PILL_H / 2;
             const r = PILL_H / 2;
+            const kind = p.vfo.kind;
+            const fill = kind === 'listening' ? vfoColour(p.vfo.id) : kind === 'main' ? accent : VFO_FILL;
+            const stem = kind === 'listening' ? vfoRgba(p.vfo.id, 0.55)
+                : kind === 'main' ? accent : 'rgba(233, 30, 99, 0.55)';
+            // The listening colours are all light; white on yellow is unreadable.
+            const ink = kind === 'listening' ? '#111' : kind === 'main' ? accentInk : VFO_INK;
 
-            c.strokeStyle = 'rgba(233, 30, 99, 0.55)';
+            c.strokeStyle = stem;
             c.lineWidth = 1;
             c.beginPath();
             c.moveTo(Math.round(x) + 0.5, y + PILL_H);
@@ -844,7 +865,7 @@ export default function MarkerBar({ width }) {
 
             c.beginPath();
             c.arc(x, cy, r, 0, Math.PI * 2);
-            c.fillStyle = VFO_FILL;
+            c.fillStyle = fill;
             c.fill();
             c.strokeStyle = 'rgba(255,255,255,0.65)';
             c.stroke();
@@ -852,7 +873,7 @@ export default function MarkerBar({ width }) {
             c.font = '700 9px ui-sans-serif, system-ui, sans-serif';
             c.textBaseline = 'middle';
             c.textAlign = 'center';
-            c.fillStyle = VFO_INK;
+            c.fillStyle = ink;
             c.fillText(p.vfo.id, x, cy + 0.5);
 
             hitsRef.current.vfos.push({ x, y, w: PILL_H, h: PILL_H, vfo: p.vfo });
@@ -878,11 +899,39 @@ export default function MarkerBar({ width }) {
                 kind === 'dial' ? dialColor : edgeColor);
         });
 
+        // The listening VFOs get the same arrows, in their own colours, queued
+        // after the main receiver's on each side: a VFO you are hearing but
+        // have panned away from is exactly what this indicator is for. Their
+        // passband is the main receiver's filter on their own frequency — the
+        // mode lock, see lib/vfoMarks.js.
+        let nLeft = arrows.left.length;
+        let nRight = arrows.right.length;
+        for (const v of vfoItems) {
+            if (v.kind !== 'listening') continue;
+            const a = offscreenArrows({
+                dialHz: v.frequency,
+                edgeHz: [v.frequency + tuning.bandwidthLow, v.frequency + tuning.bandwidthHigh],
+                startFreq,
+                endFreq,
+            });
+            const dial = vfoColour(v.id);
+            const edge = vfoRgba(v.id, 0.6);
+            for (const kind of a.left) {
+                drawArrow(c, ARROW_PAD + nLeft * (ARROW_W + ARROW_GAP), arrowCy, -1, kind === 'dial' ? dial : edge);
+                nLeft++;
+            }
+            for (const kind of a.right) {
+                drawArrow(c, width - ARROW_PAD - nRight * (ARROW_W + ARROW_GAP), arrowCy, 1,
+                    kind === 'dial' ? dial : edge);
+                nRight++;
+            }
+        }
+
     }, [width, centerFreq, span, catalog.bands, marks, showBands, colors, tuning.frequency,
         showVoice, voice, showConfirmed, confirmed,
         showDx, showCw, dxSpots, cwSpots, ageTick, showPacket, packet,
-        showVfos, vfos, tuning.frequency, showRef, refFreq, showListeners, listeners,
-        dialColor, edgeColor, edgeLowHz, edgeHighHz]);
+        vfoItems, tuning.frequency, showRef, refFreq, showListeners, listeners,
+        dialColor, edgeColor, edgeLowHz, edgeHighHz, tuning.bandwidthLow, tuning.bandwidthHigh]);
 
     const locate = useCallback((e) => {
         const canvas = canvasRef.current;
@@ -946,7 +995,9 @@ export default function MarkerBar({ width }) {
                 : hit.kind === 'ref'
                 ? refMarkerTip(serverInfo)
                 : hit.kind === 'vfo'
-                ? `VFO ${hit.vfo.id} · ${formatFreqShort(hit.vfo.frequency)}${hit.vfo.mode ? ' · ' + hit.vfo.mode.toUpperCase() : ''}`
+                ? `VFO ${hit.vfo.id} · ${formatFreqShort(hit.vfo.frequency)}${hit.vfo.mode ? ' · ' + hit.vfo.mode.toUpperCase() : ''}${
+                    hit.vfo.kind === 'listening' ? ' · listening — click to make it the main receiver'
+                        : hit.vfo.kind === 'main' ? ' · main receiver' : ''}`
                 : hit.kind === 'bookmark'
                 ? `${hit.item.name} · ${formatFreqShort(hit.item.frequency)}${hit.item.mode ? ' · ' + hit.item.mode.toUpperCase() : ''}${hit.item.comment ? ' — ' + hit.item.comment : ''}`
                 : hit.kind === 'voice'
@@ -993,7 +1044,12 @@ export default function MarkerBar({ width }) {
                 actions.setFrequency(freq);
                 actions.ensureVisible(freq);
             }
+        } else if (hit.kind === 'vfo' && hit.vfo.kind === 'main') {
+            // The receiver itself: there is nowhere to go.
+            actions.ensureVisible(hit.vfo.frequency);
         } else if (hit.kind === 'vfo') {
+            // A listening one swaps with the main receiver — selectVfo does
+            // that for a listening slot (lib/vfos.js swapVfo).
             // Go to that VFO rather than merely tuning its frequency: the mark
             // says "B is parked here", and arriving on A at B's frequency would
             // be a different thing than the one that was clicked. selectVfo
@@ -1066,7 +1122,8 @@ export default function MarkerBar({ width }) {
     // Packet was missing from this list, which hid the whole bar for anyone who
     // had turned everything else off and kept the packet channels.
     if (!showBands && !showServer && !showLocal && !showVoice && !showConfirmed
-        && !showDx && !showCw && !showVfos && !showPacket && !showRef && !showListeners) {
+        && !showDx && !showCw && !showVfos && !showPacket && !showRef && !showListeners
+        && !vfoItems.length) {
         return null;
     }
 

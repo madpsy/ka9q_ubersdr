@@ -12,11 +12,19 @@
 // to it, which is the same selectVfo the buttons, the spectrum's right-click
 // menu and a MIDI mapping all call — a VFO must be switched exactly one way or
 // two of them disagree about what "B" holds.
+//
+// Where the server allows more than one stream, each other row also gets a
+// speaker toggle: hear this VFO at the same time as the main one. That is a
+// different act from clicking the row — the row is "go there", the speaker is
+// "keep it playing while I stay here" — so the two are kept visibly apart: the
+// speaker is its own button beside the row, never part of it, and a one-line
+// hint at the top says which is which.
 
 import React, { useEffect, useRef, useState } from '../react.js';
 import { useRadio } from '../radio/RadioContext.jsx';
 import {
-    VFO_IDS, copyVfo, getVfos, nextScanVfo, onVfosChanged, scannableVfos, selectVfo,
+    LISTEN_IQ_REASON, VFO_IDS, copyVfo, getVfos, isListening, listenOf, listeningVfos, nextScanVfo,
+    onVfosChanged, scannableVfos, selectVfo,
 } from '../lib/vfos.js';
 import {
     SCAN_DWELL_MS, SCAN_MODE_DWELL_MS, SCAN_MODE_SETTLE_MS, SCAN_SETTLE_MS,
@@ -24,6 +32,10 @@ import {
 import { formatFilterWidth, formatHz } from '../lib/format.js';
 import { bandForFrequency } from '../lib/bands.js';
 import { isIQ } from '../radio/constants.js';
+import { useSubReceivers } from '../radio/useSubReceivers.js';
+import { vfoColour } from '../lib/vfoColours.js';
+import { touchVfo } from '../lib/vfoMarks.js';
+import { Icon, Slider } from '../components/ui.jsx';
 
 /**
  * What each slot holds, with the active one taken from live tuning.
@@ -34,21 +46,117 @@ import { isIQ } from '../radio/constants.js';
  * the store for the active slot would show wherever the dial was when it was
  * last selected, which is the one row guaranteed to be wrong.
  */
-function rowsFor(vfos, tuning) {
+//
+// A listening VFO is the exception to "a slot shows what it holds": it plays in
+// the main receiver's mode and filter (the mode lock — see lib/vfos.js), so that
+// is what its row shows, with its own saved mode kept as `savedMode` for the
+// note saying it will come back to it.
+//
+// `listen` is false where nothing can be heard alongside the main receiver —
+// one VFO on this server, or the main one in IQ. A stored flag is then a
+// leftover, not something playing, and the row shows the slot as it is.
+function rowsFor(vfos, tuning, listen = false) {
     return VFO_IDS.map((id) => {
         const active = vfos.active === id;
+        const listening = listen && isListening(vfos, id);
         const s = active ? tuning : vfos.slots[id];
-        if (!s || !(s.frequency > 0)) return { id, active, empty: true };
+        if (!s || !(s.frequency > 0)) return { id, active, listening: false, empty: true };
+        const shape = listening ? tuning : s;
         return {
             id,
             active,
+            listening,
             empty: false,
             frequency: s.frequency,
-            mode: (s.mode || '').toUpperCase(),
-            width: formatFilterWidth(s.bandwidthLow, s.bandwidthHigh),
+            mode: (shape.mode || '').toUpperCase(),
+            savedMode: (s.mode || '').toUpperCase(),
+            width: formatFilterWidth(shape.bandwidthLow, shape.bandwidthHigh),
             band: bandForFrequency(s.frequency),
         };
     });
+}
+
+// What a listening row says beside its controls, if anything — the one reason
+// it is not simply playing, most pressing first. Exported for the tests.
+export function listenNote(row, live) {
+    if (!row.listening) return null;
+    if (live && live.refused) return live.refused;
+    if (live && live.waitingPrimary) return 'Waiting for the main stream';
+    if (row.savedMode && row.savedMode !== row.mode) {
+        return `${row.savedMode} saved · listening in ${row.mode}`;
+    }
+    return null;
+}
+
+// The words on the lit output button: where an Auto VFO has landed, or the pin.
+// Exported for the tests.
+export function outLabel(out, pan) {
+    if (out === 'left') return 'L';
+    if (out === 'right') return 'R';
+    if (out === 'both') return 'Both';
+    if (pan == null) return 'Auto';
+    return `Auto·${pan < -0.05 ? 'L' : pan > 0.05 ? 'R' : 'C'}`;
+}
+
+// The meter's reach: 0 dB is an idle channel and the strongest signals sit
+// around 30 on this server's scale (the v4 SNR is a passband power), so a little
+// over that is full scale.
+const METER_TOP_DB = 36;
+
+function MiniMeter({ live, title }) {
+    const snr = live && live.snr != null ? live.snr : null;
+    const level = snr == null ? 0 : Math.max(0, Math.min(1, snr / METER_TOP_DB));
+    // Dimmed while the gate is shut, so a row whose VFO is quiet reads as quiet
+    // at a glance — the same answer the squelch is giving the speaker.
+    const closed = !!live && !live.squelchOpen;
+    return (
+        <span
+            className={`vfos__meter${closed ? ' is-closed' : ''}`}
+            role="img"
+            aria-label={snr == null ? 'No signal reading yet' : `${snr.toFixed(0)} dB, squelch ${closed ? 'closed' : 'open'}`}
+            title={title || (snr == null ? 'No signal reading yet' : `${snr.toFixed(1)} dB SNR${closed ? ' — squelch closed' : ''}`)}
+        >
+            <span className="vfos__meter-fill" style={{ width: `${Math.round(level * 100)}%` }} />
+        </span>
+    );
+}
+
+// Left to right as the ears are, with Auto and Both between: the two pins are
+// at the ends they send the VFO to.
+const OUT_OPTIONS = [
+    { value: 'left', label: 'L', title: 'Left ear only', aria: 'left ear only' },
+    { value: 'auto', label: 'Auto', short: 'Au', title: 'Placed by frequency among the VFOs being heard', aria: 'placed automatically' },
+    { value: 'both', label: 'Both', title: 'Both ears, in the middle', aria: 'both ears' },
+    { value: 'right', label: 'R', title: 'Right ear only', aria: 'right ear only' },
+];
+
+// Where one VFO is heard: four small buttons rather than a chip that opens a
+// menu, because the answer is worth seeing without asking for it — and the lit
+// Auto says which side it landed on, which is the thing Auto leaves you
+// wondering. The same buttons in both views; the compact one only shortens Auto.
+function OutButtons({ id, out, pan, short, onChange }) {
+    return (
+        <span className="vfos__seg" role="group" aria-label={`Where VFO ${id} is heard`}>
+            {OUT_OPTIONS.map((o) => {
+                const on = o.value === out;
+                let label = on ? outLabel(out, pan) : o.label;
+                if (short && o.value === 'auto') label = label.replace('Auto', o.short);
+                return (
+                    <button
+                        key={o.value}
+                        type="button"
+                        className={`vfos__seg-btn${on ? ' is-on' : ''}`}
+                        aria-pressed={on}
+                        aria-label={`VFO ${id}: ${o.aria}`}
+                        title={o.title}
+                        onClick={(e) => { e.stopPropagation(); onChange(o.value); }}
+                    >
+                        {label}
+                    </button>
+                );
+            })}
+        </span>
+    );
 }
 
 /**
@@ -146,6 +254,7 @@ function useScan(radio, vfos) {
     };
 }
 
+
 export default function VfosPanel({ minimal }) {
     const radio = useRadio();
     const { tuning } = radio;
@@ -156,49 +265,235 @@ export default function VfosPanel({ minimal }) {
     useEffect(() => onVfosChanged(setLocal), []);
 
     const scan = useScan(radio, vfos);
-    const rows = rowsFor(vfos, tuning);
+
+    // Simultaneous VFOs, where the server allows them. At a limit of one this
+    // panel is exactly what it was before they existed: no hint, no speakers,
+    // and a row that is one button.
+    const { subs, snap } = useSubReceivers(8);
+    const limit = snap.limit || 1;
+    const multi = limit > 1;
+    // In IQ the main receiver's left and right are I and Q, so there is no
+    // stereo field to share out and nothing else is played. The speakers stay
+    // on show, disabled with the reason, rather than the panel changing shape
+    // every time the mode does.
+    const mainIQ = isIQ(tuning.mode);
+    const canListen = multi && !mainIQ;
+    const extras = canListen ? listeningVfos(vfos).length : 0;
+    const spare = limit - 1;
+    const full = extras >= spare;
+    const rows = rowsFor(vfos, tuning, canListen);
+    const anyListening = rows.some((v) => v.listening);
+
+    // Picking a VFO by hand is taking the dial back, so it ends the scan rather
+    // than being stepped off 250 ms later. A listening one swaps with the main
+    // receiver rather than replacing it — see selectVfo.
+    const pick = (id) => { scan.stop(); selectVfo(radio, id); };
+
+    // The main receiver's sound is the Audio panel's volume and mute — the same
+    // ones, not a copy — so that turning it down here and there is one setting.
+    // Its side of the stereo field is stored with the VFOs, like the others'.
+    const audio = radio.audio || { volume: 1, muted: false };
+    const squelchOn = !!(radio.squelch && radio.squelch.enabled);
+    const mainLive = () => {
+        const m = radio.meters && radio.meters.current;
+        return m ? { snr: m.snr, squelchOpen: m.squelchOpen } : null;
+    };
+    const sound = (v) => {
+        if (v.active) {
+            return {
+                out: listenOf(vfos, v.id).out,
+                pan: snap.mainPan,
+                vol: audio.volume,
+                muted: audio.muted,
+                live: mainLive(),
+                setVolume: (x) => radio.actions.setVolume(x),
+                setMuted: (on) => radio.actions.setMuted(on),
+            };
+        }
+        const l = listenOf(vfos, v.id);
+        const live = snap.vfos[v.id] || null;
+        return {
+            out: l.out,
+            pan: live ? live.pan : null,
+            vol: l.vol,
+            muted: l.muted,
+            live,
+            setVolume: (x) => subs.setVolume(v.id, x),
+            setMuted: (on) => subs.setMuted(v.id, on),
+        };
+    };
+    const setOut = (id, out) => { touchVfo(id); subs.setOutput(id, out); };
+
+    const rowButton = (v) => (
+        <button
+            key={multi ? undefined : v.id}
+            type="button"
+            className={`vfos__row${v.active ? ' is-active' : ''}${v.listening ? ' is-listening' : ''}`}
+            aria-pressed={v.active}
+            // An unused slot takes a copy of what is live rather than
+            // doing nothing, which is what the Receiver panel's
+            // buttons do and what a radio does.
+            title={v.active
+                ? `VFO ${v.id} — in use`
+                : v.listening
+                    ? `Make VFO ${v.id} the main receiver — swaps with ${vfos.active}, which carries on playing`
+                    : v.empty
+                        ? `Switch to VFO ${v.id} — unused, so it takes the current settings`
+                        : `Switch to VFO ${v.id}`}
+            onClick={() => pick(v.id)}
+        >
+            {/* Every row emits the same cells, whether or not it
+                has anything to put in them. Rendering a cell only
+                when it has content lets the ones after it slide
+                along: a VFO outside a ham band has no band to show,
+                so its mode and filter width ended up somewhere the
+                rows above and below did not have them, and four
+                frequencies that cannot be read down a column are the
+                one thing this panel exists to avoid. */}
+            {/* A VFO being heard wears its colour on its letter — the
+                same one its passband and marker carry on the spectrum —
+                so a row and a passband can be matched without reading
+                either. Only while heard: a parked VFO is not on the
+                spectrum in that colour, and the letter is not a key to
+                anything. */}
+            <span
+                className={`vfos__id${v.listening || (v.active && anyListening) ? ' vfos__badge' : ''}`}
+            >
+                {v.id}
+            </span>
+            <span className={`vfos__freq${v.empty ? ' is-empty' : ''}`}>
+                {v.empty ? 'unused' : formatHz(v.frequency)}
+            </span>
+            <span className="vfos__mode">{v.empty ? '' : v.mode}</span>
+            {/* The filter width and the band qualify the frequency
+                rather than being it, so they are what a cut-down
+                view drops first. */}
+            {!minimal && <span className="vfos__width">{v.empty ? '' : v.width}</span>}
+            {!minimal && <span className="vfos__band">{v.empty ? '' : (v.band || '')}</span>}
+            {v.active && anyListening && <span className="vfos__main">MAIN</span>}
+        </button>
+    );
+
+    // "Hear this one as well". Never disabled for one already playing — it
+    // must always be possible to stop — and otherwise disabled, not hidden, at
+    // the limit or in IQ, with the reason as its tooltip. aria-disabled rather
+    // than `disabled` so the tooltip still shows and the button can still be
+    // focused to read it.
+    const speaker = (v) => {
+        const blocked = !canListen
+            ? LISTEN_IQ_REASON
+            : !v.listening && full
+                ? `${extras} of ${spare} in use on this receiver`
+                : null;
+        return (
+            <button
+                type="button"
+                className={`vfos__spk${v.listening ? ' is-on' : ''}${blocked ? ' is-disabled' : ''}`}
+                aria-pressed={v.listening}
+                aria-disabled={!!blocked}
+                aria-label={`Listen to VFO ${v.id} at the same time`}
+                title={blocked
+                    || (v.listening
+                        ? `Stop listening to VFO ${v.id}`
+                        : v.empty
+                            ? `Listen to VFO ${v.id} at the same time — unused, so it starts where the receiver is`
+                            : `Listen to VFO ${v.id} at the same time as ${vfos.active}`)}
+                // Its own act, never the row's: it sits beside the row rather
+                // than in it, and stops here in case it is ever nested.
+                onClick={(e) => {
+                    if (e && e.stopPropagation) e.stopPropagation();
+                    if (blocked) return;
+                    if (!v.listening) touchVfo(v.id);
+                    subs.setListening(v.id, !v.listening);
+                }}
+            >
+                <Icon.Volume size={14} />
+            </button>
+        );
+    };
+
+    // The second line of the expanded view: where it is heard, how loud, and
+    // whether its squelch is letting anything through, for the main receiver
+    // and each VFO playing beside it.
+    const soundLine = (v, s, note, refused) => (
+        <div className="vfos__ctl">
+            <OutButtons id={v.id} out={s.out} pan={s.pan} onChange={(o) => setOut(v.id, o)} />
+            <button
+                type="button"
+                className={`vfos__mute${s.muted ? ' is-on' : ''}`}
+                aria-pressed={s.muted}
+                aria-label={`Mute VFO ${v.id}`}
+                title={s.muted ? `Unmute VFO ${v.id}` : `Mute VFO ${v.id}`}
+                onClick={() => s.setMuted(!s.muted)}
+            >
+                {s.muted ? <Icon.Mute size={14} /> : <Icon.Volume size={14} />}
+            </button>
+            <span className="vfos__vol" title={`VFO ${v.id} volume: ${Math.round(s.vol * 100)}`}>
+                <Slider
+                    value={Math.round(s.vol * 100)}
+                    min={0}
+                    max={100}
+                    disabled={s.muted}
+                    onChange={(x) => s.setVolume(x / 100)}
+                />
+            </span>
+            <MiniMeter live={s.live} />
+            {/* Only with the squelch on: off, it is held open and "open" on
+                every row would be a reading that never changes. */}
+            {squelchOn && (
+                <span className={`vfos__sq${s.live && s.live.squelchOpen ? ' is-open' : ''}`}>
+                    {s.live && s.live.squelchOpen ? 'open' : 'closed'}
+                </span>
+            )}
+            {note && <span className={`vfos__note${refused ? ' is-refused' : ''}`}>{note}</span>}
+        </div>
+    );
+
+    const item = (v) => {
+        const heard = v.listening || (v.active && anyListening);
+        const s = heard ? sound(v) : null;
+        const live = v.active ? null : snap.vfos[v.id] || null;
+        const note = listenNote(v, live);
+        const refused = !!(live && live.refused);
+        // Main takes the accent it already wears; a listening VFO its colour.
+        const colour = v.active ? 'var(--accent)' : vfoColour(v.id);
+        return (
+            <div
+                key={v.id}
+                className={`vfos__item${heard ? ' is-heard' : ''}${refused ? ' is-refused' : ''}`}
+                style={heard ? { '--vfo-colour': colour } : undefined}
+            >
+                <div className="vfos__line">
+                    {rowButton(v)}
+                    {v.active ? <span className="vfos__ctl-gap" /> : speaker(v)}
+                    {/* Compact: the same answers in one line — the meter for
+                        a VFO beside the main one, and where each is heard. */}
+                    {minimal && v.listening && <MiniMeter live={live} title={refused ? note : null} />}
+                    {minimal && heard && (
+                        <OutButtons id={v.id} out={s.out} pan={s.pan} short onChange={(o) => setOut(v.id, o)} />
+                    )}
+                </div>
+                {!minimal && heard && soundLine(v, s, note, refused)}
+            </div>
+        );
+    };
 
     return (
         <div className="stack stack--tight">
-            <div className={`vfos${scan.scanning ? ' is-scanning' : ''}`}>
-                {rows.map((v) => (
-                    <button
-                        key={v.id}
-                        type="button"
-                        className={`vfos__row${v.active ? ' is-active' : ''}`}
-                        aria-pressed={v.active}
-                        // An unused slot takes a copy of what is live rather than
-                        // doing nothing, which is what the Receiver panel's
-                        // buttons do and what a radio does.
-                        title={v.active
-                            ? `VFO ${v.id} — in use`
-                            : v.empty
-                                ? `Switch to VFO ${v.id} — unused, so it takes the current settings`
-                                : `Switch to VFO ${v.id}`}
-                        // Picking a VFO by hand is taking the dial back, so it
-                        // ends the scan rather than being stepped off 250 ms later.
-                        onClick={() => { scan.stop(); selectVfo(radio, v.id); }}
-                    >
-                        {/* Every row emits the same cells, whether or not it
-                            has anything to put in them. Rendering a cell only
-                            when it has content lets the ones after it slide
-                            along: a VFO outside a ham band has no band to show,
-                            so its mode and filter width ended up somewhere the
-                            rows above and below did not have them, and four
-                            frequencies that cannot be read down a column are the
-                            one thing this panel exists to avoid. */}
-                        <span className="vfos__id">{v.id}</span>
-                        <span className={`vfos__freq${v.empty ? ' is-empty' : ''}`}>
-                            {v.empty ? 'unused' : formatHz(v.frequency)}
-                        </span>
-                        <span className="vfos__mode">{v.empty ? '' : v.mode}</span>
-                        {/* The filter width and the band qualify the frequency
-                            rather than being it, so they are what a cut-down
-                            view drops first. */}
-                        {!minimal && <span className="vfos__width">{v.empty ? '' : v.width}</span>}
-                        {!minimal && <span className="vfos__band">{v.empty ? '' : (v.band || '')}</span>}
-                    </button>
-                ))}
+            {/* The two things a row offers, said once rather than learned by
+                accident: clicking it goes there, the speaker plays it as well. */}
+            {canListen && (
+                <div className="vfos__hint">
+                    <span className="vfos__hint-text">
+                        Click a VFO to switch · <Icon.Volume size={12} /> to listen at the same time
+                    </span>
+                    <span className="vfos__hint-count" title={`Up to ${spare} VFO${spare === 1 ? '' : 's'} can play beside the main one on this receiver`}>
+                        {extras} of {spare} extra
+                    </span>
+                </div>
+            )}
+            <div className={`vfos${scan.scanning ? ' is-scanning' : ''}${multi && minimal ? ' is-compact' : ''}`}>
+                {multi ? rows.map(item) : rows.map(rowButton)}
             </div>
             {/* Stepping the VFOs on a timer until something is heard. Above the
                 copy row because it acts on all four, which is what this panel

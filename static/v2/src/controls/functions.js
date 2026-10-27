@@ -30,7 +30,11 @@ import {
     MIN_FREQ, MAX_FREQ,
 } from '../radio/constants.js';
 import { bandsInRange } from '../lib/bands.js';
-import { VFO_IDS, getVfos, selectVfo, stepVfo } from '../lib/vfos.js';
+import {
+    VFO_IDS, getVfos, isListening, listenOf, listenVfo, listeningVfos, selectVfo, setVfoListen,
+    stepVfo,
+} from '../lib/vfos.js';
+import { getVfoLimit } from '../radio/session.js';
 import { announceSettings, setAnnounceSettings } from '../lib/announce.js';
 import { requestFreqEntry } from '../lib/freqEntry.js';
 import {
@@ -423,7 +427,72 @@ const VFO = group('VFO', [
         // toggles away from.
         run: (ev, ctx) => selectVfo(radioOf(ctx), getVfos().active === 'A' ? 'B' : 'A'),
     },
+    // Listening to a VFO alongside the main receiver, where the server allows
+    // more than one stream (session.js getVfoLimit). Offered on every receiver
+    // all the same, so a mapping carried to one with a single VFO reads as
+    // itself; there it simply finds nothing it may do, which is what
+    // listenVfo's limit check answers.
+    ...VFO_IDS.map((id) => ({
+        id: `listen_${id.toLowerCase()}`,
+        label: `Listen to VFO ${id}`,
+        accepts: PRESS,
+        run: (ev, ctx) => listenVfo(radioOf(ctx), id, !isListening(getVfos(), id), getVfoLimit()),
+        lit: () => isListening(getVfos(), id),
+    })),
+    {
+        // The swap a listening VFO's row does on a click: it becomes the main
+        // receiver and the one you were on carries on listening. Stepped
+        // through the listening ones in A–D order from the one you are on, so
+        // repeated presses go round all of them.
+        id: 'listen_swap_next',
+        label: 'Swap to next listening VFO',
+        accepts: PRESS,
+        run: (ev, ctx) => {
+            const next = nextListeningVfo(getVfos());
+            return next ? selectVfo(radioOf(ctx), next) : false;
+        },
+    },
+    {
+        // One press to silence every VFO being heard alongside the main one and
+        // keep only the main receiver, and the same press to bring them back —
+        // without dropping their streams, so they return at once.
+        id: 'listen_mute_all',
+        label: 'Mute listening VFOs',
+        accepts: PRESS,
+        run: () => muteAllListening(),
+        lit: () => {
+            const on = listeningVfos(getVfos());
+            return on.length > 0 && on.every((v) => v.listen.muted);
+        },
+    },
 ]);
+
+/**
+ * The listening VFO after the active one, in A–D order and round the end, or
+ * null when nothing is listening. Exported for the tests.
+ */
+export function nextListeningVfo(state) {
+    const ids = listeningVfos(state).map((v) => v.id);
+    if (!ids.length) return null;
+    const from = VFO_IDS.indexOf(state.active);
+    for (let i = 1; i <= VFO_IDS.length; i++) {
+        const id = VFO_IDS[(from + i) % VFO_IDS.length];
+        if (ids.includes(id)) return id;
+    }
+    return null;
+}
+
+/**
+ * Mute every listening VFO, or unmute them all when they all already are.
+ * Returns whether they are muted now. Exported for the tests.
+ */
+export function muteAllListening() {
+    const on = listeningVfos(getVfos());
+    if (!on.length) return false;
+    const mute = !on.every((v) => listenOf(getVfos(), v.id).muted);
+    for (const v of on) setVfoListen(v.id, { muted: mute });
+    return mute;
+}
 
 // --- station hardware -------------------------------------------------------
 //

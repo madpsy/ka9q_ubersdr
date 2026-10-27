@@ -128,6 +128,12 @@ type Session struct {
 	Country        string // Country name from GeoIP lookup (internal use only)
 	CountryCode    string // ISO country code from GeoIP lookup (internal use only)
 
+	// VFO is which of the listener's simultaneous audio channels this is: 0 for
+	// the ordinary one, 1..N-1 for a secondary (IsSecondary).  Fixed at creation;
+	// see session_secondary_audio.go for what a secondary may and may not do.
+	VFO         int
+	IsSecondary bool
+
 	// blockExempt is true when this session must never be served the
 	// blocked-range announcement: an internal session (empty ClientIP), or a
 	// listener bypassed by IP or by password.  Both inputs are fixed for the
@@ -402,7 +408,9 @@ type SessionManager struct {
 	userAgents           map[string]string          // Map of user_session_id to User-Agent string
 	userAgentLastSeen    map[string]time.Time       // Map of user_session_id to last time it had an active session
 	uuidToIP             map[string]string          // Map of user_session_id to bound IP address (for security)
-	uuidAudioSessions    map[string]string          // Map of user_session_id to audio session ID (enforces 1 audio per UUID)
+	uuidAudioSessions    map[string]string          // Map of user_session_id to PRIMARY audio session ID (enforces 1 primary per UUID; secondaries are never in here)
+	uuidSecondaryAudio   map[string]map[int]string  // Map of user_session_id to VFO index (1..N-1) to secondary audio session ID
+	secondaryOrphanSince map[string]time.Time       // Map of user_session_id to when its secondaries were first seen without a primary
 	uuidSpectrumSessions map[string]string          // Map of user_session_id to spectrum session ID (enforces 1 spectrum per UUID)
 	uuidAudioLastSeen    map[string]time.Time       // Map of user_session_id to time when audio session last closed (or spectrum-only connect time)
 	userSessionBands     map[string]map[string]bool // Map of user_session_id to visited bands (cumulative across all sessions)
@@ -479,6 +487,8 @@ func NewSessionManager(config *Config, radiod radiodController, geoIPService *Ge
 		userAgentLastSeen:    make(map[string]time.Time),
 		uuidToIP:             make(map[string]string),
 		uuidAudioSessions:    make(map[string]string),
+		uuidSecondaryAudio:   make(map[string]map[int]string),
+		secondaryOrphanSince: make(map[string]time.Time),
 		uuidSpectrumSessions: make(map[string]string),
 		uuidAudioLastSeen:    make(map[string]time.Time),
 		userSessionBands:     make(map[string]map[string]bool),
@@ -605,8 +615,26 @@ func (sm *SessionManager) CreateSessionWithBandwidth(frequency uint64, mode stri
 
 // CreateSessionWithBandwidthAndPassword creates a new session with a unique channel, specified bandwidth, and bypass password
 func (sm *SessionManager) CreateSessionWithBandwidthAndPassword(frequency uint64, mode string, bandwidth int, sourceIP, clientIP, userSessionID, password string) (*Session, error) {
+	return sm.createAudioSession(frequency, mode, bandwidth, sourceIP, clientIP, userSessionID, password, 0)
+}
+
+// createAudioSession is CreateSessionWithBandwidthAndPassword for any VFO
+// index.  vfo 0 is the ordinary (primary) audio session and behaves exactly as
+// it always has; anything above is a secondary, which shares the one radiod
+// channel per session but almost none of the bookkeeping -- the differences are
+// marked inline and explained in session_secondary_audio.go.
+func (sm *SessionManager) createAudioSession(frequency uint64, mode string, bandwidth int, sourceIP, clientIP, userSessionID, password string, vfo int) (*Session, error) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
+
+	secondary := vfo > 0
+	if secondary {
+		// Before the rate bucket, so a refusal that will be refused again on
+		// retry does not also spend one of the listener's creations.
+		if err := sm.checkSecondaryAudioLocked(mode, clientIP, userSessionID, password, vfo); err != nil {
+			return nil, err
+		}
+	}
 
 	// Track first time we see this user_session_id
 	if userSessionID != "" {
@@ -615,8 +643,15 @@ func (sm *SessionManager) CreateSessionWithBandwidthAndPassword(frequency uint64
 		}
 	}
 
-	// Throttle session creation churn (reconnect loops) before doing any work
-	if err := sm.checkSessionCreateRate("audio", userSessionID, clientIP, password); err != nil {
+	// Throttle session creation churn (reconnect loops) before doing any work.
+	// Secondaries draw on a bucket of their own: a listener bringing up three
+	// extra VFOs must not use up the creations their main audio needs to
+	// reconnect, and a secondary stuck in a loop must not starve it either.
+	createKind := "audio"
+	if secondary {
+		createKind = "audio2"
+	}
+	if err := sm.checkSessionCreateRate(createKind, userSessionID, clientIP, password); err != nil {
 		return nil, err
 	}
 
@@ -647,7 +682,16 @@ func (sm *SessionManager) CreateSessionWithBandwidthAndPassword(frequency uint64
 	// Check session limit based on unique user_session_ids
 	// Skip this check if the IP is in the bypass list OR if this is an internal session (no IP)
 	// Internal sessions (noise floor, decoders) have empty ClientIP and should not count towards user limits
-	if clientIP != "" && !sm.config.Server.IsIPTimeoutBypassed(clientIP, password) {
+	//
+	// A secondary skips the user limits: it exists only alongside a live
+	// primary on the same UUID, which already holds that UUID's slot.  The
+	// daily budget is per IP and still applies.
+	if secondary {
+		if clientIP != "" && !sm.config.Server.IsIPTimeoutBypassed(clientIP, password) &&
+			sm.config.Server.MaxDailyTimePerIP > 0 && sm.dailyTracker.IsLimitExceeded(clientIP, sm.config.Server.MaxDailyTimePerIP) {
+			return nil, fmt.Errorf("daily time limit exceeded for your IP address (%d minutes per 24 hours)", sm.config.Server.MaxDailyTimePerIP/60)
+		}
+	} else if clientIP != "" && !sm.config.Server.IsIPTimeoutBypassed(clientIP, password) {
 		// If userSessionID is empty, treat as a unique user for each session
 		if userSessionID == "" {
 			// No UUID provided - count as unique user per session (legacy behavior)
@@ -672,7 +716,7 @@ func (sm *SessionManager) CreateSessionWithBandwidthAndPassword(frequency uint64
 
 	// Check if we've reached the maximum unique UUIDs per IP (if configured)
 	// Skip this check if the IP is in the bypass list
-	if sm.config.Server.MaxSessionsIP > 0 && clientIP != "" && userSessionID != "" {
+	if !secondary && sm.config.Server.MaxSessionsIP > 0 && clientIP != "" && userSessionID != "" {
 		if !sm.config.Server.IsIPTimeoutBypassed(clientIP, password) {
 			// Check if this is a new UUID for this IP
 			if uuidSet, exists := sm.ipToUUIDs[clientIP]; exists {
@@ -695,9 +739,23 @@ func (sm *SessionManager) CreateSessionWithBandwidthAndPassword(frequency uint64
 		}
 	}
 
-	// Check if this UUID already has an audio session
-	// If so, replace it (allows reconnection after disconnection)
-	if userSessionID != "" {
+	// Check if this UUID already has an audio session at this index.
+	// If so, replace it (allows reconnection after disconnection).  A secondary
+	// replaces only its own index, never the primary or another secondary.
+	if secondary {
+		if existingSessionID, exists := sm.uuidSecondaryAudio[userSessionID][vfo]; exists {
+			log.Printf("Replacing existing VFO %d audio session %s for UUID %s (reconnection detected)", vfo, existingSessionID, userSessionID)
+			sm.mu.Unlock()
+			if err := sm.DestroySession(existingSessionID); err != nil {
+				log.Printf("Warning: failed to destroy old VFO %d audio session %s: %v", vfo, existingSessionID, err)
+			}
+			sm.mu.Lock()
+			// The primary may have gone while the lock was down.
+			if _, ok := sm.uuidAudioSessions[userSessionID]; !ok {
+				return nil, errSecondaryNoPrimary
+			}
+		}
+	} else if userSessionID != "" {
 		if existingSessionID, exists := sm.uuidAudioSessions[userSessionID]; exists {
 			log.Printf("Replacing existing audio session %s for UUID %s (reconnection detected)", existingSessionID, userSessionID)
 			// Unlock before calling DestroySession to avoid deadlock
@@ -768,6 +826,8 @@ func (sm *SessionManager) CreateSessionWithBandwidthAndPassword(frequency uint64
 		BypassPassword:    password, // Store the password in the session
 		VisitedBands:      make(map[string]bool),
 		VisitedModes:      make(map[string]bool),
+		VFO:               vfo,
+		IsSecondary:       secondary,
 		// Internal sessions (noise floor, frequency reference) and bypassed
 		// listeners are never served the blocked-range announcement.
 		blockExempt: clientIP == "" || sm.config.Server.IsIPTimeoutBypassed(clientIP, password),
@@ -851,8 +911,18 @@ func (sm *SessionManager) CreateSessionWithBandwidthAndPassword(frequency uint64
 			}
 		}
 		sm.userSessionUUIDs[userSessionID]++
-		// Track audio session for this UUID
-		sm.uuidAudioSessions[userSessionID] = sessionID
+		// Track audio session for this UUID.  uuidAudioSessions is primaries
+		// only: reconnect detection, the spectrum-only eviction and
+		// HasActiveAudioSession all mean "the listener's audio", and a
+		// secondary standing in for it would confuse every one of them.
+		if secondary {
+			if sm.uuidSecondaryAudio[userSessionID] == nil {
+				sm.uuidSecondaryAudio[userSessionID] = make(map[int]string)
+			}
+			sm.uuidSecondaryAudio[userSessionID][vfo] = sessionID
+		} else {
+			sm.uuidAudioSessions[userSessionID] = sessionID
+		}
 	}
 
 	// Track IP to UUID mapping
@@ -869,8 +939,14 @@ func (sm *SessionManager) CreateSessionWithBandwidthAndPassword(frequency uint64
 			len(sm.sessions), len(sm.ssrcToSession), len(sm.userSessionUUIDs))
 	}
 
-	log.Printf("Session created: %s (channel: %s, SSRC: 0x%08x, freq: %d Hz, mode: %s, bandwidth: %d Hz, user: %s)",
-		sessionID, channelName, ssrc, frequency, mode, bandwidth, userSessionID)
+	log.Printf("Session created: %s (channel: %s, SSRC: 0x%08x, freq: %d Hz, mode: %s, bandwidth: %d Hz, user: %s, vfo: %d)",
+		sessionID, channelName, ssrc, frequency, mode, bandwidth, userSessionID, vfo)
+
+	// A secondary is not a user arriving: the primary already logged and
+	// announced them.
+	if secondary {
+		return session, nil
+	}
 
 	// Log session activity if this is a NEW UUID OR if adding audio to existing spectrum-only session
 	if sm.activityLogger != nil && (isNewUUID || !hadAudioBefore) {
@@ -2198,7 +2274,15 @@ func (sm *SessionManager) DestroySession(sessionID string) error {
 		}
 
 		// Remove from audio/spectrum session tracking
-		if session.IsSpectrum {
+		if session.IsSecondary {
+			if byVFO := sm.uuidSecondaryAudio[session.UserSessionID]; byVFO[session.VFO] == sessionID {
+				delete(byVFO, session.VFO)
+				if len(byVFO) == 0 {
+					delete(sm.uuidSecondaryAudio, session.UserSessionID)
+					delete(sm.secondaryOrphanSince, session.UserSessionID)
+				}
+			}
+		} else if session.IsSpectrum {
 			if sm.uuidSpectrumSessions[session.UserSessionID] == sessionID {
 				delete(sm.uuidSpectrumSessions, session.UserSessionID)
 			}
@@ -2237,8 +2321,10 @@ func (sm *SessionManager) DestroySession(sessionID string) error {
 
 	sm.mu.Unlock()
 
-	// Fire session disconnect notification for real user sessions (skip internal/background)
-	if session.ClientIP != "" && !session.IsBackground {
+	// Fire session disconnect notification for real user sessions (skip internal/background).
+	// A secondary closing is not the user leaving, any more than its opening was
+	// them arriving.
+	if session.ClientIP != "" && !session.IsBackground && !session.IsSecondary {
 		sm.fireSessionEvent(UserSessionEvent{
 			Action:        UserSessionDisconnected,
 			ClientIP:      session.ClientIP,
@@ -2382,6 +2468,7 @@ func (sm *SessionManager) cleanupLoop() {
 
 	for range ticker.C {
 		sm.cleanupInactiveSessions()
+		sm.reapOrphanedSecondaries()
 		sm.cleanupSpectrumOnlySessions()
 		sm.cleanupExpiredKickedUUIDs()
 		sm.cleanupOrphanedUserAgents()
@@ -2685,6 +2772,13 @@ func (sm *SessionManager) cleanupInactiveSessions() {
 	uuidSessionTypes := make(map[string]map[string]bool) // UUID -> set of session types (audio/spectrum)
 
 	for _, session := range sm.sessions {
+		// Secondaries are never pinged -- the client keeps its primary and its
+		// spectrum alive and nothing else -- so one would always look idle, and
+		// an idle session here kicks its whole UUID.  Their lifetime is the
+		// primary's instead: reapOrphanedSecondaries.
+		if session.IsSecondary {
+			continue
+		}
 		session.mu.RLock()
 		inactive := now.Sub(session.LastActive)
 		userSessionID := session.UserSessionID
@@ -2944,7 +3038,9 @@ func (sm *SessionManager) GetAudioUsersForViewer(viewerUserSessionID string) []U
 	seen := make(map[string]*UnifiedUserInfo)
 
 	for _, session := range sm.sessions {
-		if session.IsSpectrum {
+		// A secondary VFO is the same listener again, and the listener is where
+		// their primary is tuned.
+		if session.IsSpectrum || session.IsSecondary {
 			continue
 		}
 		if session.ClientIP == "" {
@@ -3489,6 +3585,8 @@ func (sm *SessionManager) GetAllSessionsInfo() []map[string]interface{} {
 			"mode":                 session.Mode,
 			"is_spectrum":          session.IsSpectrum,
 			"is_shared_subscriber": session.IsSharedSubscriber,
+			"vfo":                  session.VFO,
+			"is_secondary":         session.IsSecondary,
 			"source_ip":            session.SourceIP,
 			"client_ip":            session.ClientIP,
 			"user_session_id":      session.UserSessionID,

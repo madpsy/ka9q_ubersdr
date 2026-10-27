@@ -446,13 +446,15 @@ func HandleStopAudioStream(sessions *SessionManager) http.HandlerFunc {
 	}
 }
 
-// findAudioSessionByUserID finds the non-spectrum audio session for a given
-// userSessionID.  Returns nil if not found.
+// findAudioSessionByUserID finds the primary audio session for a given
+// userSessionID -- never a secondary VFO, which is not the listener's audio as
+// far as anything outside session_secondary_audio.go is concerned.  Returns
+// nil if not found.
 func (sm *SessionManager) findAudioSessionByUserID(userSessionID string) *Session {
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
 	for _, session := range sm.sessions {
-		if session.UserSessionID == userSessionID && !session.IsSpectrum {
+		if session.UserSessionID == userSessionID && !session.IsSpectrum && !session.IsSecondary {
 			return session
 		}
 	}

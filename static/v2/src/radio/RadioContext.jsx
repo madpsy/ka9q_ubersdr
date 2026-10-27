@@ -14,6 +14,7 @@ import React, { createContext, useContext, useEffect, useMemo, useRef, useState 
 import { AudioConnection } from './audio-connection.js';
 import { SpectrumConnection } from './spectrum-connection.js';
 import { AudioPlayer } from './audio-player.js';
+import { squelchState } from './squelchState.js';
 import { connectionCheck, startSessionId } from './session.js';
 // Logging only — the socket belongs to its own module. See the wiring effect.
 import { dxcluster } from './dxcluster-connection.js';
@@ -26,7 +27,7 @@ import { getRmNoise, rmCredentials, rmModeSupported } from '../lib/rmnoise.js';
 import {
     AGC_CONTROLS, MAX_FREQ, MIN_FREQ, MODE_BY_ID, MODES, applyTuningRange, bandwidthLimits, defaultAGC,
     hasAGCSettings,
-    isIQ, isWideIQ, SQUELCH_AUTO_SAMPLES, SQUELCH_HANG_MS, SQUELCH_MIN, SQUELCH_SENTINEL, snapStep,
+    isIQ, isWideIQ, SQUELCH_AUTO_SAMPLES, SQUELCH_MIN, SQUELCH_SENTINEL, snapStep,
     autoSquelchValue, squelchEnabled, squelchThreshold, clampMargin,
     marginForMode, MARGIN_IQ_START_DB } from './constants.js';
 import { clamp } from '../lib/format.js';
@@ -586,28 +587,19 @@ export function RadioProvider({ children }) {
                 if (m.snrHistory.length > SQUELCH_AUTO_SAMPLES) m.snrHistory.shift();
             }
 
-            // Mirror audioGateAllows() so the indicator reflects what the
-            // server is doing, including its 500 ms hang timer — otherwise the
-            // badge flickers closed on every syllable gap in speech.
-            //
-            // IQ is held open whatever the threshold says, because the server
-            // skips the gate entirely for it (see the isIQMode checks around
-            // audioGateAllows). The threshold itself survives a trip through IQ
-            // — the panel only hides its control — so without this the badge
-            // would read CLOSED over a stream nothing is gating. A ref because
-            // this handler is subscribed once and must not re-subscribe on
-            // every retune.
-            const threshold = iqRef.current ? null : gateRef.current;
-            const now = performance.now();
-            if (threshold == null) {
-                m.squelchOpen = true;
-                m.lastGateOpenAt = now;
-            } else if (m.snr != null && m.snr >= threshold) {
-                m.squelchOpen = true;
-                m.lastGateOpenAt = now;
-            } else {
-                m.squelchOpen = now - m.lastGateOpenAt < SQUELCH_HANG_MS;
-            }
+            // Mirror the server's audio gate, hang and IQ exception included —
+            // see radio/squelchState.js, which the extra VFOs share. Refs
+            // because this handler is subscribed once and must not re-subscribe
+            // on every retune.
+            const gate = squelchState({
+                snr: m.snr,
+                threshold: gateRef.current,
+                iq: iqRef.current,
+                now: performance.now(),
+                lastOpenAt: m.lastGateOpenAt,
+            });
+            m.squelchOpen = gate.open;
+            m.lastGateOpenAt = gate.lastOpenAt;
             // Kept with the audio it came with, so a replay can show it.
             getTimeshift().noteSignal({ basebandPower, noisePower, squelchOpen: m.squelchOpen });
         }));

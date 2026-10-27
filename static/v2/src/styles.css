@@ -3034,6 +3034,18 @@ a.btn { text-decoration: none; }
     border-color: var(--accent);
     color: var(--accent-ink);
 }
+/* A VFO being heard alongside the main one: a dot in its colour on the rim,
+   the colour its passband wears on the spectrum. */
+.vfo-btn { position: relative; }
+.vfo-btn__dot {
+    position: absolute;
+    top: -1px;
+    right: -1px;
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    box-shadow: 0 0 0 1.5px var(--surface);
+}
 
 /* The two step buttons take the room and the picker takes what it needs, rather
    than the other way round: the picker is set once and read at a glance, while
@@ -13375,6 +13387,182 @@ a.btn { text-decoration: none; }
     font-family: var(--font);
     font-size: 0.85em;
     color: var(--text-faint);
+}
+
+/* Simultaneous VFOs. Only drawn where the server allows more than one stream,
+   so a receiver with one keeps the plain rows above.
+   A row is then the switch button plus a speaker button beside it — a button
+   cannot hold buttons, and the two must not be mistaken for each other anyway —
+   and, in the full view, a line under it for how a VFO being heard sounds.
+   Colour is carried by borders and filled badges with dark ink, never by
+   coloured text: the VFO colours are picked to read on the spectrum's black
+   canvas, and yellow text on the light theme's panel would not read at all. */
+.vfos__hint {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    font-size: 0.78em;
+    color: var(--text-dim);
+}
+.vfos__hint-text { min-width: 0; }
+.vfos__hint-text svg { vertical-align: -2px; }
+.vfos__hint-count {
+    flex-shrink: 0;
+    color: var(--text-faint);
+    font-variant-numeric: tabular-nums;
+}
+.vfos__item { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.vfos__line { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; min-width: 0; }
+.vfos__line > .vfos__row { flex: 1 1 auto; min-width: 0; }
+
+/* Heard: a stripe down the left of the row in the VFO's colour (main's is the
+   accent), continued down its sound line so the two read as one block. */
+.vfos__item.is-heard > .vfos__line > .vfos__row {
+    border-left: 3px solid var(--vfo-colour);
+    padding-left: 4px;
+}
+.vfos__badge {
+    width: 1.5em;
+    text-align: center;
+    border-radius: 3px;
+}
+.vfos__item.is-heard .vfos__badge { background: var(--vfo-colour); color: #111; }
+.vfos__item.is-heard .vfos__row.is-active .vfos__badge { color: var(--accent-ink); }
+.vfos__item.is-refused .vfos__badge {
+    background: transparent;
+    color: var(--text-dim);
+    box-shadow: inset 0 0 0 1px var(--vfo-colour);
+}
+
+.vfos__main {
+    flex-shrink: 0;
+    font-size: 0.7em;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    color: var(--accent);
+}
+
+/* The speaker: "hear this one as well". Square and the same on every row, lit
+   or not, so the column of them lines up and its state is the fill. */
+.vfos__spk,
+.vfos__mute,
+.vfos__seg-btn {
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    height: 24px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--surface-2);
+    color: var(--text-dim);
+    cursor: pointer;
+}
+.vfos__spk,
+.vfos__mute { width: 26px; padding: 0; }
+.vfos__spk:hover:not(.is-disabled),
+.vfos__mute:hover,
+.vfos__seg-btn:hover { border-color: var(--accent); color: var(--text); }
+.vfos__spk:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.vfos__spk.is-on,
+.vfos__spk.is-on:hover {
+    background: var(--vfo-colour);
+    border-color: var(--vfo-colour);
+    color: #111;
+}
+/* Still on, but the server will not carry it: outlined, not filled. */
+.vfos__item.is-refused .vfos__spk.is-on {
+    background: var(--surface-2);
+    border-style: dashed;
+    color: var(--text-dim);
+}
+.vfos__spk.is-disabled { opacity: 0.4; cursor: not-allowed; }
+.vfos__mute.is-on { color: var(--warn, #f2b544); }
+/* The main row has no speaker; this holds the speaker column's place. */
+.vfos__ctl-gap { flex: 0 0 26px; }
+
+/* L | Auto | Both | R, as one strip with the lit one in the accent like every
+   other chosen option in the app. */
+.vfos__seg {
+    flex-shrink: 0;
+    display: inline-flex;
+}
+.vfos__seg-btn {
+    min-width: 22px;
+    height: 22px;
+    padding: 0 5px;
+    border-radius: 0;
+    margin-left: -1px;
+    font-size: 0.72em;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+.vfos__seg-btn:first-child {
+    margin-left: 0;
+    border-radius: var(--radius-sm) 0 0 var(--radius-sm);
+}
+.vfos__seg-btn:last-child { border-radius: 0 var(--radius-sm) var(--radius-sm) 0; }
+.vfos__seg-btn.is-on,
+.vfos__seg-btn.is-on:hover {
+    position: relative;
+    background: var(--accent);
+    border-color: var(--accent);
+    color: var(--accent-ink);
+    font-weight: 600;
+}
+/* Compact: the strip goes to the end of the line, and onto its own when the
+   dock is too narrow to hold it beside the row. */
+.vfos.is-compact .vfos__seg { margin-left: auto; }
+
+/* The full view's second line: output, mute, volume, meter, and any note. */
+.vfos__ctl {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px 6px;
+    padding: 2px 0 3px 7px;
+    border-left: 3px solid var(--vfo-colour);
+}
+.vfos__vol { flex: 1 1 60px; min-width: 50px; max-width: 140px; display: flex; }
+.vfos__vol .slider { flex: 1; }
+.vfos__sq {
+    font-size: 0.72em;
+    color: var(--text-faint);
+    min-width: 3.2em;
+}
+.vfos__sq.is-open { color: var(--text-dim); }
+
+/* A signal meter in miniature: dimmed while the VFO's squelch is shut. */
+.vfos__meter {
+    flex: 0 0 28px;
+    height: 5px;
+    border-radius: 2px;
+    background: var(--surface-3, rgba(255, 255, 255, 0.08));
+    overflow: hidden;
+}
+.vfos__meter-fill {
+    display: block;
+    height: 100%;
+    background: var(--good, #3ee07f);
+    transition: width 120ms linear, opacity var(--dur) var(--ease);
+}
+.vfos__meter.is-closed .vfos__meter-fill { opacity: 0.3; }
+
+.vfos__note {
+    flex-basis: 100%;
+    font-size: 0.75em;
+    color: var(--text-faint);
+}
+.vfos__note.is-refused { color: var(--warn, #f2b544); }
+
+/* A finger needs more than a mouse: every listening control at least 28px tall
+   where the pointer is coarse, which is also where the panel is a bottom sheet. */
+@media (pointer: coarse) {
+    .vfos__spk,
+    .vfos__mute { width: 32px; height: 30px; }
+    .vfos__seg-btn { height: 30px; min-width: 30px; }
+    .vfos__ctl-gap { flex-basis: 32px; }
 }
 
 /* Narrow dock: the qualifiers go before the frequency does, one at a time.

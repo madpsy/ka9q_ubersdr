@@ -105,6 +105,11 @@ export class AudioPlayer extends Emitter {
         // 'both' | 'left' | 'right'. Only meaningful on a stereo stream (IQ
         // modes, and stereo Opus); a mono stream ignores it.
         this.channelMode = 'both';
+        // A stereo position, -1..+1, or null. Set only while more than one VFO
+        // is being listened to (radio/subReceivers.js places every stream in
+        // the stereo field, this one included); null hands the two sides back
+        // to channelMode. See setPan.
+        this.pan = null;
         this.channels = 0;          // planes in the buffer last scheduled
         // What the stream declares itself to be, from the packet header — see
         // _noteStream. The rate is not always the rate the context runs at:
@@ -167,6 +172,7 @@ export class AudioPlayer extends Emitter {
         this.anchorWanted = false;  // Media Session needs a media element playing
         this.element = null;        // the hidden <audio> those two share
         this.local = null;          // gate on the context's own output
+        this.subBus = null;         // where the extra VFOs join the output — see there
         this.external = false;      // something outside the graph is playing this
         // Bumped every time the context is rebuilt. A recording holds nodes
         // belonging to one context, so anything capturing audio has to notice
@@ -292,6 +298,9 @@ export class AudioPlayer extends Emitter {
         this.txSilenced = !!on;
         if (!this.txGate || !this.ctx) return;
         this.txGate.gain.setTargetAtTime(this.txSilenced ? 0 : 1, this.ctx.currentTime, 0.015);
+        // The extra VFOs are speakers too, and a rig on the air is just as
+        // loud in them.
+        if (this.subBus) this.subBus.gain.setTargetAtTime(this.txSilenced ? 0 : 1, this.ctx.currentTime, 0.015);
     }
 
     setBufferSec(sec) {
@@ -301,6 +310,15 @@ export class AudioPlayer extends Emitter {
     // The cushion to (re)start from, in seconds. Deliberately not the ceiling:
     // starting at the limit leaves no room for the jitter the ceiling exists to
     // absorb, so the first late packet would overflow it.
+    /**
+     * How far ahead a stream that is starting should be scheduled — the same
+     * cushion this player primes with, so audio played beside it (the extra
+     * VFOs) rides out the same network jitter the operator chose a buffer for.
+     */
+    leadInSec() {
+        return this._primeSec();
+    }
+
     _primeSec() {
         return Math.min(Math.max(PRIME_SEC, MIN_PRIME_SEC), this.bufferSec * 0.75);
     }
@@ -518,6 +536,14 @@ export class AudioPlayer extends Emitter {
         this.local.gain.value = this.external ? 0 : 1;
         this.txGate.connect(this.local);
         this.local.connect(this.ctx.destination);
+        // The extra VFOs' bus — see the getter. Beside `local` rather than into
+        // it, so the HTTP stream taking over the main receiver's playback
+        // leaves them playing, and after none of the main chain: not its
+        // filters, not its duck, not its recorder tap. Only the TX silence
+        // reaches it, set on the node itself.
+        this.subBus = this.ctx.createGain();
+        this.subBus.gain.value = this.txSilenced ? 0 : 1;
+        this.subBus.connect(this.ctx.destination);
         // Recorder tap, at the point v1 takes it (app.js "Step 10"): after the
         // filter chain and the volume/mute fader, but before the L/R output
         // routing — so a recording holds the processed audio as heard, in both
@@ -545,6 +571,9 @@ export class AudioPlayer extends Emitter {
         this.nextPlayTime = this.ctx.currentTime + this._primeSec();
         this.queueEndCaptureMs = null;
         this._pendFrames = 0;
+        // For anything that builds nodes of its own in this context (the extra
+        // VFOs' voices): every one of them belongs to the context just closed.
+        this.emit('context', this.contextEpoch);
     }
 
     // Nothing else notices a context that has stopped running.
@@ -682,6 +711,12 @@ export class AudioPlayer extends Emitter {
 
         try { this.local.disconnect(); } catch (e) { /* not connected */ }
         this.local.connect(el._dest);
+        // Wherever the main receiver goes, the extra VFOs go: the same device,
+        // and on Firefox and Safari the same element.
+        if (this.subBus) {
+            try { this.subBus.disconnect(); } catch (e) { /* not connected */ }
+            this.subBus.connect(el._dest);
+        }
         // Autoplay policy can block this; audio starts from a user gesture, so
         // in practice it does not, and a failure here is silence that retrying
         // would not fix.
@@ -701,6 +736,10 @@ export class AudioPlayer extends Emitter {
         if (this.ctx && this.local) {
             try { this.local.disconnect(); } catch (e) { /* ignore */ }
             this.local.connect(this.ctx.destination);
+        }
+        if (this.ctx && this.subBus) {
+            try { this.subBus.disconnect(); } catch (e) { /* ignore */ }
+            this.subBus.connect(this.ctx.destination);
         }
     }
 
@@ -1124,10 +1163,33 @@ export class AudioPlayer extends Emitter {
         this._applyChannelMode();
     }
 
+    /**
+     * Place this stream at `p` in the stereo field, -1 left .. +1 right, or
+     * hand the sides back to the channel picker with null.
+     *
+     * Equal-power, on the same two side gains the channel picker drives, so
+     * the two cannot both be in force: while a pan is set it wins, and the
+     * picker's choice is kept to come back to. That is the arrangement the
+     * Audio panel shows — its picker says the sides are set per VFO while more
+     * than one is listening. In IQ the caller sets none, since left and right
+     * are I and Q there and the picker is choosing a signal, not a seat.
+     */
+    setPan(p) {
+        const n = Number(p);
+        this.pan = p == null || !Number.isFinite(n) ? null : Math.max(-1, Math.min(1, n));
+        this._applyChannelMode();
+    }
+
     _applyChannelMode() {
         if (!this.leftGain || !this.rightGain || !this.ctx) return;
-        const m = this.channelMode;
         const t = this.ctx.currentTime;
+        if (this.pan != null) {
+            const a = ((this.pan + 1) * Math.PI) / 4;
+            this.leftGain.gain.setTargetAtTime(Math.cos(a), t, 0.01);
+            this.rightGain.gain.setTargetAtTime(Math.sin(a), t, 0.01);
+            return;
+        }
+        const m = this.channelMode;
         this.leftGain.gain.setTargetAtTime(m === 'right' ? 0 : 1, t, 0.01);
         this.rightGain.gain.setTargetAtTime(m === 'left' ? 0 : 1, t, 0.01);
     }
@@ -1375,6 +1437,19 @@ export class AudioPlayer extends Emitter {
      */
     get outputBus() {
         return this.local || null;
+    }
+
+    /**
+     * Where the extra VFOs' voices join the output (radio/subReceivers.js).
+     *
+     * Routed exactly as `outputBus` is — same device, same element — but not
+     * through it, because that one goes to zero while the Media Session HTTP
+     * stream is playing the *main* receiver in its place, and that stream
+     * carries nothing of the others. Silenced for TX like the main audio. A
+     * new one with every context; the 'context' event says when.
+     */
+    get subOutput() {
+        return this.subBus || null;
     }
 
     // Ask to be told, once, when audio is next genuinely playing.

@@ -3872,6 +3872,10 @@ type ConnectionCheckResponse struct {
 	AllowedIQModes         []string `json:"allowed_iq_modes"`          // List of IQ modes the user can access
 	DailyTimeUsedSecs      int64    `json:"daily_time_used_secs"`      // Seconds used in the rolling 24-hour window (0 if no limit)
 	DailyTimeRemainingSecs int64    `json:"daily_time_remaining_secs"` // Seconds remaining today (-1 = unlimited)
+	// VFOs is how many audio channels this listener may hold at once (/ws
+	// vfo=0..VFOs-1); see session_secondary_audio.go.  Absent from older
+	// servers, which a client reads as 1.
+	VFOs int `json:"vfos"`
 }
 
 // handleConnectionCheck checks if a connection will be allowed before WebSocket upgrade
@@ -3993,6 +3997,7 @@ func handleConnectionCheck(w http.ResponseWriter, r *http.Request, sessions *Ses
 		AllowedIQModes:         allowedIQModes,
 		DailyTimeUsedSecs:      dailyTimeUsed,
 		DailyTimeRemainingSecs: dailyTimeRemaining,
+		VFOs:                   sessions.config.Server.AudioVFOLimit(clientIP, req.Password),
 	}
 
 	// Check if IP is banned
@@ -4409,8 +4414,9 @@ func handleStats(w http.ResponseWriter, r *http.Request, sessions *SessionManage
 
 	for _, session := range sessions.sessions {
 		// Skip spectrum sessions, only include audio channels
-		// Also skip sessions without a ClientIP address
-		if !session.IsSpectrum && session.ClientIP != "" {
+		// Also skip sessions without a ClientIP address, and secondary VFOs:
+		// this is a list of listeners, and those are a listener's extra ears.
+		if !session.IsSpectrum && !session.IsSecondary && session.ClientIP != "" {
 			session.mu.RLock()
 
 			// Check if this IP is bypassed
@@ -4459,7 +4465,7 @@ func handleStats(w http.ResponseWriter, r *http.Request, sessions *SessionManage
 			// We need to find the matching session to get the ClientIP and UserSessionID
 			sessions.mu.RLock()
 			for _, session := range sessions.sessions {
-				if !session.IsSpectrum && session.ClientIP != "" {
+				if !session.IsSpectrum && !session.IsSecondary && session.ClientIP != "" {
 					session.mu.RLock()
 					// Match by checking if session info matches
 					if sessionList[i]["frequency"] == session.Frequency &&

@@ -117,6 +117,10 @@ func sessionsToGeoJSON(rawSessions []map[string]interface{}) geoJSONFeatureColle
 		if b, _ := s["is_shared_subscriber"].(bool); b {
 			continue
 		}
+		// One marker per listener: a secondary VFO is the same person again.
+		if b, _ := s["is_secondary"].(bool); b {
+			continue
+		}
 
 		lat, latOK := toFloat(s["latitude"])
 		lon, lonOK := toFloat(s["longitude"])

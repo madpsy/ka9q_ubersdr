@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from '../react.js';
+import React, { useCallback, useEffect, useRef, useState } from '../react.js';
 import { useRadio } from '../radio/RadioContext.jsx';
 import { useDisplay } from '../display/DisplayContext.jsx';
 import FrequencyDial from '../components/FrequencyDial.jsx';
@@ -6,7 +6,12 @@ import FilterReset from '../components/FilterReset.jsx';
 import { Button, Field, Icon, Segmented, Slider } from '../components/ui.jsx';
 import { MarginPicker } from './AudioPanel.jsx';
 import useHoldPress from '../lib/useHoldPress.js';
-import { VFO_IDS, getVfos, onVfosChanged, selectVfo } from '../lib/vfos.js';
+import {
+    VFO_IDS, getVfos, isListening, listenVfo, onVfosChanged, selectVfo,
+} from '../lib/vfos.js';
+import { useVfoLimit } from '../radio/useSubReceivers.js';
+import { vfoColour } from '../lib/vfoColours.js';
+import { touchVfo } from '../lib/vfoMarks.js';
 import {
     AGC_CONTROLS, FILTER_WIDTH_MIN, FILTER_WIDTH_STEP, MODES, MODE_BY_ID, TUNING_STEPS,
     edgesForShift, edgesForWidth, filterShift, hasAGCSettings, isIQ,
@@ -61,39 +66,92 @@ function AGCSettings() {
 // The VFOs themselves live in lib/vfos.js, not here: this panel is unmounted
 // whenever it is collapsed or dragged to another dock, and the spectrum's
 // right-click menu writes them too.
+//
+// Where the server allows more than one stream, a VFO can also be *heard*
+// alongside the one you are on. That is the button's second job — right-click,
+// or hold on a touchscreen, the same gesture the IQ button uses for its widths —
+// and a listening VFO wears a dot in its colour, the one its passband carries on
+// the spectrum. The VFOs panel has the full set of listening controls; this is
+// the quick way in.
 function VfoBar() {
     const radio = useRadio();
     const [vfos, setLocal] = useState(getVfos);
+    const limit = useVfoLimit();
 
     useEffect(() => onVfosChanged(setLocal), []);
 
-    // The switch itself is in lib/vfos.js, because a control mapped to "VFO B"
-    // on a MIDI box or the FlexControl has to make exactly the same one.
-    const select = (id) => selectVfo(radio, id);
-
     return (
         <div className="vfo-bar">
-            {VFO_IDS.map((id) => {
-                const s = vfos.slots[id];
-                const on = vfos.active === id;
-                return (
-                    <button
-                        key={id}
-                        type="button"
-                        className={`vfo-btn${on ? ' is-active' : ''}`}
-                        aria-pressed={on}
-                        title={on
-                            ? `VFO ${id} — in use`
-                            : s
-                                ? `VFO ${id} — ${(s.frequency / 1e6).toFixed(3)} MHz ${s.mode.toUpperCase()}`
-                                : `VFO ${id} — unused; takes a copy of the current settings`}
-                        onClick={() => select(id)}
-                    >
-                        {id}
-                    </button>
-                );
-            })}
+            {VFO_IDS.map((id) => (
+                <VfoButton key={id} id={id} vfos={vfos} radio={radio} limit={limit} />
+            ))}
         </div>
+    );
+}
+
+// A toggle is not idempotent, and useHoldPress may call its action twice for one
+// gesture — Android sends a long press as both the timer and a contextmenu. So a
+// second call this soon after the first is the same gesture and is dropped.
+const LISTEN_TOGGLE_GUARD_MS = 700;
+
+/** Exported for the tests: whether a VFO button's secondary press does anything. */
+export function canToggleListen(vfos, id, limit) {
+    return limit > 1 && vfos.active !== id;
+}
+
+function VfoButton({ id, vfos, radio, limit }) {
+    const s = vfos.slots[id];
+    const on = vfos.active === id;
+    const listening = isListening(vfos, id, limit);
+    const last = useRef(0);
+
+    const toggle = useCallback(() => {
+        const now = performance.now();
+        if (now - last.current < LISTEN_TOGGLE_GUARD_MS) return;
+        last.current = now;
+        const state = getVfos();
+        if (!canToggleListen(state, id, limit)) return;
+        const want = !isListening(state, id, limit);
+        if (want) touchVfo(id);
+        listenVfo(radio, id, want, limit);
+    }, [id, radio, limit]);
+    const [press, afterHold] = useHoldPress(toggle);
+    // Only where there is something for the second press to do: a receiver
+    // with one VFO keeps the browser's own right-click on these buttons.
+    const secondary = canToggleListen(vfos, id, limit) ? press : {};
+
+    // The switch itself is in lib/vfos.js, because a control mapped to "VFO B"
+    // on a MIDI box or the FlexControl has to make exactly the same one.
+    const select = () => {
+        if (afterHold()) return;
+        selectVfo(radio, id);
+    };
+
+    const base = on
+        ? `VFO ${id} — in use`
+        : s
+            ? `VFO ${id} — ${(s.frequency / 1e6).toFixed(3)} MHz ${s.mode.toUpperCase()}`
+            : `VFO ${id} — unused; takes a copy of the current settings`;
+    const extra = !canToggleListen(vfos, id, limit)
+        ? ''
+        : listening
+            ? ' · listening — right-click or hold to stop'
+            : ' · right-click or hold to listen as well';
+
+    return (
+        <button
+            type="button"
+            className={`vfo-btn${on ? ' is-active' : ''}${listening ? ' is-listening' : ''}`}
+            aria-pressed={on}
+            title={base + extra}
+            onClick={select}
+            {...secondary}
+        >
+            {id}
+            {listening && (
+                <span className="vfo-btn__dot" style={{ background: vfoColour(id) }} aria-label="listening" />
+            )}
+        </button>
     );
 }
 

@@ -243,6 +243,18 @@ esbuild ../src/lib/bands.js --bundle --format=cjs --platform=node \
     --outfile=.build/bands.cjs --log-level=warning
 esbuild ../src/lib/vfos.js --bundle --format=cjs --platform=node \
     --outfile=.build/vfos.cjs --log-level=warning
+esbuild ../src/lib/vfoPan.js --bundle --format=cjs --platform=node \
+    --outfile=.build/vfopan.cjs --log-level=warning
+esbuild ../src/radio/squelchState.js --bundle --format=cjs --platform=node \
+    --outfile=.build/squelchstate.cjs --log-level=warning
+esbuild audiovfo.entry.js --bundle --format=cjs --platform=node \
+    --outfile=.build/audiovfo.cjs --log-level=warning
+esbuild subreceivers.entry.js --bundle --format=cjs --platform=node \
+    --outfile=.build/subreceivers.cjs --log-level=warning
+esbuild vfowatch.entry.js --bundle --format=cjs --platform=node \
+    --outfile=.build/vfowatch.cjs --log-level=warning
+esbuild vfolistenui.entry.js --bundle --format=cjs --platform=node \
+    --outfile=.build/vfolistenui.cjs --log-level=warning
 esbuild ../src/lib/needle.js --bundle --format=cjs --platform=node \
     --outfile=.build/needle.cjs --log-level=warning
 esbuild ../src/lib/listeners.js --bundle --format=cjs --platform=node \
@@ -553,6 +565,13 @@ node ranking.test.js
 node dss.test.js
 node samfallback.test.js
 node vfos.test.js
+node vfolisten.test.js
+node vfopan.test.js
+node squelchstate.test.js
+node audiovfo.test.js
+node subreceivers.test.js
+node vfowatch.test.js
+node vfolistenui.test.js
 node vfospanel.test.js
 node scanner.test.js
 node scannerpanel.test.js
@@ -712,6 +731,7 @@ node maxfps.test.js
 node shell.test.js
 node barrelmarks.test.js
 node audioresume.test.js
+node audiosubbus.test.js
 node wheelstep.test.js
 node iffit.test.js
 node audiotint.test.js

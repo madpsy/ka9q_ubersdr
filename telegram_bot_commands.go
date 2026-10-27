@@ -1017,6 +1017,11 @@ func (l *TelegramBotListener) handleSessions(chatID int64, args string) (string,
 		if isInternal {
 			continue
 		}
+		// A secondary VFO would otherwise compete with the primary for the
+		// user's "audio frequency"; the primary is where they are listening.
+		if isSecondary, _ := s["is_secondary"].(bool); isSecondary {
+			continue
+		}
 		isSpectrum, _ := s["is_spectrum"].(bool)
 
 		userSessionID, _ := s["user_session_id"].(string)

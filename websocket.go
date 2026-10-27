@@ -499,6 +499,17 @@ func (wsh *WebSocketHandler) HandleWebSocket(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
+	// Which of the listener's simultaneous audio channels this socket is: 0
+	// (absent) is the ordinary one, 1..N-1 a secondary.  See
+	// session_secondary_audio.go.  The index and mode limits are checked once
+	// the socket is up, so the client gets a readable error rather than a
+	// failed upgrade.
+	vfo, vfoErr := parseAudioVFOParam(query.Get("vfo"))
+	if vfoErr != nil {
+		http.Error(w, vfoErr.Error(), http.StatusBadRequest)
+		return
+	}
+
 	// Check connection rate limit (unless IP is bypassed via IP list or password)
 	if !wsh.config.Server.IsIPTimeoutBypassed(clientIP, password) && !wsh.connRateLimiter.AllowConnection(clientIP) {
 		log.Printf("Connection rate limit exceeded for IP: %s (client IP: %s)", sourceIP, clientIP)
@@ -729,8 +740,20 @@ func (wsh *WebSocketHandler) HandleWebSocket(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
+	// A secondary VFO is demodulated audio only, in either format.
+	if err := secondaryAudioConnectError(vfo, mode); err != nil {
+		log.Printf("Rejected VFO %d WebSocket connection: %v (client IP: %s)", vfo, err, clientIP)
+		wsh.sendError(conn, err.Error())
+		return
+	}
+
 	// Create initial session with IP tracking, user session ID, and bypass password
-	session, err := wsh.sessions.CreateSessionWithBandwidthAndPassword(frequency, mode, 3000, sourceIP, clientIP, userSessionID, password)
+	var session *Session
+	if vfo > 0 {
+		session, err = wsh.sessions.CreateSecondaryAudioSession(frequency, mode, 3000, sourceIP, clientIP, userSessionID, password, vfo)
+	} else {
+		session, err = wsh.sessions.CreateSessionWithBandwidthAndPassword(frequency, mode, 3000, sourceIP, clientIP, userSessionID, password)
+	}
 	if err != nil {
 		log.Printf("Failed to create session: %v", err)
 
@@ -921,8 +944,9 @@ func (wsh *WebSocketHandler) handleMessages(conn *wsConn, sessionHolder *session
 		// Update last active time
 		wsh.sessions.TouchSession(currentSession.ID)
 
-		// Check rate limit for this UUID (skip ping messages)
-		if msg.Type != "ping" && !wsh.rateLimiterManager.AllowAudio(currentSession.UserSessionID) {
+		// Check rate limit for this UUID (skip ping messages).  Each secondary
+		// VFO has its own bucket; the primary keeps the UUID's.
+		if msg.Type != "ping" && !wsh.rateLimiterManager.AllowAudioVFO(currentSession.UserSessionID, currentSession.VFO) {
 			// Record rate limit error in Prometheus
 			if wsh.prometheusMetrics != nil {
 				wsh.prometheusMetrics.RecordRateLimitError("audio")
@@ -973,6 +997,12 @@ func (wsh *WebSocketHandler) handleMessages(conn *wsConn, sessionHolder *session
 				if !validModes[msg.Mode] && !wideIQModes[msg.Mode] {
 					wsh.sendError(conn, fmt.Sprintf("Invalid mode '%s'. Valid modes: usb, lsb, am, sam, fm, nfm, cwu, cwl, iq", msg.Mode))
 					continue // Don't close connection, just reject this tune request
+				}
+
+				// A secondary VFO is never IQ, on connect or after.
+				if currentSession.IsSecondary && isIQModeName(msg.Mode) {
+					wsh.sendError(conn, fmt.Sprintf("Mode '%s' is not available on an additional VFO", msg.Mode))
+					continue
 				}
 
 				// Check if wide IQ mode requires bypass (via IP list or password)
@@ -1253,6 +1283,12 @@ func (wsh *WebSocketHandler) handleMessages(conn *wsConn, sessionHolder *session
 			//       or: { "type": "set_dsp", "enabled": false }
 			if version < 2 {
 				wsh.sendError(conn, "set_dsp requires protocol version 2")
+				continue
+			}
+			// The DSP insert is a shared, limited resource and secondaries
+			// are the cheap class of session; they never get one.
+			if currentSession.IsSecondary {
+				wsh.sendError(conn, "Noise reduction is not available on an additional VFO")
 				continue
 			}
 			if !wsh.config.DSP.Enabled || wsh.dspConn == nil {

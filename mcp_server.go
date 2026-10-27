@@ -584,7 +584,8 @@ func (m *MCPServer) handleGetActiveSessions(ctx context.Context, request mcp.Cal
 	sessions := make([]map[string]interface{}, 0)
 	index := 1
 	for _, session := range m.sessions.sessions {
-		if !session.IsSpectrum && session.ClientIP != "" {
+		// One entry per listener: a secondary VFO is the same listener again.
+		if !session.IsSpectrum && !session.IsSecondary && session.ClientIP != "" {
 			session.mu.RLock()
 
 			isBypassed := m.sessions.config.Server.IsIPTimeoutBypassed(session.ClientIP)

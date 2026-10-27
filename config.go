@@ -383,6 +383,7 @@ type ServerConfig struct {
 	SessionsPerMinute               int               `yaml:"sessions_per_minute"`       // /connection endpoint requests per minute per IP (0 = unlimited)
 	SessionCreateRateLimit          int               `yaml:"session_create_rate_limit"` // New sessions per minute per user (UUID), separately for audio and spectrum (0 = default 6, negative = unlimited)
 	SessionCreateBurst              int               `yaml:"session_create_burst"`      // New sessions allowed back-to-back before the per-minute rate bites (0 = default 3)
+	AudioVFOs                       int               `yaml:"audio_vfos"`                // Audio channels one listener may hear at once (0 = default 2, 1 = off, max 4; bypassed users always get 4)
 	EnforceSessionIPMatch           bool              `yaml:"enforce_session_ip_match"`  // Enforce that WebSocket connections must come from same IP as /connection (default: false)
 	TimeoutBypassIPs                []string          `yaml:"timeout_bypass_ips"`        // List of IPs/CIDRs that bypass idle and max session time limits
 	TrustedProxyIPs                 []string          `yaml:"trusted_proxy_ips"`         // List of IPs/CIDRs to trust X-Real-IP header from
@@ -1389,6 +1390,7 @@ func LoadConfig(filename string) (*Config, error) {
 	if config.Server.SessionCreateBurst < 1 {
 		config.Server.SessionCreateBurst = 3 // Default burst of 3 back-to-back creations
 	}
+	config.Server.AudioVFOs = normalizeAudioVFOs(config.Server.AudioVFOs)
 	// Set default public IQ modes if not specified (all restricted by default)
 	if config.Server.PublicIQModes == nil {
 		config.Server.PublicIQModes = map[string]bool{
@@ -2162,6 +2164,56 @@ func (sc *ServerConfig) parseTimeoutBypassIPs() error {
 	}
 
 	return nil
+}
+
+// maxAudioVFOs is the most audio channels one listener can hold at once, and
+// what a bypassed listener always gets.  Every extra VFO is another radiod
+// channel and another audio encoder, so the ceiling is a hard one rather than
+// something an operator can raise by mistake.
+const maxAudioVFOs = 4
+
+// defaultAudioVFOs is what an unconfigured server offers: the listener's own
+// channel plus one more, enough to watch a second frequency without letting a
+// single visitor take a quarter of the channel budget.
+const defaultAudioVFOs = 2
+
+// clampAudioVFOs maps server.audio_vfos as written onto the value served.
+// 0 means "not specified" and takes the default; anything outside 1..4 is
+// clamped rather than refused, because a typo in this one field should not keep
+// the receiver from starting.
+func clampAudioVFOs(n int) int {
+	switch {
+	case n == 0:
+		return defaultAudioVFOs
+	case n < 1:
+		return 1
+	case n > maxAudioVFOs:
+		return maxAudioVFOs
+	}
+	return n
+}
+
+// normalizeAudioVFOs is clampAudioVFOs for LoadConfig, which says so when it
+// has had to change a value the operator actually wrote.
+func normalizeAudioVFOs(n int) int {
+	c := clampAudioVFOs(n)
+	if n != 0 && c != n {
+		log.Printf("Warning: server.audio_vfos %d is outside 1..%d, using %d", n, maxAudioVFOs, c)
+	}
+	return c
+}
+
+// AudioVFOLimit is how many audio channels this listener may hold at once:
+// index 0 is their ordinary audio session and 1..N-1 are secondaries (see
+// session_secondary_audio.go).  Bypassed listeners always get the maximum.
+//
+// Clamped again here so a config built without LoadConfig (tests, mostly)
+// means the same thing it would have from a file.
+func (sc *ServerConfig) AudioVFOLimit(clientIP, password string) int {
+	if sc.IsIPTimeoutBypassed(clientIP, password) {
+		return maxAudioVFOs
+	}
+	return clampAudioVFOs(sc.AudioVFOs)
 }
 
 // IsIPTimeoutBypassed checks if an IP address is in the timeout bypass list

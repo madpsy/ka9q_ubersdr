@@ -8287,8 +8287,12 @@ func (ah *AdminHandler) HandleSessionsWithCountries(w http.ResponseWriter, r *ht
 		// Extract client IP from session info
 		clientIP, _ := sessionInfo["client_ip"].(string)
 
-		// Skip internal sessions (no client IP)
+		// Skip internal sessions (no client IP), and secondary VFOs, which
+		// are a listener already in this list.
 		if clientIP == "" {
+			continue
+		}
+		if isSecondary, _ := sessionInfo["is_secondary"].(bool); isSecondary {
 			continue
 		}
 

@@ -179,6 +179,44 @@ export function connectionCheck({ reregister = false } = {}) {
     return promise;
 }
 
+// How many audio streams — VFOs — this session may hold at once, main
+// included: the `vfos` field of the /connection reply. A server from before
+// simultaneous VFOs has no such field and allows exactly one, which is what an
+// absent or unreadable figure means here too, and what an unanswered check
+// means: like `bypassed`, a privilege is never handed out on a guess.
+//
+// Held here rather than in RadioContext because the VFO store, the engine that
+// plays the extra streams and the panel all need it, and the reply already
+// lands here. Not cleared with the id: it is a property of the receiver and the
+// password, and every check re-reads it.
+let vfoLimit = 1;
+const vfoLimitListeners = new Set();
+
+/** The server's VFO count for this client, main included. 1 until told otherwise. */
+export function getVfoLimit() {
+    return vfoLimit;
+}
+
+/** Hear about a change to getVfoLimit(). Returns the unsubscribe. */
+export function onVfoLimit(fn) {
+    vfoLimitListeners.add(fn);
+    return () => vfoLimitListeners.delete(fn);
+}
+
+/** The `vfos` field of a /connection reply, as a count. Exported for tests. */
+export function parseVfoLimit(data) {
+    const n = data && Number(data.vfos);
+    return Number.isInteger(n) && n >= 1 ? n : 1;
+}
+
+function noteVfoLimit(n) {
+    if (n === vfoLimit) return;
+    vfoLimit = n;
+    for (const fn of Array.from(vfoLimitListeners)) {
+        try { fn(n); } catch (e) { console.error('vfo limit listener threw', e); }
+    }
+}
+
 export function getBypassPassword() {
     const fromUrl = new URLSearchParams(location.search).get('password');
     if (fromUrl) {
@@ -232,6 +270,11 @@ async function checkConnection() {
             body: JSON.stringify(body),
         });
         const data = await res.json();
+        const vfos = parseVfoLimit(data);
+        // Only from a real answer. A failed fetch below reports allowed so as
+        // not to block anybody, and must not take away VFOs a moment ago
+        // granted either — it simply says nothing about them.
+        noteVfoLimit(vfos);
         return {
             allowed: !!data.allowed,
             reason: data.reason || '',
@@ -257,6 +300,8 @@ async function checkConnection() {
             allowedIQModes: Array.isArray(data.allowed_iq_modes)
                 ? data.allowed_iq_modes.filter((m) => typeof m === 'string')
                 : [],
+            // Audio streams this session may hold, main included. See getVfoLimit.
+            vfos,
             status: res.status,
             sessionId: id,
         };
@@ -274,6 +319,7 @@ async function checkConnection() {
             bypassed: false,
             // And no wide IQ, for the same reason.
             allowedIQModes: [],
+            vfos: 1,
             status: 0,
             sessionId: id,
         };

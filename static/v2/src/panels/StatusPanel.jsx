@@ -4,6 +4,7 @@ import { Empty } from '../components/ui.jsx';
 import { isIQ } from '../radio/constants.js';
 import { formatRate, formatSpan } from '../lib/format.js';
 import { sessionClock, sessionTicks } from '../lib/sessionClock.js';
+import { useSubReceivers } from '../radio/useSubReceivers.js';
 
 // Hover note for the rate row. The stream's rate and the context's are two
 // different facts: the player asks for the former and falls back to the device
@@ -53,6 +54,25 @@ function useThroughput(conn) {
     }, [conn]);
 
     return rate;
+}
+
+// The audio links of the VFOs listened to alongside the main receiver, one row
+// each under the main one's. Each is a socket of its own with its own rate, and
+// a component of its own so each can hold its own throughput hook. Nothing at
+// all where the server allows one VFO or none is listening.
+function SubLinks() {
+    // 1 Hz is plenty: this lists the links, and each row samples its own rate.
+    const { subs, snap } = useSubReceivers(1);
+    const ids = Object.keys(snap.vfos).filter((id) => !snap.vfos[id].overLimit).sort();
+    if (snap.limit <= 1 || !ids.length) return null;
+    return ids.map((id) => (
+        <SubLink key={id} id={id} conn={subs.connection(id)} state={snap.vfos[id].state} />
+    ));
+}
+
+function SubLink({ id, conn, state }) {
+    const rate = useThroughput(conn);
+    return <Row label={`VFO ${id} link`} value={<Link state={state} rate={rate} />} />;
 }
 
 // The spectrum poll rate, as the divisor this client has asked the server for.
@@ -179,6 +199,7 @@ export default function StatusPanel({ minimal }) {
                     value={<span className={clock.low ? 'kv__v--low' : undefined}>{clock.label}</span>}
                 />
                 <Row label="Audio link" value={<Link state={audioState} rate={audioRate} />} />
+                <SubLinks />
                 {/* What the stream actually is, rather than what the mode
                     implies: 12 kHz mono on SSB, 24 on the AM family, and 12 kHz
                     stereo in IQ where the two channels are I and Q rather than

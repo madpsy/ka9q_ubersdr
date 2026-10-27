@@ -85,6 +85,7 @@ type PrometheusMetrics struct {
 	activeUsersPassword    prometheus.Gauge // Unique password-bypassed users
 	activeUsersBypassed    prometheus.Gauge // Unique IP-bypassed users
 	activeAudioSessions    prometheus.Gauge // Active audio sessions only
+	activeSecondaryAudio   prometheus.Gauge // Active secondary-VFO audio sessions (a subset of activeAudioSessions)
 	activeSpectrumSessions prometheus.Gauge // Active spectrum sessions only
 
 	// Radiod channel metrics
@@ -595,6 +596,12 @@ func (pm *PrometheusMetrics) InitializeSystemMetrics() {
 			Help: "Total number of active audio sessions",
 		},
 	)
+	pm.activeSecondaryAudio = promauto.NewGauge(
+		prometheus.GaugeOpts{
+			Name: "ubersdr_active_secondary_audio_sessions_total",
+			Help: "Active secondary-VFO audio sessions (included in ubersdr_active_audio_sessions_total)",
+		},
+	)
 	pm.activeSpectrumSessions = promauto.NewGauge(
 		prometheus.GaugeOpts{
 			Name: "ubersdr_active_spectrum_sessions_total",
@@ -914,6 +921,7 @@ func (pm *PrometheusMetrics) UpdateSessionMetrics(sessions *SessionManager) {
 	// Count audio vs spectrum sessions and track unique users by auth method
 	sessions.mu.RLock()
 	audioCount := 0
+	secondaryCount := 0
 	spectrumCount := 0
 	regularUsers := make(map[string]bool)
 	passwordUsers := make(map[string]bool)
@@ -925,6 +933,9 @@ func (pm *PrometheusMetrics) UpdateSessionMetrics(sessions *SessionManager) {
 			spectrumCount++
 		} else {
 			audioCount++
+			if session.IsSecondary {
+				secondaryCount++
+			}
 		}
 
 		// Track unique users by auth method (skip internal sessions)
@@ -955,6 +966,9 @@ func (pm *PrometheusMetrics) UpdateSessionMetrics(sessions *SessionManager) {
 	pm.activeUsersPassword.Set(float64(len(passwordUsers)))
 	pm.activeUsersBypassed.Set(float64(len(bypassedUsers)))
 	pm.activeAudioSessions.Set(float64(audioCount))
+	if pm.activeSecondaryAudio != nil {
+		pm.activeSecondaryAudio.Set(float64(secondaryCount))
+	}
 	pm.activeSpectrumSessions.Set(float64(spectrumCount))
 
 	// Update radiod channel metrics

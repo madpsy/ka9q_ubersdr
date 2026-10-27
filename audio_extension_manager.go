@@ -766,13 +766,15 @@ func (aem *AudioExtensionManager) RemoveSession(sessionID string) {
 	}
 }
 
-// findAudioSessionByUserID finds the audio session for a given UserSessionID
+// findAudioSessionByUserID finds the primary audio session for a given
+// UserSessionID.  Extensions attach to the main VFO only; a secondary VFO
+// matching here would send the decoder whichever channel the map yielded first.
 func (aem *AudioExtensionManager) findAudioSessionByUserID(userSessionID string) *Session {
 	aem.sessionManager.mu.RLock()
 	defer aem.sessionManager.mu.RUnlock()
 
 	for _, session := range aem.sessionManager.sessions {
-		if session.UserSessionID == userSessionID && !session.IsSpectrum {
+		if session.UserSessionID == userSessionID && !session.IsSpectrum && !session.IsSecondary {
 			return session
 		}
 	}

@@ -688,7 +688,8 @@ const BUILT_IN = [
 
     // CAT sync with a transceiver. Collapsed by default, and deliberately so:
     // opening it is what starts the 14 MB Hamlib download, since that is the
-    // point at which someone has asked for CAT.
+    // point at which someone has asked for CAT. (Serial auto-connect fetches
+    // it too, but only once it has found the radio's adapter plugged in.)
     {
         id: 'radiocontrol',
         title: 'Radio control',

@@ -42,7 +42,7 @@ globalThis.addEventListener = () => {};
 globalThis.removeEventListener = () => {};
 
 const {
-    render, reset, deep, words,
+    render: renderNow, reset, deep, words,
     TimePanel, PANELS, PANEL_BY_ID, GROUPS,
     DIAL_MIN_MS, MAX_SAMPLE_AGE_MS, STATUS_MAX_MS, STATUS_MIN_MS, STEP_MS, WINDOW,
     addSample, addonUrl, bestEstimate, carriedTheta, clockAsleep, clockParts, deviceError,
@@ -54,6 +54,23 @@ const {
     saveShowRef, saveShowMs, savedBigClock, savedShowRef, savedShowMs, servingNote,
     staleStatus, stationMix, statusUrl, timeUrl, utcOffsetText, zoneOffsetMin,
 } = require('./.build/ntptime.cjs');
+
+// Every render happens in July. The panel lays its clocks out from Date.now(), and
+// Europe/London is UTC for half the year — the half in which this device reads the same
+// as UTC, its clock merges into the UTC one, and every render test below fails or, worse,
+// asserts less than it means to. The pure tests pass their own dates; this is the same
+// thing for the ones that cannot.
+const SUMMER_MS = Date.UTC(2026, 6, 15, 12);
+const render = (...args) => {
+    const realNow = Date.now;
+    const skew = SUMMER_MS - realNow();
+    Date.now = () => realNow() + skew;
+    try {
+        return renderNow(...args);
+    } finally {
+        Date.now = realNow;
+    }
+};
 
 let pass = 0;
 const t = (name, fn) => {

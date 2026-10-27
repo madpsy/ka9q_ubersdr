@@ -7,11 +7,13 @@
 // can be used together: a MIDI box on the receiver and a rig tracking it are no
 // conflict, only two ways of moving the same dial.
 //
-// Hamlib is fetched when this panel is first opened, and only then: it is 14 MB
-// of WebAssembly, the panel ships collapsed, and opening it is the point at
-// which someone has asked for CAT. The link and the loaded module then live on
-// a singleton (controls/sources.js), so dragging the panel to another dock —
-// which unmounts it — neither drops the rig nor re-downloads anything.
+// Hamlib is fetched when this panel is first opened: it is 14 MB of
+// WebAssembly, the panel ships collapsed, and opening it is the point at which
+// someone has asked for CAT. The one other time is serial auto-connect finding
+// the radio's adapter, which is the same request made in advance. The link and
+// the loaded module then live on a singleton (controls/sources.js), so dragging
+// the panel to another dock — which unmounts it — neither drops the rig nor
+// re-downloads anything.
 
 import React, { useEffect, useState } from '../react.js';
 import { Button, Field, Segmented, Switch } from '../components/ui.jsx';
@@ -463,7 +465,7 @@ export default function RadioControlPanel({ minimal }) {
 
             <div className="chip-row chip-row--split">
                 {status.connected ? (
-                    <Button variant="ghost" size="sm" disabled={status.busy} onClick={() => sync.disconnect()}>
+                    <Button variant="ghost" size="sm" disabled={status.busy} onClick={() => sync.disconnect({ byHand: true })}>
                         Disconnect
                     </Button>
                 ) : (
@@ -476,20 +478,28 @@ export default function RadioControlPanel({ minimal }) {
                         {status.busy ? 'Connecting…' : 'Connect'}
                     </Button>
                 )}
-                {/* Present but not available here, rather than absent: a control
-                    that exists for one connection and not another reads as a
-                    bug. Opening a serial port raises the browser's own port
-                    picker, and that has to happen on the stack of a click — see
-                    the note in controls/radiosync.js — so there is nothing a
-                    page can do on load that would not be refused. */}
+                {/* The picker needs a click, but a port this browser has been
+                    given once can be reopened without one — so auto-connect
+                    looks for the adapter the last Connect went through. See
+                    RadioSync.autoConnect, and ControlWatch, which runs it. */}
                 <Switch
-                    checked={false}
-                    disabled
-                    onChange={() => {}}
+                    checked={!!cfg.radiosync.autoConnect}
+                    onChange={(v) => setSync({ autoConnect: v })}
                     label="Auto-connect"
-                    title="Not possible over serial: the browser only opens a port in response to a click"
+                    title={'Connect on its own when the page opens or the radio\'s serial adapter is plugged in. '
+                        + 'Press Connect once first, so this browser knows which adapter that is. '
+                        + 'Opening the port can change DTR/RTS, which some interfaces use for PTT.'}
                 />
             </div>
+
+            {/* Kept on screen rather than only logged: auto-connect runs at page
+                load, usually with this panel collapsed, so its log lines went
+                to nobody. Only while it is wanted and has not worked. */}
+            {cfg.radiosync.autoConnect && !status.connected && status.autoProblem && (
+                <div className={`note note--tight${status.autoProblem.tone === 'error' ? ' note--warn' : ''}`}>
+                    {status.autoProblem.text}
+                </div>
+            )}
 
             {syncControls}
 

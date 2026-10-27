@@ -26,6 +26,8 @@ import { rc28Available } from '../controls/rc28.js';
 import { indicatorLeds, ledSettings } from '../controls/rc28leds.js';
 import { squelchEnabled } from '../radio/constants.js';
 import { getRecorder } from '../lib/recorder.js';
+import { pushNotification } from '../lib/notifications.js';
+import { serialAvailable } from '../controls/radiosync.js';
 import {
     getGamepad, getRc28, getSurface, getSync, releaseSurfaceExcept, surfaceKeyLabel,
 } from '../controls/sources.js';
@@ -47,7 +49,7 @@ const REFUSED_GAP_MS = 1500;
 
 export default function ControlWatch() {
     const radio = useRadio();
-    const [cfg] = useControlState();
+    const [cfg, updateCfg] = useControlState();
     const hw = useHardware();
     const ctx = useControlContext(cfg.stepHz);
 
@@ -258,6 +260,8 @@ export default function ControlWatch() {
     // direction and of which fields follow the rig applied only once they
     // happened to open the panel.
     const rs = cfg.radiosync || {};
+    const controlStateRef = useRef(cfg);
+    controlStateRef.current = cfg;
     useEffect(() => {
         sync.setDirection(rs.direction);
         sync.setMuteOnTx(rs.muteOnTx);
@@ -267,6 +271,51 @@ export default function ControlWatch() {
     useEffect(() => {
         sync.setSyncFields({ frequency: rs.syncFrequency, mode: rs.syncMode });
     }, [sync, rs.syncFrequency, rs.syncMode]);
+
+    // Serial auto-connect: on arrival, and whenever a serial port is plugged
+    // in — the adapter on a rig that has just been switched on. Here rather
+    // than in the panel for the same reason as the surfaces above; it is also
+    // why Hamlib can be fetched with the panel never opened, which only
+    // happens once the operator has asked for this and the adapter is there.
+    //
+    // Read through a ref: the subscription is made once and must see the rig
+    // and adapter as they are when the port turns up.
+    const autoRef = useRef(null);
+    autoRef.current = { model: rs.rig, baud: rs.baud, port: rs.port || null };
+    const serialAuto = (rs.transport || 'serial') === 'serial' && !!rs.autoConnect;
+    useEffect(() => {
+        if (!serialAuto || !serialAvailable()) {
+            sync.clearAutoProblem();
+            return undefined;
+        }
+        const attempt = () => { sync.autoConnect(autoRef.current).catch(() => {}); };
+        attempt();
+        navigator.serial.addEventListener('connect', attempt);
+        return () => navigator.serial.removeEventListener('connect', attempt);
+    }, [sync, serialAuto]);
+
+    // The adapter each connect went through, kept for the next auto-connect —
+    // by hand or not, so choosing a different port in the picker moves it.
+    useEffect(() => sync.on('port', ({ port }) => {
+        const prev = (controlStateRef.current.radiosync || {}).port || null;
+        const same = prev && port
+            ? prev.usbVendorId === port.usbVendorId && prev.usbProductId === port.usbProductId
+            : prev === port;
+        if (same) return;
+        updateCfg((c) => ({ ...c, radiosync: { ...c.radiosync, port } }));
+    }), [sync, updateCfg]);
+
+    // A failure that is worth an interruption. The panel keeps the reason on
+    // screen as well, but it is usually collapsed at page load — which is when
+    // this runs — so without a toast an auto-connect that did not happen looks
+    // the same as one nobody asked for.
+    useEffect(() => sync.on('autoproblem', ({ text, tone }) => pushNotification({
+        severity: tone === 'error' ? 'bad' : 'warn',
+        title: 'Radio control',
+        body: text,
+        source: 'radio',
+        key: 'radio-autoconnect',
+    })), [sync]);
 
     return null;
 }

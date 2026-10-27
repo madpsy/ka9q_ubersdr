@@ -85,6 +85,12 @@ export const NOTICE_SOURCES = [
         note: 'Notices raised by custom panels and browser extensions',
     },
     {
+        id: 'radio',
+        panel: 'radiocontrol',
+        label: 'Radio control',
+        note: 'When auto-connecting to the radio fails',
+    },
+    {
         id: 'rotator',
         panel: 'rotator',
         label: 'Rotator',

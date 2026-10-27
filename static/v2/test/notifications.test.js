@@ -526,9 +526,11 @@ t('only sources the receiver actually has get a switch', () => {
     assert.deepStrictEqual(ids((p) => p === 'rotator'), ['rotator']);
     // A host that has switched chat off loses both halves of it at once.
     assert.deepStrictEqual(ids((p) => p !== 'chat'),
-        ['rotator', 'antenna', 'voice-callsign', 'lightning']);
+        ['radio', 'rotator', 'antenna', 'voice-callsign', 'lightning']);
     // And a receiver without the voice skimmer addon does not offer its callsigns.
     assert.ok(!ids((p) => p !== 'voiceskimmer').includes('voice-callsign'));
+    // Radio control's failures go with Radio control.
+    assert.deepStrictEqual(ids((p) => p === 'radiocontrol'), ['radio']);
     // A receiver with no rotator, no antenna switch and no chat has nothing to offer.
     assert.deepStrictEqual(ids(() => false), []);
 });
@@ -547,7 +549,7 @@ t('a hidden source keeps whatever it was muted to', () => {
     n.setSourceEnabled('rotator', false);
     assert.deepStrictEqual(
         n.switchableSources((p) => p !== 'rotator').map((s) => s.id).filter((id) => id !== 'bridge'),
-        ['antenna', 'chat-mention', 'chat-join', 'voice-callsign', 'lightning']);
+        ['radio', 'antenna', 'chat-mention', 'chat-join', 'voice-callsign', 'lightning']);
     assert.strictEqual(n.sourceEnabled('rotator'), false);
 });
 

@@ -324,6 +324,146 @@ t('a disconnect mid-over opens the gate', async () => {
     assert.deepStrictEqual(calls, [['gate', true], ['gate', false]]);
 });
 
+// --- serial auto-connect ------------------------------------------------------
+//
+// The bridge can only get a port from requestPort(), which needs a click. Auto-
+// connect finds the remembered adapter with getPorts() and hands it over by
+// shadowing requestPort for the one synchronous call that starts open().
+
+const FTDI = { usbVendorId: 0x0403, usbProductId: 0x6001 };
+const CP210X = { usbVendorId: 0x10c4, usbProductId: 0xea60 };
+const fakePort = (id, open = false) => ({ getInfo: () => ({ ...id }), readable: open ? {} : null });
+
+// makeSync, with getPorts answering `ports` and an open() that records which
+// port the bridge was given — the way the real bridge would get it.
+function autoSync(ports, { open } = {}) {
+    const sync = makeSync();
+    const opened = [];
+    const realRequest = () => Promise.reject(Object.assign(new Error('no gesture'), { name: 'SecurityError' }));
+    global.navigator.serial = { getPorts: () => Promise.resolve(ports), requestPort: realRequest };
+    Object.setPrototypeOf(global.navigator.serial, { requestPort: realRequest });
+    delete global.navigator.serial.requestPort;
+    const bridge = sync._guardBridge({
+        ports: new Map(),
+        async open() {
+            const port = await navigator.serial.requestPort();
+            opened.push(port);
+            this.ports.set(1000, { port });
+            return 1000;
+        },
+    });
+    sync.open = open || (async () => bridge.open());
+    const alerts = [];
+    const saved = [];
+    sync.on('autoproblem', (p) => alerts.push(p));
+    sync.on('port', (p) => saved.push(p.port));
+    return { sync, opened, alerts, saved };
+}
+
+t('auto-connect opens the remembered adapter without a picker', async () => {
+    const want = fakePort(FTDI);
+    const { sync, opened, alerts, saved } = autoSync([fakePort(CP210X), want]);
+    assert.strictEqual(await sync.autoConnect({ model: '1035', baud: 0, port: FTDI }), true);
+    assert.strictEqual(opened[0], want);
+    assert.strictEqual(sync.connected, true);
+    assert.deepStrictEqual(saved, [FTDI]);
+    assert.deepStrictEqual(alerts, []);
+    assert.strictEqual(sync.autoProblem, null);
+    // The shadow is gone: the page's own requestPort is back.
+    assert.ok(!Object.prototype.hasOwnProperty.call(navigator.serial, 'requestPort'));
+    sync._stopPolling();
+});
+
+t('a connect by hand remembers whichever adapter was picked', async () => {
+    const picked = fakePort(CP210X);
+    const { sync, saved } = autoSync([]);
+    navigator.serial.requestPort = () => Promise.resolve(picked);
+    assert.strictEqual(await sync.connect('1035', 0), true);
+    assert.deepStrictEqual(saved, [CP210X]);
+    sync._stopPolling();
+});
+
+t('an adapter that is not plugged in waits quietly, and nothing is loaded', async () => {
+    const { sync, alerts } = autoSync([fakePort(CP210X)]);
+    let loads = 0;
+    sync.ensureLoaded = () => { loads++; return Promise.resolve(sync.rigs); };
+    assert.strictEqual(await sync.autoConnect({ model: '1035', port: FTDI }), false);
+    assert.strictEqual(loads, 0, 'Hamlib fetched for an adapter that is not there');
+    assert.strictEqual(sync.autoProblem.tone, 'warn');
+    assert.match(sync.autoProblem.text, /USB 0403:6001/);
+    assert.deepStrictEqual(alerts, [], 'a switched-off radio is not worth a toast');
+});
+
+t('two adapters of the same kind are refused, loudly', async () => {
+    const { sync, opened, alerts } = autoSync([fakePort(FTDI), fakePort(FTDI)]);
+    assert.strictEqual(await sync.autoConnect({ model: '1035', port: FTDI }), false);
+    assert.deepStrictEqual(opened, []);
+    assert.strictEqual(alerts.length, 1);
+    assert.match(alerts[0].text, /cannot tell which one/);
+});
+
+t('an adapter already open in this page is not opened twice', async () => {
+    const { sync, opened, alerts } = autoSync([fakePort(FTDI, true)]);
+    assert.strictEqual(await sync.autoConnect({ model: '1035', port: FTDI }), false);
+    assert.deepStrictEqual(opened, []);
+    assert.match(alerts[0].text, /already open/);
+});
+
+t('one free adapter beside one in use is the radio', async () => {
+    const free = fakePort(FTDI);
+    const { sync, opened } = autoSync([fakePort(FTDI, true), free]);
+    assert.strictEqual(await sync.autoConnect({ model: '1035', port: FTDI }), true);
+    assert.strictEqual(opened[0], free);
+    sync._stopPolling();
+});
+
+t('nothing remembered yet says to connect once by hand', async () => {
+    const { sync, alerts } = autoSync([fakePort(FTDI)]);
+    assert.strictEqual(await sync.autoConnect({ model: '1035', port: null }), false);
+    assert.match(sync.autoProblem.text, /Press Connect once/);
+    assert.deepStrictEqual(alerts, []);
+});
+
+t('a rig that does not answer is reported with the reason', async () => {
+    const { sync, alerts } = autoSync([fakePort(FTDI)], { open: () => Promise.resolve(-5) });
+    assert.strictEqual(await sync.autoConnect({ model: '1035', port: FTDI }), false);
+    assert.strictEqual(alerts.length, 1);
+    assert.match(alerts[0].text, /^Auto-connect failed: /);
+    assert.strictEqual(sync.autoProblem.tone, 'error');
+});
+
+t('a port found but never opened is not handed to the next connect', async () => {
+    // Hamlib failing to load returns before open(); the next open is somebody
+    // at the picker, and must get the picker.
+    const { sync } = autoSync([fakePort(FTDI)]);
+    sync.ensureLoaded = () => Promise.reject(new Error('offline'));
+    assert.strictEqual(await sync.autoConnect({ model: '1035', port: FTDI }), false);
+    assert.strictEqual(sync._presetPort, null);
+    assert.match(sync.autoProblem.text, /Hamlib could not be loaded: offline/);
+});
+
+t('Disconnect holds auto-connect off until the next Connect', async () => {
+    const { sync } = autoSync([fakePort(FTDI)]);
+    assert.strictEqual(await sync.autoConnect({ model: '1035', port: FTDI }), true);
+    await sync.disconnect({ byHand: true });
+    assert.strictEqual(await sync.autoConnect({ model: '1035', port: FTDI }), false, 'replug reconnected');
+    navigator.serial.requestPort = () => Promise.resolve(fakePort(FTDI));
+    assert.strictEqual(await sync.connect('1035', 0), true);
+    await sync.disconnect();     // lost contact, not the button
+    assert.strictEqual(await sync.autoConnect({ model: '1035', port: FTDI }), true);
+    sync._stopPolling();
+});
+
+t('a connect by hand clears the auto-connect problem', async () => {
+    const { sync } = autoSync([]);
+    await sync.autoConnect({ model: '1035', port: FTDI });
+    assert.ok(sync.autoProblem);
+    navigator.serial.requestPort = () => Promise.resolve(fakePort(FTDI));
+    await sync.connect('1035', 0);
+    assert.strictEqual(sync.autoProblem, null);
+    sync._stopPolling();
+});
+
 chain.then(() => {
     if (process.exitCode) console.log('\nradio sync tests FAILED');
     else console.log(`\nall ${pass} radio sync tests passed`);

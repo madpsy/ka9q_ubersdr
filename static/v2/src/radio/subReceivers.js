@@ -26,10 +26,11 @@
 //                  rate limit allows a burst of four a second per IP, and the
 //                  main socket and the spectrum have already spent two.
 //   main tuning    MODE LOCK. Every secondary plays in the main receiver's mode
-//                  and filter, at its own frequency. The streams then all
-//                  arrive at the context's own rate and nothing resamples. A
-//                  listening VFO's saved mode stays in its slot (lib/vfos.js)
-//                  for when it stops listening.
+//                  at its own frequency. The streams then all arrive at the
+//                  context's own rate and nothing resamples. A listening VFO's
+//                  saved mode stays in its slot (lib/vfos.js) for when it stops
+//                  listening. The filter is main's too until the VFO is given
+//                  one of its own (setFilter; lib/vfos.js listenEdges).
 //   main format    every secondary is in the main socket's format, Opus or
 //                  lossless (the Audio panel's choice, or the recorder's hold
 //                  on lossless). The server fixes the format at connect, so a
@@ -42,8 +43,9 @@
 //                  The VFOs are ordinary memories again, and leaving IQ brings
 //                  none of them back by itself. While in IQ listening is
 //                  refused, with listenBlocked saying why.
-//   squelch        one threshold for every stream. Sent as min_snr on connect
-//                  and as set_audio_gate when it moves.
+//   squelch        main's threshold, for every stream that has not been given
+//                  its own (setSquelch; lib/vfos.js listenThreshold). Sent as
+//                  min_snr on connect and as set_audio_gate when it moves.
 //
 // Which VFOs are listening, and how each is heard, is the VFO store's
 // (lib/vfos.js). This subscribes to it and makes the streams match.
@@ -54,13 +56,13 @@
 
 import { AudioConnection } from './audio-connection.js';
 import { getOpusDecoderClass } from './audio-player.js';
-import { SQUELCH_SENTINEL, isIQ } from './constants.js';
+import { SQUELCH_AUTO_SAMPLES, SQUELCH_SENTINEL, autoSquelchValue, isIQ } from './constants.js';
 import { Emitter } from './emitter.js';
 import { squelchState } from './squelchState.js';
 import { getVfoLimit, onVfoLimit } from './session.js';
 import {
-    clearListening, getVfos, listenBlockedReason, listenOf, listenVfo, listeningVfos,
-    onVfosChanged, setVfoListen, setVfos, tuneListening,
+    clearListening, getVfos, listenBlockedReason, listenEdges, listenOf, listenThreshold, listenVfo,
+    listeningVfos, onVfosChanged, setVfoFilter, setVfoListen, setVfoSquelch, setVfos, tuneListening,
 } from '../lib/vfos.js';
 import { vfoPans } from '../lib/vfoPan.js';
 import { throttle } from '../lib/throttle.js';
@@ -195,14 +197,14 @@ export class SubReceivers extends Emitter {
             }
         }
 
+        // Unforced: a VFO with a filter of its own is only retuned when the mode
+        // moves it, not every time main's filter does.
         if (!this._iq(main) && modeChanged(prev.tuning, main.tuning)) {
-            for (const lane of this._assigned()) this._tune(lane, true);
+            for (const lane of this._assigned()) this._tune(lane, false);
         }
 
         if (prev.threshold !== main.threshold) {
-            for (const lane of this._assigned()) {
-                lane.sendGate(gateValue(main.threshold));
-            }
+            for (const lane of this._assigned()) this._gate(lane);
         }
 
         this._sync();
@@ -230,6 +232,34 @@ export class SubReceivers extends Emitter {
      */
     get listenBlocked() {
         return listenBlockedReason(this.main.tuning && this.main.tuning.mode);
+    }
+
+    /**
+     * Give listening VFO `id` its own filter, `[low, high]` in the main
+     * receiver's mode, or with null put it back on main's.
+     */
+    setFilter(id, edges) {
+        return setVfoFilter(id, this.main.tuning, edges);
+    }
+
+    /**
+     * Give listening VFO `id` its own squelch — a threshold in dB, or 'off' —
+     * or with null put it back on main's.
+     */
+    setSquelch(id, value) {
+        return setVfoSquelch(id, this.main.threshold, value);
+    }
+
+    /**
+     * Set `id`'s own squelch just above the noise it has been hearing, as the
+     * main receiver's Auto does. False with nothing heard yet to measure.
+     */
+    autoSquelch(id) {
+        const lane = this._assigned().find((l) => l.slotId === id);
+        const value = lane ? autoSquelchValue(lane.meters.snrHistory) : null;
+        if (value == null) return false;
+        this.setSquelch(id, value);
+        return true;
     }
 
     /** 'auto' | 'left' | 'right' | 'both'. */
@@ -291,6 +321,8 @@ export class SubReceivers extends Emitter {
      *   state           the socket's: idle | connecting | open | reconnecting | rejected
      *   basebandPower, noisePower, snr   the last signal reading, dB; null before one
      *   squelchOpen     as the gate would have it — radio/squelchState.js
+     *   threshold       the squelch it is gated by, dB, or null when off
+     *   squelchOwn      that squelch is its own rather than main's
      *   error           the last thing the server or socket said went wrong, or null
      *   refused         why the server will not have this VFO at all, or null
      *   waitingPrimary  refused for want of a main stream; retried when it opens
@@ -307,6 +339,8 @@ export class SubReceivers extends Emitter {
                 noisePower: m.noisePower,
                 snr: m.snr,
                 squelchOpen: m.squelchOpen,
+                threshold: lane.threshold == null ? null : lane.threshold,
+                squelchOwn: !!lane.squelchOwn,
                 error: lane.error,
                 refused: lane.refused,
                 waitingPrimary: lane.waitingPrimary,
@@ -323,6 +357,8 @@ export class SubReceivers extends Emitter {
                 noisePower: null,
                 snr: null,
                 squelchOpen: false,
+                threshold: null,
+                squelchOwn: false,
                 error: null,
                 refused: `This receiver allows ${limit} VFO${limit === 1 ? '' : 's'}`,
                 waitingPrimary: false,
@@ -381,8 +417,11 @@ export class SubReceivers extends Emitter {
         }
         for (const lane of leaving) this._release(lane);
 
-        // Frequencies that moved since they were last sent.
-        for (const lane of this._assigned()) this._tune(lane, false);
+        // Frequencies, filters and squelches that moved since they were last sent.
+        for (const lane of this._assigned()) {
+            this._tune(lane, false);
+            this._gate(lane);
+        }
 
         this._applyVoices();
         this._applyPans();
@@ -417,6 +456,8 @@ export class SubReceivers extends Emitter {
             freq: null,             // the frequency last sent, Hz
             urlParams: null,        // the tuning the last connect URL carried
             sentMode: null,         // the mode and filter last sent
+            threshold: undefined,   // the squelch in force, dB or null; undefined before one
+            squelchOwn: false,
             decoder: null,
             decRate: 0,
             decCh: 0,
@@ -520,7 +561,8 @@ export class SubReceivers extends Emitter {
         lane.conn.setFormat(main.format);
         // Recorded on the connection before it connects, so the gate rides the
         // connect URL as min_snr (see AudioConnection.connect).
-        if (main.threshold != null) lane.conn.setAudioGate({ minSnr: main.threshold });
+        this._gate(lane);
+        if (lane.threshold != null) lane.conn.setAudioGate({ minSnr: lane.threshold });
         else lane.conn.lastGate = null;
         lane.freq = params.frequency;
         lane.sentMode = modeKey(params);
@@ -549,20 +591,34 @@ export class SubReceivers extends Emitter {
     }
 
     // What a secondary on this lane should be tuned to: its own frequency, the
-    // main receiver's mode and filter.
+    // main receiver's mode, and its own filter or else main's.
     _params(lane) {
-        const slot = this.store.get().slots[lane.slotId];
+        const state = this.store.get();
+        const slot = state.slots[lane.slotId];
         const t = this.main.tuning;
         if (!slot || !t || isIQ(t.mode)) return null;
+        const edges = listenEdges(listenOf(state, lane.slotId), t);
         return {
             frequency: slot.frequency,
             mode: t.mode,
-            bandwidthLow: t.bandwidthLow,
-            bandwidthHigh: t.bandwidthHigh,
+            bandwidthLow: edges.low,
+            bandwidthHigh: edges.high,
         };
     }
 
-    // Sends a tune when the lane's frequency or the locked mode has moved since
+    // The squelch this lane's VFO is gated by — its own, or main's — sent when
+    // it has changed. A socket that is not open has nothing sent: the next
+    // connect carries it in the URL (_connect) and the open sends it again.
+    _gate(lane) {
+        const state = this.store.get();
+        const gate = listenThreshold(listenOf(state, lane.slotId), this.main.threshold);
+        lane.squelchOwn = gate.own;
+        if (lane.threshold === gate.threshold) return;
+        lane.threshold = gate.threshold;
+        if (lane.conn.state === 'open') lane.sendGate(gateValue(gate.threshold));
+    }
+
+    // Sends a tune when the lane's frequency, mode or filter has moved since
     // the last one — or always, with `force`. Nothing in IQ, which a secondary
     // may not have; there are no lanes then anyway.
     _tune(lane, force) {
@@ -594,7 +650,7 @@ export class SubReceivers extends Emitter {
         }
         // Belt and braces with the connect URL's min_snr: a server that read
         // the URL already has it, and one that did not is gated now.
-        if (this.main.threshold != null) lane.conn.setAudioGate({ minSnr: this.main.threshold });
+        if (lane.threshold != null) lane.conn.setAudioGate({ minSnr: lane.threshold });
         lane.meters = freshMeters();
         this.emit('change');
     }
@@ -628,13 +684,18 @@ export class SubReceivers extends Emitter {
         m.snr = basebandPower != null && noisePower != null ? basebandPower - noisePower : null;
         const gate = squelchState({
             snr: m.snr,
-            threshold: this.main.threshold,
+            threshold: lane.threshold == null ? null : lane.threshold,
             iq: false,
             now: this.now(),
             lastOpenAt: m.lastOpenAt,
         });
         m.squelchOpen = gate.open;
         m.lastOpenAt = gate.lastOpenAt;
+        // What its Auto measures from — the same few readings main's uses.
+        if (m.snr != null) {
+            m.snrHistory.push(m.snr);
+            if (m.snrHistory.length > SQUELCH_AUTO_SAMPLES) m.snrHistory.shift();
+        }
     }
 
     // ---- audio -----------------------------------------------------------
@@ -805,7 +866,9 @@ export class SubReceivers extends Emitter {
 }
 
 function freshMeters() {
-    return { basebandPower: null, noisePower: null, snr: null, squelchOpen: true, lastOpenAt: 0 };
+    return {
+        basebandPower: null, noisePower: null, snr: null, squelchOpen: true, lastOpenAt: 0, snrHistory: [],
+    };
 }
 
 function gateValue(threshold) {

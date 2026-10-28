@@ -13525,7 +13525,7 @@ a.btn { text-decoration: none; }
    dock is too narrow to hold it beside the row. */
 .vfos.is-compact .vfos__seg { margin-left: auto; }
 
-/* The full view's second line: output, mute, volume, meter, and any note. */
+/* The full view's second line: two rows of controls, and any note. */
 .vfos__ctl {
     display: flex;
     flex-wrap: wrap;
@@ -13534,14 +13534,82 @@ a.btn { text-decoration: none; }
     padding: 2px 0 3px 7px;
     border-left: 3px solid var(--vfo-colour);
 }
-.vfos__vol { flex: 1 1 60px; min-width: 50px; max-width: 140px; display: flex; }
+.vfos__vol { flex: 1 1 60px; min-width: 50px; display: flex; }
 .vfos__vol .slider { flex: 1; }
-.vfos__sq {
-    font-size: 0.72em;
-    color: var(--text-faint);
-    min-width: 3.2em;
+
+/* The two rows of the full view's second line. The first is how the VFO is
+   heard, the volume taking what the buttons leave; the second its squelch and
+   filter width side by side, each taking half. Below about 290px of row the
+   pair wraps, one slider to a line, rather than either being squeezed to a
+   stub. Labels and values hold fixed widths, so the four VFOs' sliders line up
+   in columns and a value changing never moves its slider. */
+.vfos__ctl-row {
+    flex: 1 1 100%;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px 10px;
+    min-width: 0;
 }
-.vfos__sq.is-open { color: var(--text-dim); }
+.vfos__ctl-row:first-child { gap: 4px 6px; }
+.vfos__knob {
+    flex: 1 1 130px;
+    min-width: 130px;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+.vfos__knob-label {
+    flex: 0 0 1.7em;
+    font-size: 0.68em;
+    letter-spacing: 0.04em;
+    color: var(--text-faint);
+}
+.vfos__knob-slider { flex: 1 1 auto; min-width: 44px; display: flex; }
+.vfos__knob-slider > * { flex: 1; min-width: 0; }
+.vfos__knob-val {
+    flex: 0 0 auto;
+    min-width: 3.6em;
+    font-size: 0.74em;
+    font-variant-numeric: tabular-nums;
+    color: var(--text-dim);
+    text-align: right;
+    white-space: nowrap;
+}
+/* Following main: the value is main's, so it is said quietly. */
+.vfos__knob-val.is-following { color: var(--text-faint); }
+/* Its own: outlined in the VFO's colour, and a press puts it back on main's.
+   The text stays in the ink colour — see the note on colour above. */
+button.vfos__knob-val.is-own {
+    display: inline-flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 3px;
+    padding: 1px 4px;
+    border: 1px solid var(--vfo-colour, var(--border));
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--text);
+    font-family: inherit;
+    cursor: pointer;
+}
+button.vfos__knob-val.is-own:hover { border-color: var(--accent); }
+button.vfos__knob-val.is-own svg { opacity: 0.7; }
+/* The squelch's Auto: the size of the output buttons, never the slider's room. */
+.vfos__auto {
+    flex: 0 0 auto;
+    height: 24px;
+    padding: 0 5px;
+    font-size: 0.7em;
+    font-family: inherit;
+    color: var(--text-dim);
+    background: var(--surface-2, transparent);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+}
+.vfos__auto:hover:not(:disabled) { border-color: var(--accent); color: var(--text); }
+.vfos__auto:disabled { opacity: 0.45; cursor: default; }
 
 /* A signal meter in miniature: dimmed while the VFO's squelch is shut. */
 .vfos__meter {
@@ -13573,6 +13641,8 @@ a.btn { text-decoration: none; }
     .vfos__mute { width: 32px; height: 30px; }
     .vfos__seg-btn { height: 30px; min-width: 30px; }
     .vfos__ctl-gap { flex-basis: 32px; }
+    button.vfos__knob-val.is-own,
+    .vfos__auto { min-height: 28px; }
 }
 
 /* Narrow dock: the qualifiers go before the frequency does, one at a time.

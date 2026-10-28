@@ -12,7 +12,9 @@
 // active slot.
 
 import { freqInRange } from './format.js';
-import { isIQ } from '../radio/constants.js';
+import {
+    FILTER_WIDTH_MIN, SQUELCH_MAX, SQUELCH_MIN, bandwidthLimits, isIQ,
+} from '../radio/constants.js';
 import { getVfoLimit } from '../radio/session.js';
 
 export const VFO_IDS = ['A', 'B', 'C', 'D'];
@@ -73,6 +75,10 @@ export function cleanSlot(s) {
 //           receiver takes part in that spread.
 //   vol     0..1, its own fader.
 //   muted   its own mute, so one VFO can be silenced without being dropped.
+//   bw      its own filter, per mode family, where it has been given one — see
+//           listenEdges. Absent, it plays with the main receiver's filter.
+//   sq      its own squelch, a threshold in dB or 'off', where it has been
+//           given one — see listenThreshold. Absent, it follows main's.
 //
 // A listening VFO is *live*: its frequency is written back to its slot as it
 // is tuned (throttled, see tuneListening), since there is no "switching away"
@@ -81,6 +87,19 @@ export function cleanSlot(s) {
 // streams then share one sample rate and one audio context with no resampling
 // — and writing that borrowed mode into the slot would lose the one it had, so
 // that it came back as something else when it stopped listening.
+//
+// The filter is the exception to the lock, because it costs nothing: the
+// width does not change the stream's rate. A listening VFO starts with the main
+// receiver's filter and keeps following it, so turning one on sounds the way
+// the main one does, until it is given a width of its own — on the spectrum by
+// its passband edges, or by its slider in the VFOs panel. That width is
+// remembered per mode family in the listen entry, not in the slot, for the
+// same reason the mode is not: the slot's own filter belongs to its own mode.
+//
+// The squelch works the same way and for a better reason still: VFOs on
+// different bands sit on different noise, and a threshold that keeps main quiet
+// on 20 m is held open by 80 m's. Each follows main's until given its own,
+// which may be off while main's is on, or the other way round.
 //
 // The stored flag is not the whole answer. It is kept whatever the server's
 // VFO count is — that reads 1 until /connection answers, and a reload must not
@@ -103,7 +122,132 @@ export function cleanListen(l) {
         out: LISTEN_OUTS.includes(l.out) ? l.out : 'auto',
         vol: vol == null ? 1 : Math.max(0, Math.min(1, vol)),
         muted: l.muted === true,
+        ...cleanBw(l.bw),
+        ...cleanSq(l.sq),
     };
+}
+
+// --- a listening VFO's own squelch -------------------------------------------
+
+// 'off', or a threshold the squelch slider could set; the slider's floor is off.
+function sqValue(v) {
+    if (v === 'off') return 'off';
+    const n = num(v);
+    if (n == null) return null;
+    if (n <= SQUELCH_MIN) return 'off';
+    return Math.min(SQUELCH_MAX, n);
+}
+
+function cleanSq(sq) {
+    const v = sq == null ? null : sqValue(sq);
+    return v == null ? {} : { sq: v };
+}
+
+/**
+ * The squelch a listening VFO is gated by, with main's at `mainThreshold`
+ * (dB, or null when main's is off): `{threshold, own}`, threshold null for off.
+ */
+export function listenThreshold(listen, mainThreshold) {
+    const v = listen ? sqValue(listen.sq) : null;
+    if (v == null) return { threshold: mainThreshold == null ? null : mainThreshold, own: false };
+    return { threshold: v === 'off' ? null : v, own: true };
+}
+
+/**
+ * The listen entry with its own squelch set to `value` (dB, or 'off' — the
+ * slider's floor reads as off too) — or, given null or main's own setting,
+ * back to following main.
+ */
+export function withListenSquelch(listen, mainThreshold, value) {
+    const v = value == null ? null : sqValue(value);
+    const main = mainThreshold == null ? 'off' : mainThreshold;
+    const next = { ...listen };
+    delete next.sq;
+    if (v == null || v === main) return next;
+    return { ...next, sq: v };
+}
+
+// --- a listening VFO's own filter --------------------------------------------
+//
+// Stored per mode family, so a VFO given 1.8 kHz on SSB keeps it while the main
+// receiver goes to AM and back, and follows the main filter in AM meanwhile — a
+// width set for speech on one sideband is no answer for a broadcast station.
+// Upper and lower sideband are one family, kept in upper-sideband terms and
+// mirrored for LSB, so flipping sideband keeps the width and the shift.
+
+/** The family a mode's own filter is kept under, or null for none (IQ). */
+export function filterFamily(mode) {
+    switch (mode) {
+        case 'usb': case 'lsb': return 'ssb';
+        case 'cwu': case 'cwl': return 'cw';
+        case 'am': case 'sam': return 'am';
+        case 'fm': return 'fm';
+        case 'nfm': return 'nfm';
+        default: return null;
+    }
+}
+
+const BW_FAMILIES = ['ssb', 'cw', 'am', 'fm', 'nfm'];
+const BW_REACH = 12000;
+
+// Only well-formed entries survive a reload; none at all is no `bw` field.
+function cleanBw(bw) {
+    if (!bw || typeof bw !== 'object') return {};
+    const out = {};
+    for (const fam of BW_FAMILIES) {
+        const e = bw[fam];
+        if (!Array.isArray(e) || e.length !== 2) continue;
+        const lo = num(e[0]);
+        const hi = num(e[1]);
+        if (lo == null || hi == null || !(hi > lo) || Math.abs(lo) > BW_REACH || Math.abs(hi) > BW_REACH) continue;
+        out[fam] = [Math.round(lo), Math.round(hi)];
+    }
+    return Object.keys(out).length ? { bw: out } : {};
+}
+
+// Stored edges <-> the edges in `mode`: LSB is the stored USB pair mirrored.
+const flipFor = (mode, [lo, hi]) => (mode === 'lsb' ? [-hi, -lo] : [lo, hi]);
+
+/**
+ * The filter a listening VFO plays with, with the main receiver in `tuning`:
+ * `{low, high, own}`, `own` saying it is the VFO's own rather than main's.
+ * Its own is clamped into the mode's limits, and dropped for main's if that
+ * leaves it narrower than any control would set.
+ */
+export function listenEdges(listen, tuning) {
+    const main = {
+        low: Number(tuning && tuning.bandwidthLow) || 0,
+        high: Number(tuning && tuning.bandwidthHigh) || 0,
+        own: false,
+    };
+    const mode = tuning && tuning.mode;
+    const fam = filterFamily(mode);
+    const stored = fam && listen && listen.bw ? listen.bw[fam] : null;
+    if (!stored) return main;
+    const l = bandwidthLimits(mode);
+    const [a, b] = flipFor(mode, stored);
+    const low = Math.max(l.min, Math.min(l.max, a));
+    const high = Math.max(l.min, Math.min(l.max, b));
+    if (high - low < FILTER_WIDTH_MIN) return main;
+    return { low, high, own: true };
+}
+
+/**
+ * The listen entry with its own filter in `tuning`'s mode set to `[low, high]`
+ * — or, given null or edges that are main's own, back to following main.
+ */
+export function withListenFilter(listen, tuning, edges) {
+    const fam = filterFamily(tuning && tuning.mode);
+    if (!fam) return listen;
+    const bw = { ...((listen && listen.bw) || {}) };
+    const same = edges
+        && Math.round(edges[0]) === Math.round(Number(tuning.bandwidthLow))
+        && Math.round(edges[1]) === Math.round(Number(tuning.bandwidthHigh));
+    if (!edges || same) delete bw[fam];
+    else bw[fam] = flipFor(tuning.mode, [Math.round(edges[0]), Math.round(edges[1])]);
+    const next = { ...listen };
+    delete next.bw;
+    return Object.keys(bw).length ? { ...next, bw } : next;
 }
 
 /** The listen entry for `id`, whatever shape the state is in. */
@@ -407,6 +551,12 @@ export function selectVfo(radio, to, { limit = getVfoLimit() } = {}) {
 // The listen entries swap with the roles, so a VFO pinned to the left ear is
 // still heard on the left when it comes back from being the main receiver. The
 // zoom is left where it is — the auto-recentre follows the dial.
+//
+// The filters go with the stations, for the same reason the mode stays: one
+// heard through its own 1.8 kHz comes to the front still 1.8 kHz wide, and the
+// one it displaced carries on in the filter it had as main. The squelch too,
+// where `radio` carries it: the main receiver's becomes the promoted VFO's,
+// and the displaced one keeps the threshold it had.
 function swapVfo(radio, to) {
     const before = getVfos();
     const target = cleanSlot(before.slots[to]);
@@ -415,17 +565,30 @@ function swapVfo(radio, to) {
     const live = vfoSnapshot(radio.tuning, radio.view);
     const lFrom = listenOf(before, from);
     const lTo = listenOf(before, to);
+    const t = radio.tuning || {};
+    const heard = listenEdges(lTo, t);
+    const promoted = { ...t, bandwidthLow: heard.low, bandwidthHigh: heard.high };
+    let entryFrom = withListenFilter({ ...lTo, on: true }, promoted, [t.bandwidthLow, t.bandwidthHigh]);
+    let entryTo = withListenFilter({ ...lFrom, on: false }, t, null);
+    const sq = radio.squelch && radio.actions.setSquelch ? radio.squelch : null;
+    let squelchTo;
+    if (sq) {
+        const was = sq.enabled ? sq.threshold : null;
+        const gate = listenThreshold(lTo, was);
+        entryFrom = withListenSquelch(entryFrom, gate.threshold, was == null ? 'off' : was);
+        entryTo = withListenSquelch(entryTo, was, null);
+        if (gate.own) squelchTo = gate.threshold == null ? SQUELCH_MIN : gate.threshold;
+    }
     setVfos({
         ...before,
         active: to,
         slots: { ...before.slots, [from]: live },
-        listen: {
-            ...(before.listen || {}),
-            [from]: { ...lTo, on: true },
-            [to]: { ...lFrom, on: false },
-        },
+        listen: { ...(before.listen || {}), [from]: entryFrom, [to]: entryTo },
     });
-    radio.actions.tuneTo({ frequency: target.frequency });
+    radio.actions.tuneTo(heard.own
+        ? { frequency: target.frequency, bandwidthLow: heard.low, bandwidthHigh: heard.high }
+        : { frequency: target.frequency });
+    if (squelchTo != null) radio.actions.setSquelch(squelchTo);
     return true;
 }
 
@@ -452,6 +615,36 @@ export function setVfoListen(id, patch) {
     const state = patchListen(before, id, patch);
     setVfos(state);
     return state !== before;
+}
+
+/**
+ * Give listening VFO `id` its own filter in the main receiver's mode, or with
+ * null hand it back to main's (see listenEdges). Lazy on disk like a retune:
+ * a slider or an edge drag is a stream of them.
+ */
+export function setVfoFilter(id, tuning, edges) {
+    const before = getVfos();
+    if (!VFO_IDS.includes(id) || id === before.active || !filterFamily(tuning && tuning.mode)) return false;
+    const was = listenOf(before, id);
+    const next = cleanListen(withListenFilter(was, tuning, edges));
+    if (JSON.stringify(next.bw || null) === JSON.stringify(was.bw || null)) return false;
+    setVfos({ ...before, listen: { ...(before.listen || {}), [id]: next } }, { lazy: true });
+    return true;
+}
+
+/**
+ * Give listening VFO `id` its own squelch — dB, or 'off' — or with null hand it
+ * back to main's, which is at `mainThreshold` (null for off). Lazy on disk: the
+ * slider is a stream of these.
+ */
+export function setVfoSquelch(id, mainThreshold, value) {
+    const before = getVfos();
+    if (!VFO_IDS.includes(id) || id === before.active) return false;
+    const was = listenOf(before, id);
+    const next = cleanListen(withListenSquelch(was, mainThreshold, value));
+    if (next.sq === was.sq) return false;
+    setVfos({ ...before, listen: { ...(before.listen || {}), [id]: next } }, { lazy: true });
+    return true;
 }
 
 /**

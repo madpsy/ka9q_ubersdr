@@ -33,9 +33,11 @@ import {
 import MarkerBar from './MarkerBar.jsx';
 import SpectrumMenu from './SpectrumMenu.jsx';
 import AddBookmark from './AddBookmark.jsx';
-import { VFO_IDS, getVfos, setVfos, storeInto, tuneListening, vfoSnapshot } from '../lib/vfos.js';
 import {
-    alphaOf, easeLevel, listeningPassbands, markBoost, overlayAlpha, passbandAt, passbandsKey,
+    VFO_IDS, getVfos, setVfoFilter, setVfos, storeInto, tuneListening, vfoSnapshot,
+} from '../lib/vfos.js';
+import {
+    alphaOf, easeLevel, listenEdgeAt, listeningPassbands, markBoost, overlayAlpha, passbandAt, passbandsKey,
     shiftTarget, touchVfo, washAlpha,
 } from '../lib/vfoMarks.js';
 import { vfoRgba } from '../lib/vfoColours.js';
@@ -1838,6 +1840,25 @@ export default function SpectrumView() {
         return passbandAt(clientX - r.left, g.listen, cfgRef.current, r.width, EDGE_GRAB_PX);
     }, [markAtX]);
 
+    // A listening VFO's passband edge under the pointer, as {id, which}, or
+    // null: dragging it gives that VFO its own filter. Off with the main edges'
+    // setting, and never over the main receiver's dial or passband, for the
+    // reason listenAtX gives.
+    const listenEdgeAtX = useCallback((clientX, touch = false) => {
+        const el = wrapRef.current;
+        const g = gfx.current;
+        if (!el || !g.listen || !g.listen.length) return null;
+        if (dispRef.current.edgeDrag === false) return null;
+        const main = markAtX(clientX);
+        if (main === 'dial' || main === 'filter') return null;
+        const r = el.getBoundingClientRect();
+        return listenEdgeAt(
+            clientX - r.left, g.listen, cfgRef.current, r.width,
+            touch ? TOUCH_GRAB_PX : EDGE_GRAB_PX,
+            touch ? TOUCH_EDGE_MIN_PX : EDGE_MIN_PX,
+        );
+    }, [markAtX]);
+
     // Which passband edge is under the pointer, if either. The geometry and the
     // reasoning about the zone sizes are in lib/edgeHit.js; this is the part
     // that reads the live view.
@@ -2197,6 +2218,17 @@ export default function SpectrumView() {
             g.subDrag = null;
             return;
         }
+        // A listening VFO's edge is the same gesture on that VFO's filter:
+        // `sub` names it, and everything that ends or abandons an edge drag
+        // ends this one too.
+        const subEdge = listenEdgeAtX(e.clientX, touch);
+        if (subEdge) {
+            g.edge = { which: subEdge.which, sub: subEdge.id, pending: touch, startX: e.clientX };
+            g.drag = null;
+            g.subDrag = null;
+            touchVfo(subEdge.id);
+            return;
+        }
 
         // A listening VFO's passband: a drag there retunes that VFO instead of
         // panning, and a press that never moves is still a tap that tunes —
@@ -2250,7 +2282,7 @@ export default function SpectrumView() {
                 }, HOLD_MS),
             };
         }
-    }, [freqAtX, edgeAtX, listenAtX, openMenu, beginMeasure, endSelection]);
+    }, [freqAtX, edgeAtX, listenEdgeAtX, listenAtX, openMenu, beginMeasure, endSelection]);
 
     /// Nothing is being held any more — moved too far, lifted, or taken away.
     const dropHold = useCallback(() => {
@@ -2388,6 +2420,22 @@ export default function SpectrumView() {
                 haptic('grab', 'spectrum');
             }
             const t = tuneRef.current;
+            if (g.edge.sub) {
+                // A listening VFO's edge, by the same rules about its own dial.
+                // Its other edge is read from what was last drawn, which an
+                // edge drag never moves.
+                const v = (g.listen || []).find((x) => x.id === g.edge.sub);
+                if (v && f != null && cfg.span && r.width) {
+                    const offset = Math.round((f - v.frequency) / FILTER_WIDTH_STEP) * FILTER_WIDTH_STEP;
+                    const minHz = EDGE_FLOOR_PX * (cfg.span / r.width);
+                    const shape = { bandwidthLow: v.low, bandwidthHigh: v.high };
+                    const [low, high] = edgesForEdgeDrag(t.mode, g.edge.which, offset, shape, minHz);
+                    if (low !== v.low || high !== v.high) {
+                        setListeningFilter(subsRef.current, v.id, t, [low, high]);
+                    }
+                }
+                return;
+            }
             const raw = f == null ? null : f - t.frequency;
             if (raw != null) {
                 // Snapped to the same grain the width slider moves in, so a
@@ -2414,7 +2462,9 @@ export default function SpectrumView() {
         if (e.pointerType !== 'touch') {
             el.style.cursor = measureRef.current
                 ? measureCursor(e.clientX)
-                : (edgeAtX(e.clientX) ? 'col-resize' : listenAtX(e.clientX) ? 'ew-resize' : '');
+                : (edgeAtX(e.clientX) || listenEdgeAtX(e.clientX)
+                    ? 'col-resize'
+                    : listenAtX(e.clientX) ? 'ew-resize' : '');
         }
 
         // A listening VFO's passband being dragged: its frequency follows the
@@ -2468,7 +2518,7 @@ export default function SpectrumView() {
                 if (paced != null) actions.setSpectrumCenter(paced);
             }
         }
-    }, [actions, freqAtX, edgeAtX, markAtX, listenAtX, dropHold, measureCursor, pushSelection]);
+    }, [actions, freqAtX, edgeAtX, markAtX, listenEdgeAtX, listenAtX, dropHold, measureCursor, pushSelection]);
 
     // A release that means "tune here". Snapped to whatever the Receiver panel's
     // step is set to, so clicking the spectrum and pressing +/- agree about where
@@ -3757,6 +3807,12 @@ function tuneListeningVfo(subs, id, hz) {
     else tuneListening(id, hz);
 }
 
+// Give a listening VFO its own filter, through the engine when there is one.
+function setListeningFilter(subs, id, tuning, edges) {
+    if (subs) subs.setFilter(id, edges);
+    else setVfoFilter(id, tuning, edges);
+}
+
 // The VFOs being heard alongside the main receiver, as the spectrum draws them
 // — none where the server allows one stream, whatever the store remembers.
 function listeningNow(subs, tuning) {
@@ -3767,9 +3823,11 @@ function listeningNow(subs, tuning) {
 // The squelch brighten, eased: g.bright holds a 0..1 level per passband — 'main'
 // and each listening VFO's letter — moved toward 1 while that passband's squelch
 // is open and toward 0 otherwise. Off entirely with the display setting, with
-// the squelch off, and in IQ, where nothing is gated (squelchBrightens).
+// that passband's squelch off — each listening VFO may have its own — and in
+// IQ, where nothing is gated (squelchBrightens).
 function easeBrightness(g, d, squelch, meters, tuning, dtMs) {
-    const enabled = d.squelchBrighten !== false && !!(squelch && squelch.enabled);
+    const on = d.squelchBrighten !== false;
+    const enabled = on && !!(squelch && squelch.enabled);
     const iq = isIQ(tuning && tuning.mode);
     const next = {};
     const prev = g.bright || {};
@@ -3777,7 +3835,7 @@ function easeBrightness(g, d, squelch, meters, tuning, dtMs) {
         squelchBrightens({ enabled, open: !!(meters && meters.squelchOpen), iq }) ? 1 : 0, dtMs);
     for (const v of g.listen || []) {
         next[v.id] = easeLevel(prev[v.id],
-            squelchBrightens({ enabled, open: v.open, iq }) ? 1 : 0, dtMs);
+            squelchBrightens({ enabled: on && v.gated, open: v.open, iq }) ? 1 : 0, dtMs);
     }
     g.bright = next;
 }

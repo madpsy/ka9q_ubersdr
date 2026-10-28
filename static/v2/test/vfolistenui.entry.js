@@ -7,7 +7,7 @@
 // single instance each — split across bundles, a test that set the count in one
 // would be reading the default in another.
 import { deep, render, reset, walk, words } from './hookStub.js';
-import VfosPanel, { listenNote, outLabel } from '../src/panels/VfosPanel.jsx';
+import VfosPanel, { listenNote, outLabel, sqLabel } from '../src/panels/VfosPanel.jsx';
 import ReceiverPanel, { canToggleListen } from '../src/panels/ReceiverPanel.jsx';
 import StatusPanel from '../src/panels/StatusPanel.jsx';
 import { DEFAULTS } from '../src/display/DisplayContext.jsx';
@@ -22,7 +22,7 @@ import {
 
 module.exports = {
     deep, render, reset, walk, words,
-    VfosPanel, listenNote, outLabel, ReceiverPanel, canToggleListen, StatusPanel, DEFAULTS,
+    VfosPanel, listenNote, outLabel, sqLabel, ReceiverPanel, canToggleListen, StatusPanel, DEFAULTS,
     getVfos, setVfos, getSubReceivers, connectionCheck, getVfoLimit, newSessionId,
     colours, marks, catalogue, muteAllListening, nextListeningVfo, runFunction,
 };

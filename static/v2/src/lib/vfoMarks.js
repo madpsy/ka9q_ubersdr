@@ -7,13 +7,14 @@
 //
 // A listening VFO is drawn like the main receiver: a wash over its passband and
 // the dial and edge lines, in its own colour (lib/vfoColours.js). The passband is
-// the *main* receiver's filter shape centred on the VFO's own frequency, because
-// that is what it is playing — every listening VFO is locked to the main mode
-// and filter (see the note on listening in lib/vfos.js). Drawing its own saved
-// filter instead would show a passband nothing is demodulating.
+// the filter it is playing with about the VFO's own frequency — main's, until
+// it is given one of its own (lib/vfos.js listenEdges) — never its saved slot's,
+// which belongs to a mode it is not in and would show a passband nothing is
+// demodulating.
 
-import { VFO_IDS, cleanSlot, isListening, listenBlockedReason } from './vfos.js';
+import { VFO_IDS, cleanSlot, isListening, listenBlockedReason, listenEdges, listenOf } from './vfos.js';
 import { vfoColour } from './vfoColours.js';
+import { edgeHit } from './edgeHit.js';
 
 /**
  * The listening VFOs as the spectrum draws them, in A–D order.
@@ -22,11 +23,13 @@ import { vfoColour } from './vfoColours.js';
  * @param snap    the engine's snapshot() (radio/subReceivers.js), or null. A VFO
  *                the server's limit leaves out (`overLimit`) is not playing and
  *                is not drawn.
- * @param tuning  the main receiver's, for the filter shape. In IQ nothing is
+ * @param tuning  the main receiver's, for the mode and main's filter. In IQ nothing is
  *                drawn: listening ends there (lib/vfos.js), and this answers so
  *                from the same render rather than a frame after the flags clear.
  * @param limit   the server's VFO count; at 1 nothing is listening.
- * @returns {Array<{id, frequency, low, high, colour, open}>}
+ * @returns {Array<{id, frequency, low, high, own, colour, open, gated}>} —
+ *          `own` when the filter is the VFO's own rather than main's, `gated`
+ *          when it has a squelch on at all (its own or main's).
  */
 export function listeningPassbands(state, snap, tuning, limit) {
     const out = [];
@@ -37,13 +40,16 @@ export function listeningPassbands(state, snap, tuning, limit) {
         if (!slot) continue;
         const live = snap && snap.vfos ? snap.vfos[id] : null;
         if (live && live.overLimit) continue;
+        const edges = listenEdges(listenOf(state, id), tuning);
         out.push({
             id,
             frequency: slot.frequency,
-            low: Number(tuning.bandwidthLow) || 0,
-            high: Number(tuning.bandwidthHigh) || 0,
+            low: edges.low,
+            high: edges.high,
+            own: edges.own,
             colour: vfoColour(id),
             open: !!(live && live.squelchOpen),
+            gated: !!(live && live.threshold != null),
         });
     }
     return out;
@@ -72,6 +78,28 @@ export function passbandAt(x, list, cfg, width, grab = 6) {
         if (x < lo || x > hi) continue;
         const d = Math.abs(x - dial);
         if (d < bestD) { best = v.id; bestD = d; }
+    }
+    return best;
+}
+
+/**
+ * The listening passband edge under a pointer, as `{id, which}`, or null —
+ * dragging it gives that VFO a filter of its own. The same zones as the main
+ * receiver's edges (lib/edgeHit.js), so a passband too narrow on screen to
+ * grab has none and a drag there retunes instead; where two VFOs' edges are
+ * both in reach the nearer edge wins.
+ */
+export function listenEdgeAt(x, list, cfg, width, grab, minPx) {
+    if (!cfg || !cfg.span || !width || !list || !list.length) return null;
+    const xAt = (hz) => ((hz - (cfg.centerFreq - cfg.span / 2)) / cfg.span) * width;
+    let best = null;
+    let bestD = Infinity;
+    for (const v of list) {
+        const t = { frequency: v.frequency, bandwidthLow: v.low, bandwidthHigh: v.high };
+        const which = edgeHit(x, width, cfg.span, cfg.centerFreq, t, grab, minPx);
+        if (!which) continue;
+        const d = Math.abs(x - xAt(v.frequency + (which === 'low' ? v.low : v.high)));
+        if (d < bestD) { best = { id: v.id, which }; bestD = d; }
     }
     return best;
 }

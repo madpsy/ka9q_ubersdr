@@ -393,6 +393,8 @@ const SPECTRUM = group('Spectrum', [
 const radioOf = (ctx) => ({
     tuning: ctx.state().tuning,
     view: ctx.state().view,
+    // A swap hands squelches over with the roles (lib/vfos.js swapVfo).
+    squelch: ctx.state().squelch,
     actions: ctx.actions,
 });
 

@@ -19,19 +19,30 @@
 // "keep it playing while I stay here" — so the two are kept visibly apart: the
 // speaker is its own button beside the row, never part of it, and a one-line
 // hint at the top says which is which.
+//
+// Each VFO being heard also gets a squelch and a width slider on its second
+// line. A listening VFO starts on the main receiver's squelch and filter and
+// follows them until it is given its own — by the slider, its Auto, or for the
+// filter its passband edge on the spectrum; the value beside the slider then
+// turns into the way back. The main row's sliders are simply main's, so every
+// heard row has the same controls in the same places. The squelch slider
+// carries the live SNR on its track, which is the row's signal meter too.
 
 import React, { useEffect, useRef, useState } from '../react.js';
 import { useRadio } from '../radio/RadioContext.jsx';
 import {
-    LISTEN_IQ_REASON, VFO_IDS, copyVfo, getVfos, isListening, listenOf, listeningVfos, nextScanVfo,
-    onVfosChanged, scannableVfos, selectVfo,
+    LISTEN_IQ_REASON, VFO_IDS, copyVfo, getVfos, isListening, listenEdges, listenOf, listenThreshold,
+    listeningVfos, nextScanVfo, onVfosChanged, scannableVfos, selectVfo,
 } from '../lib/vfos.js';
 import {
     SCAN_DWELL_MS, SCAN_MODE_DWELL_MS, SCAN_MODE_SETTLE_MS, SCAN_SETTLE_MS,
 } from '../lib/scanner.js';
 import { formatFilterWidth, formatHz } from '../lib/format.js';
 import { bandForFrequency } from '../lib/bands.js';
-import { isIQ } from '../radio/constants.js';
+import {
+    FILTER_WIDTH_MIN, FILTER_WIDTH_STEP, SQUELCH_MAX, SQUELCH_MIN, SQUELCH_STEP, edgesForWidth, isIQ,
+    maxFilterWidth,
+} from '../radio/constants.js';
 import { useSubReceivers } from '../radio/useSubReceivers.js';
 import { vfoColour } from '../lib/vfoColours.js';
 import { touchVfo } from '../lib/vfoMarks.js';
@@ -48,9 +59,10 @@ import { Icon, Slider } from '../components/ui.jsx';
  */
 //
 // A listening VFO is the exception to "a slot shows what it holds": it plays in
-// the main receiver's mode and filter (the mode lock — see lib/vfos.js), so that
-// is what its row shows, with its own saved mode kept as `savedMode` for the
-// note saying it will come back to it.
+// the main receiver's mode (the mode lock — see lib/vfos.js) and in main's
+// filter or one of its own, so that is what its row shows, with its own saved
+// mode kept as `savedMode` for the note saying it will come back to it. `low`,
+// `high` and `ownFilter` are the filter it is playing with.
 //
 // `listen` is false where nothing can be heard alongside the main receiver —
 // one VFO on this server, or the main one in IQ. A stored flag is then a
@@ -62,6 +74,9 @@ function rowsFor(vfos, tuning, listen = false) {
         const s = active ? tuning : vfos.slots[id];
         if (!s || !(s.frequency > 0)) return { id, active, listening: false, empty: true };
         const shape = listening ? tuning : s;
+        const edges = listening
+            ? listenEdges(listenOf(vfos, id), tuning)
+            : { low: shape.bandwidthLow, high: shape.bandwidthHigh, own: false };
         return {
             id,
             active,
@@ -70,7 +85,10 @@ function rowsFor(vfos, tuning, listen = false) {
             frequency: s.frequency,
             mode: (shape.mode || '').toUpperCase(),
             savedMode: (s.mode || '').toUpperCase(),
-            width: formatFilterWidth(shape.bandwidthLow, shape.bandwidthHigh),
+            width: formatFilterWidth(edges.low, edges.high),
+            low: edges.low,
+            high: edges.high,
+            ownFilter: edges.own,
             band: bandForFrequency(s.frequency),
         };
     });
@@ -157,6 +175,46 @@ function OutButtons({ id, out, pan, short, onChange }) {
             })}
         </span>
     );
+}
+
+/**
+ * One of a heard row's two tuning sliders, squelch or filter width: a short
+ * label, the slider, and the value it is at.
+ *
+ * For a listening VFO the value is also the state. Dimmed, it is main's and
+ * follows main; once the VFO has a setting of its own the number turns into a
+ * button that puts it back — the one place the panel shows the difference is
+ * also the way to undo it. The main row's sliders are simply main's controls,
+ * so every heard row has the same things in the same places.
+ */
+function Knob({ kind, id, label, title, slider, value, own, following, reset, extra }) {
+    return (
+        <span className={`vfos__knob vfos__${kind}`} title={title}>
+            <span className="vfos__knob-label" aria-hidden="true">{label}</span>
+            <span className="vfos__knob-slider"><Slider {...slider} /></span>
+            {own ? (
+                <button
+                    type="button"
+                    className="vfos__knob-val is-own"
+                    aria-label={reset.aria}
+                    title={reset.title}
+                    onClick={(e) => { e.stopPropagation(); reset.onClick(); }}
+                >
+                    {value}
+                    <Icon.Reset size={10} />
+                </button>
+            ) : (
+                <span className={`vfos__knob-val${following ? ' is-following' : ''}`}>{value}</span>
+            )}
+            {extra}
+        </span>
+    );
+}
+
+// A squelch threshold as the panel says it: "off", or whole dB where it is one.
+export function sqLabel(threshold) {
+    if (threshold == null) return 'off';
+    return `${Number.isInteger(threshold) ? threshold : threshold.toFixed(1)} dB`;
 }
 
 /**
@@ -293,7 +351,7 @@ export default function VfosPanel({ minimal }) {
     // ones, not a copy — so that turning it down here and there is one setting.
     // Its side of the stereo field is stored with the VFOs, like the others'.
     const audio = radio.audio || { volume: 1, muted: false };
-    const squelchOn = !!(radio.squelch && radio.squelch.enabled);
+    const mainThreshold = radio.squelch && radio.squelch.enabled ? radio.squelch.threshold : null;
     const mainLive = () => {
         const m = radio.meters && radio.meters.current;
         return m ? { snr: m.snr, squelchOpen: m.squelchOpen } : null;
@@ -308,6 +366,11 @@ export default function VfosPanel({ minimal }) {
                 live: mainLive(),
                 setVolume: (x) => radio.actions.setVolume(x),
                 setMuted: (on) => radio.actions.setMuted(on),
+                setWidth: (w) => radio.actions.setBandwidth(...edgesForWidth(tuning.mode, w, tuning)),
+                threshold: mainThreshold,
+                sqOwn: false,
+                setSquelch: (x) => radio.actions.setSquelch(x),
+                autoSquelch: () => radio.actions.autoSquelch(),
             };
         }
         const l = listenOf(vfos, v.id);
@@ -320,8 +383,23 @@ export default function VfosPanel({ minimal }) {
             live,
             setVolume: (x) => subs.setVolume(v.id, x),
             setMuted: (on) => subs.setMuted(v.id, on),
+            // From the filter it is playing with, so a VFO with a shift of its
+            // own keeps it; one that lands back on main's filter follows main
+            // again (lib/vfos.js withListenFilter).
+            setWidth: (w) => {
+                touchVfo(v.id);
+                subs.setFilter(v.id, edgesForWidth(tuning.mode, w, { bandwidthLow: v.low, bandwidthHigh: v.high }));
+            },
+            follow: () => subs.setFilter(v.id, null),
+            // The stored setting, not the engine's: the slider moves at once.
+            threshold: listenThreshold(l, mainThreshold).threshold,
+            sqOwn: listenThreshold(l, mainThreshold).own,
+            setSquelch: (x) => { touchVfo(v.id); subs.setSquelch(v.id, x <= SQUELCH_MIN ? 'off' : x); },
+            autoSquelch: () => { touchVfo(v.id); subs.autoSquelch(v.id); },
+            followSquelch: () => subs.setSquelch(v.id, null),
         };
     };
+    const mainWidth = Math.abs((tuning.bandwidthHigh || 0) - (tuning.bandwidthLow || 0));
     const setOut = (id, out) => { touchVfo(id); subs.setOutput(id, out); };
 
     const rowButton = (v) => (
@@ -412,42 +490,122 @@ export default function VfosPanel({ minimal }) {
         );
     };
 
-    // The second line of the expanded view: where it is heard, how loud, and
-    // whether its squelch is letting anything through, for the main receiver
-    // and each VFO playing beside it.
-    const soundLine = (v, s, note, refused) => (
-        <div className="vfos__ctl">
-            <OutButtons id={v.id} out={s.out} pan={s.pan} onChange={(o) => setOut(v.id, o)} />
-            <button
-                type="button"
-                className={`vfos__mute${s.muted ? ' is-on' : ''}`}
-                aria-pressed={s.muted}
-                aria-label={`Mute VFO ${v.id}`}
-                title={s.muted ? `Unmute VFO ${v.id}` : `Mute VFO ${v.id}`}
-                onClick={() => s.setMuted(!s.muted)}
-            >
-                {s.muted ? <Icon.Mute size={14} /> : <Icon.Volume size={14} />}
-            </button>
-            <span className="vfos__vol" title={`VFO ${v.id} volume: ${Math.round(s.vol * 100)}`}>
-                <Slider
-                    value={Math.round(s.vol * 100)}
-                    min={0}
-                    max={100}
-                    disabled={s.muted}
-                    onChange={(x) => s.setVolume(x / 100)}
-                />
-            </span>
-            <MiniMeter live={s.live} />
-            {/* Only with the squelch on: off, it is held open and "open" on
-                every row would be a reading that never changes. */}
-            {squelchOn && (
-                <span className={`vfos__sq${s.live && s.live.squelchOpen ? ' is-open' : ''}`}>
-                    {s.live && s.live.squelchOpen ? 'open' : 'closed'}
-                </span>
-            )}
-            {note && <span className={`vfos__note${refused ? ' is-refused' : ''}`}>{note}</span>}
-        </div>
-    );
+    // The second line of the expanded view, in two rows: how the VFO is heard
+    // (where, whether, how loud), then what it lets through (squelch and
+    // filter width) — two sliders side by side, so the rows of four VFOs line
+    // up in columns. On a narrow dock the pair wraps, one slider to a row.
+    const soundLine = (v, s, note, refused) => {
+        const snr = s.live && s.live.snr != null ? s.live.snr : null;
+        const open = !!(s.live && s.live.squelchOpen);
+        const sqText = sqLabel(s.threshold);
+        const mainSq = sqLabel(mainThreshold);
+        const width = Math.abs(v.high - v.low);
+        const max = maxFilterWidth(tuning.mode);
+        const widthText = formatFilterWidth(0, width);
+        const mainWidthText = formatFilterWidth(0, mainWidth);
+        const main = v.active;
+        return (
+            <div className="vfos__ctl">
+                <div className="vfos__ctl-row">
+                    <OutButtons id={v.id} out={s.out} pan={s.pan} onChange={(o) => setOut(v.id, o)} />
+                    <button
+                        type="button"
+                        className={`vfos__mute${s.muted ? ' is-on' : ''}`}
+                        aria-pressed={s.muted}
+                        aria-label={`Mute VFO ${v.id}`}
+                        title={s.muted ? `Unmute VFO ${v.id}` : `Mute VFO ${v.id}`}
+                        onClick={() => s.setMuted(!s.muted)}
+                    >
+                        {s.muted ? <Icon.Mute size={14} /> : <Icon.Volume size={14} />}
+                    </button>
+                    <span className="vfos__vol" title={`VFO ${v.id} volume: ${Math.round(s.vol * 100)}`}>
+                        <Slider
+                            value={Math.round(s.vol * 100)}
+                            min={0}
+                            max={100}
+                            disabled={s.muted}
+                            onChange={(x) => s.setVolume(x / 100)}
+                        />
+                    </span>
+                </div>
+                <div className="vfos__ctl-row">
+                    <Knob
+                        kind="squelch"
+                        id={v.id}
+                        label="SQ"
+                        title={[
+                            main
+                                ? `VFO ${v.id} squelch: ${sqText}`
+                                : s.sqOwn
+                                    ? `VFO ${v.id} has its own squelch: ${sqText} (${vfos.active} ${mainSq})`
+                                    : `VFO ${v.id} uses ${vfos.active}'s squelch (${mainSq}) — move this to give it its own`,
+                            snr == null ? 'no signal reading yet' : `SNR ${snr.toFixed(1)} dB${s.threshold == null ? '' : `, ${open ? 'open' : 'closed'}`}`,
+                        ].join(' — ')}
+                        slider={{
+                            value: s.threshold == null ? SQUELCH_MIN : s.threshold,
+                            min: SQUELCH_MIN,
+                            max: SQUELCH_MAX,
+                            step: SQUELCH_STEP,
+                            onChange: s.setSquelch,
+                            // The live SNR on the track, in the gate's colour:
+                            // the row's meter and its squelch state in one.
+                            marker: snr,
+                            markerTone: s.threshold != null && !open ? 'closed' : 'open',
+                        }}
+                        value={sqText}
+                        own={!main && s.sqOwn}
+                        following={!main}
+                        reset={{
+                            aria: `VFO ${v.id}: use ${vfos.active}'s squelch again`,
+                            title: `Back to ${vfos.active}'s squelch (${mainSq})`,
+                            onClick: s.followSquelch,
+                        }}
+                        extra={(
+                            <button
+                                type="button"
+                                className="vfos__auto"
+                                aria-label={`VFO ${v.id}: set the squelch automatically`}
+                                title={`Set VFO ${v.id}'s squelch just above the noise it is hearing`}
+                                disabled={snr == null}
+                                onClick={(e) => { e.stopPropagation(); s.autoSquelch(); }}
+                            >
+                                Auto
+                            </button>
+                        )}
+                    />
+                    <Knob
+                        kind="bw"
+                        id={v.id}
+                        label="BW"
+                        title={main
+                            ? `VFO ${v.id} filter width: ${widthText}`
+                            : v.ownFilter
+                                ? `VFO ${v.id} has its own filter: ${widthText} (${vfos.active} ${mainWidthText})`
+                                : `VFO ${v.id} uses ${vfos.active}'s filter (${widthText}) — move this or drag its passband edge to give it its own`}
+                        slider={{
+                            value: Math.max(FILTER_WIDTH_MIN, Math.min(max, Math.round(width))),
+                            min: FILTER_WIDTH_MIN,
+                            max,
+                            step: FILTER_WIDTH_STEP,
+                            onChange: s.setWidth,
+                            // Main's width on the track, so how the two compare
+                            // shows without reading either number.
+                            marker: main ? null : mainWidth,
+                        }}
+                        value={widthText}
+                        own={!main && v.ownFilter}
+                        following={!main}
+                        reset={{
+                            aria: `VFO ${v.id}: use ${vfos.active}'s filter again`,
+                            title: `Back to ${vfos.active}'s filter (${mainWidthText})`,
+                            onClick: s.follow,
+                        }}
+                    />
+                </div>
+                {note && <span className={`vfos__note${refused ? ' is-refused' : ''}`}>{note}</span>}
+            </div>
+        );
+    };
 
     const item = (v) => {
         const heard = v.listening || (v.active && anyListening);

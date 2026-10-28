@@ -632,7 +632,7 @@ t('volume and mute go to the VFO\'s store entry, and the main one\'s to the Audi
     assert.strictEqual(byClass(ib2, 'slider')[0].props.disabled, true, 'a muted VFO\'s slider');
 });
 
-t('a heard VFO\'s width slider gives it its own filter, and its number puts it back', async () => {
+t('a heard VFO\'s width is its own: main\'s moving leaves it, and its number matches main\'s', async () => {
     await setLimit(2);
     reset();
     state({ B: true });
@@ -640,21 +640,36 @@ t('a heard VFO\'s width slider gives it its own filter, and its number puts it b
     const ctx = context();
     ctx.actions = { ...ctx.actions, setBandwidth: (lo, hi) => calls.push([lo, hi]) };
     run(ctx);
+    // Started with a copy of main's.
+    assert.deepStrictEqual(getVfos().listen.B.bw, { ssb: [50, 2700] });
     let tree = frame(VfosPanel, {}, ctx);
     let [ia, ib] = items(tree);
     const bw = (item) => byClass(item, 'vfos__bw')[0];
-    // Following main: main's width, said quietly, with main's marked on the track.
+    const val = (item) => byClass(bw(item), 'vfos__knob-val')[0];
+    // The same as main's: said quietly, with main's marked on the track.
     assert.ok(bw(ib), 'the listening row has one');
-    assert.strictEqual(byClass(bw(ib), 'vfos__knob-val')[0].props.className, 'vfos__knob-val is-following');
-    assert.strictEqual(text(byClass(bw(ib), 'vfos__knob-val')[0]), '2.65k');
+    assert.strictEqual(val(ib).props.className, 'vfos__knob-val is-same');
+    assert.strictEqual(text(val(ib)), '2.65k');
+    assert.strictEqual(byClass(val(ib), 'vfos__knob-num').length, 1, 'the number in its own span, for hiding');
     assert.strictEqual(byClass(bw(ib), 'slider-marker').length, 1);
-    assert.ok(/uses A's filter/.test(bw(ib).props.title), bw(ib).props.title);
+    assert.ok(/the same as A's/.test(bw(ib).props.title), bw(ib).props.title);
     // The main row's is main's own filter, through the receiver's action.
     assert.strictEqual(byClass(bw(ia), 'slider-marker').length, 0);
     byClass(bw(ia), 'slider')[0].props.onChange({ target: { value: '2000' } });
     assert.deepStrictEqual(calls, [[50, 2050]]);
 
-    // B's slider: its own filter, from where it was, in the store only.
+    // Main's filter moves: B's does not.
+    const moved = context({ tuning: { ...ctx.tuning, bandwidthHigh: 2050 } });
+    run(moved);
+    reset();
+    [ia, ib] = items(frame(VfosPanel, {}, moved));
+    assert.strictEqual(text(val(ib)), '2.65k');
+    assert.ok(val(ib).props.className.includes('is-own'), 'now it differs from main\'s');
+    run(ctx);
+
+    // B's slider: in the store only.
+    reset();
+    [ia, ib] = items(frame(VfosPanel, {}, ctx));
     byClass(bw(ib), 'slider')[0].props.onChange({ target: { value: '1800' } });
     assert.deepStrictEqual(getVfos().listen.B.bw, { ssb: [50, 1850] });
     assert.strictEqual(calls.length, 1, 'main\'s filter left alone');
@@ -662,14 +677,13 @@ t('a heard VFO\'s width slider gives it its own filter, and its number puts it b
     tree = frame(VfosPanel, {}, ctx);
     [ia, ib] = items(tree);
     assert.strictEqual(byClass(ib, 'vfos__width')[0].props.children, '1.80k', 'the row shows the width it plays');
-    const val = byClass(bw(ib), 'vfos__knob-val')[0];
-    assert.strictEqual(val.type, 'button');
-    assert.ok(val.props.className.includes('is-own'));
-    assert.strictEqual(val.props['aria-label'], 'VFO B: use A\'s filter again');
+    assert.strictEqual(val(ib).type, 'button');
+    assert.ok(val(ib).props.className.includes('is-own'));
+    assert.strictEqual(val(ib).props['aria-label'], 'VFO B: match A\'s filter');
     const e = ev();
-    val.props.onClick(e);
+    val(ib).props.onClick(e);
     assert.ok(e.stopped);
-    assert.ok(!('bw' in getVfos().listen.B), 'back on main\'s');
+    assert.deepStrictEqual(getVfos().listen.B.bw, { ssb: [50, 2700] }, 'a copy of main\'s');
 });
 
 t('the compact view has no squelch or width sliders', async () => {
@@ -685,9 +699,12 @@ t('a squelch value reads as whole dB, a half, or off', () => {
     assert.strictEqual(sqLabel(null), 'off');
     assert.strictEqual(sqLabel(6), '6 dB');
     assert.strictEqual(sqLabel(6.5), '6.5 dB');
+    // Beside the slider, without the unit.
+    assert.strictEqual(sqLabel(12.5, false), '12.5');
+    assert.strictEqual(sqLabel(null, false), 'off');
 });
 
-t('a heard VFO\'s squelch follows main until set, and its value puts it back', async () => {
+t('a heard VFO\'s squelch is its own: main\'s moving leaves it, and its value matches main\'s', async () => {
     await setLimit(2);
     reset();
     state({ B: true });
@@ -703,22 +720,27 @@ t('a heard VFO\'s squelch follows main until set, and its value puts it back', a
     let [ia, ib] = items(tree);
     const sq = (item) => byClass(item, 'vfos__squelch')[0];
     const val = (item) => byClass(sq(item), 'vfos__knob-val')[0];
-    // Following main's 6 dB: main's value, dim, and the slider sitting on it.
-    assert.strictEqual(val(ib).props.className, 'vfos__knob-val is-following');
-    assert.strictEqual(text(val(ib)), '6 dB');
+    // A copy of main's 6 dB: dim, and the slider sitting on it.
+    assert.strictEqual(getVfos().listen.B.sq, 6);
+    assert.strictEqual(val(ib).props.className, 'vfos__knob-val is-same');
+    assert.strictEqual(text(val(ib)), '6');
     assert.strictEqual(byClass(sq(ib), 'slider')[0].props.value, 6);
-    assert.ok(/uses A's squelch \(6 dB\)/.test(sq(ib).props.title), sq(ib).props.title);
+    assert.ok(/squelch: 6 dB, the same as A's/.test(sq(ib).props.title), sq(ib).props.title);
     // The main row's slider and Auto are main's own controls.
     byClass(sq(ia), 'slider')[0].props.onChange({ target: { value: '9' } });
     byClass(sq(ia), 'vfos__auto')[0].props.onClick(ev());
     assert.deepStrictEqual(calls, [['set', 9], ['auto']]);
-    assert.strictEqual(text(val(ia)), '6 dB');
+    assert.strictEqual(text(val(ia)), '6');
     assert.strictEqual(val(ia).props.className, 'vfos__knob-val', 'main\'s value is not dimmed');
 
     // B's own: in the store only, and the engine's lane gated by it.
     byClass(sq(ib), 'slider')[0].props.onChange({ target: { value: '12' } });
     assert.strictEqual(getVfos().listen.B.sq, 12);
     assert.strictEqual(calls.length, 2, 'main\'s squelch left alone');
+    // Main's moving leaves it where it is.
+    run(context({ squelch: { value: 20, enabled: true, threshold: 20 } }));
+    assert.strictEqual(subs.snapshot().vfos.B.threshold, 12);
+    run(ctx);
     assert.strictEqual(subs.snapshot().vfos.B.threshold, 12);
     assert.strictEqual(subs.snapshot().vfos.B.squelchOwn, true);
     reset();
@@ -726,7 +748,7 @@ t('a heard VFO\'s squelch follows main until set, and its value puts it back', a
     [ia, ib] = items(tree);
     assert.strictEqual(val(ib).type, 'button');
     assert.ok(val(ib).props.className.includes('is-own'));
-    assert.strictEqual(val(ib).props['aria-label'], 'VFO B: use A\'s squelch again');
+    assert.strictEqual(val(ib).props['aria-label'], 'VFO B: match A\'s squelch');
     // The floor is off — its own off, with main's still on.
     byClass(sq(ib), 'slider')[0].props.onChange({ target: { value: '-10' } });
     assert.strictEqual(getVfos().listen.B.sq, 'off');
@@ -738,7 +760,7 @@ t('a heard VFO\'s squelch follows main until set, and its value puts it back', a
     const e = ev();
     val(ib).props.onClick(e);
     assert.ok(e.stopped);
-    assert.ok(!('sq' in getVfos().listen.B), 'back on main\'s');
+    assert.strictEqual(getVfos().listen.B.sq, 6, 'a copy of main\'s');
     assert.strictEqual(subs.snapshot().vfos.B.threshold, 6);
 });
 
@@ -758,9 +780,8 @@ t('a VFO\'s Auto waits for a reading, then sets its own squelch above its noise'
     ib = items(frame(VfosPanel, {}, ctx))[1];
     assert.strictEqual(auto(ib).props.disabled, false);
     auto(ib).props.onClick(ev());
-    // Averaging 3 dB, plus the 3 dB of headroom main's Auto uses: 6 dB, which
-    // is main's own, so it goes on following main.
-    assert.ok(!('sq' in getVfos().listen.B));
+    // Averaging 3 dB, plus the 3 dB of headroom main's Auto uses.
+    assert.strictEqual(getVfos().listen.B.sq, 6);
     for (const n of [9, 9, 9, 9, 9]) subs._onQuality(lane, { basebandPower: n, noisePower: 0 });
     assert.ok(subs.autoSquelch('B'));
     assert.strictEqual(getVfos().listen.B.sq, 12);

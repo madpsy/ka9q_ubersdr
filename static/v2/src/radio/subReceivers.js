@@ -29,8 +29,8 @@
 //                  at its own frequency. The streams then all arrive at the
 //                  context's own rate and nothing resamples. A listening VFO's
 //                  saved mode stays in its slot (lib/vfos.js) for when it stops
-//                  listening. The filter is main's too until the VFO is given
-//                  one of its own (setFilter; lib/vfos.js listenEdges).
+//                  listening. The filter is the VFO's own (setFilter), copied
+//                  from main's when it starts — see _seed.
 //   main format    every secondary is in the main socket's format, Opus or
 //                  lossless (the Audio panel's choice, or the recorder's hold
 //                  on lossless). The server fixes the format at connect, so a
@@ -43,9 +43,9 @@
 //                  The VFOs are ordinary memories again, and leaving IQ brings
 //                  none of them back by itself. While in IQ listening is
 //                  refused, with listenBlocked saying why.
-//   squelch        main's threshold, for every stream that has not been given
-//                  its own (setSquelch; lib/vfos.js listenThreshold). Sent as
-//                  min_snr on connect and as set_audio_gate when it moves.
+//   squelch        each stream's own threshold (setSquelch), copied from
+//                  main's when it starts — see _seed. Sent as min_snr on
+//                  connect and as set_audio_gate when it moves.
 //
 // Which VFOs are listening, and how each is heard, is the VFO store's
 // (lib/vfos.js). This subscribes to it and makes the streams match.
@@ -62,7 +62,8 @@ import { squelchState } from './squelchState.js';
 import { getVfoLimit, onVfoLimit } from './session.js';
 import {
     clearListening, getVfos, listenBlockedReason, listenEdges, listenOf, listenThreshold, listenVfo,
-    listeningVfos, onVfosChanged, setVfoFilter, setVfoListen, setVfoSquelch, setVfos, tuneListening,
+    listeningVfos, onVfosChanged, seedListen, setVfoFilter, setVfoListen, setVfoSquelch, setVfos,
+    tuneListening,
 } from '../lib/vfos.js';
 import { vfoPans } from '../lib/vfoPan.js';
 import { throttle } from '../lib/throttle.js';
@@ -197,8 +198,8 @@ export class SubReceivers extends Emitter {
             }
         }
 
-        // Unforced: a VFO with a filter of its own is only retuned when the mode
-        // moves it, not every time main's filter does.
+        // Unforced: each VFO has its own filter, so main's moving retunes none
+        // of them; only a mode change does.
         if (!this._iq(main) && modeChanged(prev.tuning, main.tuning)) {
             for (const lane of this._assigned()) this._tune(lane, false);
         }
@@ -381,6 +382,8 @@ export class SubReceivers extends Emitter {
     // ---- making the streams match the store ---------------------------
 
     _sync() {
+        // A seed is a store write, and the write runs _sync again with it.
+        if (this._seed()) return;
         const state = this.store.get();
         const limit = this.limitSource.get();
         // listeningVfos answers none at a limit of 1, so a stored flag the
@@ -430,6 +433,25 @@ export class SubReceivers extends Emitter {
 
     _assigned() {
         return Array.from(this.lanes.values()).filter((l) => l.slotId);
+    }
+
+    // Every listening VFO without a filter for main's mode, or without a
+    // squelch, gets a copy of main's — once, from then on its own. Here rather
+    // than where listening is switched on, so it covers every way a VFO comes
+    // to be listening (the panel, a swap, a control surface, a reload) and main
+    // moving into a mode family the VFO has not played in. Only while running:
+    // main's settings before then may not be the restored ones.
+    _seed() {
+        const main = this.main;
+        if (!main.running || !main.tuning || this._iq(main)) return false;
+        const before = this.store.get();
+        let state = before;
+        for (const v of listeningVfos(before, this.limitSource.get())) {
+            state = seedListen(state, v.id, main.tuning, main.threshold);
+        }
+        if (state === before) return false;
+        this.store.set(state);
+        return true;
     }
 
     _anyConnected() {

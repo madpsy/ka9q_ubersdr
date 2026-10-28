@@ -275,19 +275,32 @@ t('at a limit of one stored flags are inert: nothing connects and nothing is ref
 
 // --- the mode lock -----------------------------------------------------------
 
-t('a mode or filter change on the main receiver retunes every secondary', () => {
+t('a mode change retunes every secondary into it, each keeping its own filter', () => {
     const r = track(rig());
     up(r);
+    // Each was seeded with main's LSB filter as it started.
+    assert.deepStrictEqual(listenOf(getVfos(), 'B').bw, { ssb: [50, 2700] });
     r.conns.forEach((c) => { c.sent = []; });
     r.subs.update({ tuning: { frequency: 7100000, mode: 'usb', bandwidthLow: 50, bandwidthHigh: 2800 } });
     for (const c of r.conns) {
         const tune = c.sent.find((m) => m.type === 'tune');
         assert.ok(tune, `vfo ${c.vfo} retuned`);
         assert.strictEqual(tune.mode, 'usb');
-        assert.strictEqual(tune.bandwidthHigh, 2800);
+        // Its own SSB filter, mirrored — not main's new 2800.
+        assert.deepStrictEqual([tune.bandwidthLow, tune.bandwidthHigh], [50, 2700]);
         assert.strictEqual(tune.frequency, c.params.frequency);
     }
     assert.strictEqual(r.byVfo(1).sent.find((m) => m.type === 'tune').frequency, 14074000);
+});
+
+t('a mode family a VFO has not played in starts from main\'s filter', () => {
+    const r = track(rig({ listening: ['B'] }));
+    up(r);
+    r.conns.forEach((c) => { c.sent = []; });
+    r.subs.update({ tuning: { frequency: 7100000, mode: 'am', bandwidthLow: -4000, bandwidthHigh: 4000 } });
+    const tune = r.byVfo(1).sent.find((m) => m.type === 'tune');
+    assert.deepStrictEqual([tune.mode, tune.bandwidthLow, tune.bandwidthHigh], ['am', -4000, 4000]);
+    assert.deepStrictEqual(listenOf(getVfos(), 'B').bw, { ssb: [50, 2700], am: [-4000, 4000] });
 });
 
 t('the main receiver moving frequency does not retune anybody', () => {
@@ -311,28 +324,27 @@ t('retuning a listening VFO tunes its stream, with the locked mode', () => {
 // The tune throttle runs on the real clock, so each step waits out its window.
 const pastThrottle = () => new Promise((res) => setTimeout(res, 90));
 
-t('a VFO given its own filter is retuned with it, and the others keep main\'s', async () => {
+t('each VFO\'s filter is its own: setting one retunes only it, and main\'s retunes none', async () => {
     const r = track(rig());
     up(r);
     r.conns.forEach((c) => { c.sent = []; });
-    // Main is in LSB; B is given 1.8 kHz on that sideband.
+    // Main is in LSB; B is set to 1.8 kHz on that sideband.
     assert.ok(r.subs.setFilter('B', [-1850, -50]));
     const tune = r.byVfo(1).sent.find((m) => m.type === 'tune');
     assert.deepStrictEqual(tune, { type: 'tune', frequency: 14074000, mode: 'lsb', bandwidthLow: -1850, bandwidthHigh: -50 });
     for (const i of [2, 3]) assert.ok(!r.byVfo(i).sent.some((m) => m.type === 'tune'), `vfo ${i} untouched`);
-    // Main's filter moving leaves B's own alone and carries the others.
+    // Main's filter moving moves nobody else's.
     r.conns.forEach((c) => { c.sent = []; });
     await pastThrottle();
     r.subs.update({ tuning: { ...LSB, bandwidthLow: -3000 } });
-    assert.ok(!r.byVfo(1).sent.some((m) => m.type === 'tune'), 'B keeps its own');
-    assert.strictEqual(r.byVfo(2).sent.find((m) => m.type === 'tune').bandwidthLow, -3000);
+    assert.ok(r.conns.every((c) => !c.sent.some((m) => m.type === 'tune')), 'no secondary retuned');
     // Upper sideband: the same width, mirrored.
     r.conns.forEach((c) => { c.sent = []; });
     await pastThrottle();
     r.subs.update({ tuning: { ...LSB, mode: 'usb', bandwidthLow: 50, bandwidthHigh: 2700 } });
     const usb = r.byVfo(1).sent.find((m) => m.type === 'tune');
     assert.deepStrictEqual([usb.bandwidthLow, usb.bandwidthHigh], [50, 1850]);
-    // And back on main's.
+    // Matching main's copies it once.
     r.conns.forEach((c) => { c.sent = []; });
     await pastThrottle();
     assert.ok(r.subs.setFilter('B', null));
@@ -341,21 +353,22 @@ t('a VFO given its own filter is retuned with it, and the others keep main\'s', 
     assert.deepStrictEqual([back.bandwidthLow, back.bandwidthHigh], [50, 2700]);
 });
 
-t('a VFO given its own squelch is gated by it, and the others follow main', async () => {
+t('each VFO\'s squelch is its own: seeded from main\'s, then main\'s moving moves none', async () => {
     const r = track(rig());
     up(r, { threshold: 6 });
+    assert.ok(['B', 'C', 'D'].every((id) => listenOf(getVfos(), id).sq === 6), 'each starts with main\'s');
     r.conns.forEach((c) => { c.sent = []; });
     assert.ok(r.subs.setSquelch('B', 15));
     assert.deepStrictEqual(r.byVfo(1).sent, [{ type: 'set_audio_gate', min_snr: 15 }]);
     for (const i of [2, 3]) assert.deepStrictEqual(r.byVfo(i).sent, [], `vfo ${i} untouched`);
     assert.strictEqual(r.subs.snapshot().vfos.B.threshold, 15);
     assert.strictEqual(r.subs.snapshot().vfos.B.squelchOwn, true);
-    // Main's moving carries the others and leaves B's own alone.
+    // Main's moving moves nobody else's.
     await pastThrottle();
     r.conns.forEach((c) => { c.sent = []; });
     r.subs.update({ threshold: 9 });
-    assert.deepStrictEqual(r.byVfo(1).sent, []);
-    assert.deepStrictEqual(r.byVfo(2).sent, [{ type: 'set_audio_gate', min_snr: 9 }]);
+    assert.ok(r.conns.every((c) => c.sent.length === 0));
+    assert.strictEqual(r.subs.snapshot().vfos.C.threshold, 6);
     // Its own off, with main's on: the sentinel, and held open.
     await pastThrottle();
     r.conns.forEach((c) => { c.sent = []; });
@@ -501,23 +514,25 @@ t('a format change with the receiver off is kept for the next connect', () => {
 
 // --- squelch -----------------------------------------------------------------
 
-t('the shared squelch rides the connect, and follows the slider after', () => {
+t('a VFO starts with main\'s squelch on its connect URL, and keeps it when main\'s moves', () => {
     const r = track(rig({ listening: ['B'] }));
     up(r, { threshold: 10 });
     const c = r.byVfo(1);
     assert.strictEqual(c.connects[0].gate, 10, 'min_snr on the connect URL');
     c.sent = [];
     r.subs.update({ threshold: 15 });
-    assert.deepStrictEqual(c.sent, [{ type: 'set_audio_gate', min_snr: 15 }]);
+    assert.deepStrictEqual(c.sent, []);
+    r.subs.update({ threshold: null });
+    assert.deepStrictEqual(c.sent, []);
 });
 
-t('turning the squelch off sends the disabled sentinel', async () => {
+t('a VFO\'s squelch set off sends the disabled sentinel', async () => {
     const r = track(rig({ listening: ['B'] }));
     up(r, { threshold: 10 });
     await new Promise((res) => setTimeout(res, 120));   // past the gate throttle
     const c = r.byVfo(1);
     c.sent = [];
-    r.subs.update({ threshold: null });
+    r.subs.setSquelch('B', 'off');
     assert.deepStrictEqual(c.sent, [{ type: 'set_audio_gate', min_snr: -999 }]);
 });
 

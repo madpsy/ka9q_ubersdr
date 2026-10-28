@@ -7,8 +7,8 @@
 //
 // A listening VFO is drawn like the main receiver: a wash over its passband and
 // the dial and edge lines, in its own colour (lib/vfoColours.js). The passband is
-// the filter it is playing with about the VFO's own frequency — main's, until
-// it is given one of its own (lib/vfos.js listenEdges) — never its saved slot's,
+// the filter it is playing with about the VFO's own frequency — its own, which
+// starts as a copy of main's (lib/vfos.js listenEdges) — never its saved slot's,
 // which belongs to a mode it is not in and would show a passband nothing is
 // demodulating.
 
@@ -28,8 +28,8 @@ import { edgeHit } from './edgeHit.js';
  *                from the same render rather than a frame after the flags clear.
  * @param limit   the server's VFO count; at 1 nothing is listening.
  * @returns {Array<{id, frequency, low, high, own, colour, open, gated}>} —
- *          `own` when the filter is the VFO's own rather than main's, `gated`
- *          when it has a squelch on at all (its own or main's).
+ *          `own` when the filter differs from main's, `gated` when its
+ *          squelch is on.
  */
 export function listeningPassbands(state, snap, tuning, limit) {
     const out = [];

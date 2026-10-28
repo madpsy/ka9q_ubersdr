@@ -21,12 +21,12 @@
 // hint at the top says which is which.
 //
 // Each VFO being heard also gets a squelch and a width slider on its second
-// line. A listening VFO starts on the main receiver's squelch and filter and
-// follows them until it is given its own — by the slider, its Auto, or for the
-// filter its passband edge on the spectrum; the value beside the slider then
-// turns into the way back. The main row's sliders are simply main's, so every
-// heard row has the same controls in the same places. The squelch slider
-// carries the live SNR on its track, which is the row's signal meter too.
+// line, its own and independent of main's: a listening VFO starts with a copy
+// of main's squelch and filter, and from then on moving main's moves nothing
+// else. Where one differs from main's, the value beside its slider turns into
+// a button that matches main's again. The main row's sliders are simply main's,
+// so every heard row has the same controls in the same places. The squelch
+// slider carries the live SNR on its track, which is the row's meter too.
 
 import React, { useEffect, useRef, useState } from '../react.js';
 import { useRadio } from '../radio/RadioContext.jsx';
@@ -181,13 +181,17 @@ function OutButtons({ id, out, pan, short, onChange }) {
  * One of a heard row's two tuning sliders, squelch or filter width: a short
  * label, the slider, and the value it is at.
  *
- * For a listening VFO the value is also the state. Dimmed, it is main's and
- * follows main; once the VFO has a setting of its own the number turns into a
- * button that puts it back — the one place the panel shows the difference is
- * also the way to undo it. The main row's sliders are simply main's controls,
- * so every heard row has the same things in the same places.
+ * For a listening VFO the value also compares it with main. Dimmed, it is the
+ * same as main's; different, the number is a button that matches main's — the
+ * one place the panel shows the difference is also the quick way to undo it.
+ * Matching copies main's value once; the two stay independent.
+ *
+ * The value sits in a box of fixed width, the same whether it is the plain
+ * number or the button, so the slider never changes length as the digits do
+ * or as it starts or stops matching main. On a narrow dock the number goes and
+ * the box keeps only room for the match button's icon (see styles.css).
  */
-function Knob({ kind, id, label, title, slider, value, own, following, reset, extra }) {
+function Knob({ kind, id, label, title, slider, value, own, same, reset, extra }) {
     return (
         <span className={`vfos__knob vfos__${kind}`} title={title}>
             <span className="vfos__knob-label" aria-hidden="true">{label}</span>
@@ -200,11 +204,13 @@ function Knob({ kind, id, label, title, slider, value, own, following, reset, ex
                     title={reset.title}
                     onClick={(e) => { e.stopPropagation(); reset.onClick(); }}
                 >
-                    {value}
+                    <span className="vfos__knob-num">{value}</span>
                     <Icon.Reset size={10} />
                 </button>
             ) : (
-                <span className={`vfos__knob-val${following ? ' is-following' : ''}`}>{value}</span>
+                <span className={`vfos__knob-val${same ? ' is-same' : ''}`}>
+                    <span className="vfos__knob-num">{value}</span>
+                </span>
             )}
             {extra}
         </span>
@@ -212,9 +218,11 @@ function Knob({ kind, id, label, title, slider, value, own, following, reset, ex
 }
 
 // A squelch threshold as the panel says it: "off", or whole dB where it is one.
-export function sqLabel(threshold) {
+// Without the unit beside the slider, where the room is the slider's.
+export function sqLabel(threshold, unit = true) {
     if (threshold == null) return 'off';
-    return `${Number.isInteger(threshold) ? threshold : threshold.toFixed(1)} dB`;
+    const n = Number.isInteger(threshold) ? String(threshold) : threshold.toFixed(1);
+    return unit ? `${n} dB` : n;
 }
 
 /**
@@ -384,19 +392,18 @@ export default function VfosPanel({ minimal }) {
             setVolume: (x) => subs.setVolume(v.id, x),
             setMuted: (on) => subs.setMuted(v.id, on),
             // From the filter it is playing with, so a VFO with a shift of its
-            // own keeps it; one that lands back on main's filter follows main
-            // again (lib/vfos.js withListenFilter).
+            // own keeps it.
             setWidth: (w) => {
                 touchVfo(v.id);
                 subs.setFilter(v.id, edgesForWidth(tuning.mode, w, { bandwidthLow: v.low, bandwidthHigh: v.high }));
             },
-            follow: () => subs.setFilter(v.id, null),
+            matchFilter: () => subs.setFilter(v.id, null),
             // The stored setting, not the engine's: the slider moves at once.
             threshold: listenThreshold(l, mainThreshold).threshold,
             sqOwn: listenThreshold(l, mainThreshold).own,
             setSquelch: (x) => { touchVfo(v.id); subs.setSquelch(v.id, x <= SQUELCH_MIN ? 'off' : x); },
             autoSquelch: () => { touchVfo(v.id); subs.autoSquelch(v.id); },
-            followSquelch: () => subs.setSquelch(v.id, null),
+            matchSquelch: () => subs.setSquelch(v.id, null),
         };
     };
     const mainWidth = Math.abs((tuning.bandwidthHigh || 0) - (tuning.bandwidthLow || 0));
@@ -537,8 +544,8 @@ export default function VfosPanel({ minimal }) {
                             main
                                 ? `VFO ${v.id} squelch: ${sqText}`
                                 : s.sqOwn
-                                    ? `VFO ${v.id} has its own squelch: ${sqText} (${vfos.active} ${mainSq})`
-                                    : `VFO ${v.id} uses ${vfos.active}'s squelch (${mainSq}) — move this to give it its own`,
+                                    ? `VFO ${v.id} squelch: ${sqText} (${vfos.active} ${mainSq})`
+                                    : `VFO ${v.id} squelch: ${sqText}, the same as ${vfos.active}'s`,
                             snr == null ? 'no signal reading yet' : `SNR ${snr.toFixed(1)} dB${s.threshold == null ? '' : `, ${open ? 'open' : 'closed'}`}`,
                         ].join(' — ')}
                         slider={{
@@ -552,13 +559,13 @@ export default function VfosPanel({ minimal }) {
                             marker: snr,
                             markerTone: s.threshold != null && !open ? 'closed' : 'open',
                         }}
-                        value={sqText}
+                        value={sqLabel(s.threshold, false)}
                         own={!main && s.sqOwn}
-                        following={!main}
+                        same={!main}
                         reset={{
-                            aria: `VFO ${v.id}: use ${vfos.active}'s squelch again`,
-                            title: `Back to ${vfos.active}'s squelch (${mainSq})`,
-                            onClick: s.followSquelch,
+                            aria: `VFO ${v.id}: match ${vfos.active}'s squelch`,
+                            title: `Set to ${vfos.active}'s squelch (${mainSq})`,
+                            onClick: s.matchSquelch,
                         }}
                         extra={(
                             <button
@@ -580,8 +587,8 @@ export default function VfosPanel({ minimal }) {
                         title={main
                             ? `VFO ${v.id} filter width: ${widthText}`
                             : v.ownFilter
-                                ? `VFO ${v.id} has its own filter: ${widthText} (${vfos.active} ${mainWidthText})`
-                                : `VFO ${v.id} uses ${vfos.active}'s filter (${widthText}) — move this or drag its passband edge to give it its own`}
+                                ? `VFO ${v.id} filter width: ${widthText} (${vfos.active} ${mainWidthText}) — or drag its passband edge on the spectrum`
+                                : `VFO ${v.id} filter width: ${widthText}, the same as ${vfos.active}'s — or drag its passband edge on the spectrum`}
                         slider={{
                             value: Math.max(FILTER_WIDTH_MIN, Math.min(max, Math.round(width))),
                             min: FILTER_WIDTH_MIN,
@@ -594,11 +601,11 @@ export default function VfosPanel({ minimal }) {
                         }}
                         value={widthText}
                         own={!main && v.ownFilter}
-                        following={!main}
+                        same={!main}
                         reset={{
-                            aria: `VFO ${v.id}: use ${vfos.active}'s filter again`,
-                            title: `Back to ${vfos.active}'s filter (${mainWidthText})`,
-                            onClick: s.follow,
+                            aria: `VFO ${v.id}: match ${vfos.active}'s filter`,
+                            title: `Set to ${vfos.active}'s filter (${mainWidthText})`,
+                            onClick: s.matchFilter,
                         }}
                     />
                 </div>

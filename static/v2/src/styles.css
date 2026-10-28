@@ -13539,10 +13539,22 @@ a.btn { text-decoration: none; }
 
 /* The two rows of the full view's second line. The first is how the VFO is
    heard, the volume taking what the buttons leave; the second its squelch and
-   filter width side by side, each taking half. Below about 290px of row the
-   pair wraps, one slider to a line, rather than either being squeezed to a
-   stub. Labels and values hold fixed widths, so the four VFOs' sliders line up
-   in columns and a value changing never moves its slider. */
+   filter width. That second row is laid out by the line's own width (it is the
+   container), from the widest to the narrowest dock:
+
+     380px and up   side by side, with their values
+     330 - 379      side by side, values reduced to the match button's icon
+     200 - 329      one slider to a line, with their values
+     under 200      one slider to a line, icon only
+
+   Each step is taken where the squelch slider — the shorter of the two, with
+   Auto beside it — would otherwise drop under about 70px of track, which is
+   the least that still sets a threshold to the half dB. The measurements are
+   of these rules: label 15px, the value box about 47px (squelch) or 61px
+   (width) or 20px reduced, Auto 36px, 4px gaps and 10px between the two.
+   Squelch at 380: 185 - 110 = 75px of track; at 330 reduced: 160 - 83 = 77;
+   one to a line at 200: 90, and reduced at 199 and below, 77 at 160. */
+.vfos__ctl { container: vfoctl / inline-size; }
 .vfos__ctl-row {
     flex: 1 1 100%;
     display: flex;
@@ -13553,8 +13565,8 @@ a.btn { text-decoration: none; }
 }
 .vfos__ctl-row:first-child { gap: 4px 6px; }
 .vfos__knob {
-    flex: 1 1 130px;
-    min-width: 130px;
+    flex: 1 1 0;
+    min-width: 0;
     display: flex;
     align-items: center;
     gap: 4px;
@@ -13565,26 +13577,33 @@ a.btn { text-decoration: none; }
     letter-spacing: 0.04em;
     color: var(--text-faint);
 }
-.vfos__knob-slider { flex: 1 1 auto; min-width: 44px; display: flex; }
+.vfos__knob-slider { flex: 1 1 auto; min-width: 0; display: flex; }
 .vfos__knob-slider > * { flex: 1; min-width: 0; }
+/* A fixed width, not a minimum: room for the longest value the slider can
+   reach ("12.5" / "12.00k") plus the match button's border, padding and icon,
+   whether or not the button is showing. A width that followed the text moved
+   the slider every time a digit was gained or lost, or the button came and
+   went. */
 .vfos__knob-val {
+    box-sizing: border-box;
     flex: 0 0 auto;
-    min-width: 3.6em;
-    font-size: 0.74em;
-    font-variant-numeric: tabular-nums;
-    color: var(--text-dim);
-    text-align: right;
-    white-space: nowrap;
-}
-/* Following main: the value is main's, so it is said quietly. */
-.vfos__knob-val.is-following { color: var(--text-faint); }
-/* Its own: outlined in the VFO's colour, and a press puts it back on main's.
-   The text stays in the ink colour — see the note on colour above. */
-button.vfos__knob-val.is-own {
+    width: calc(4ch + 24px);
+    overflow: hidden;
     display: inline-flex;
     align-items: center;
     justify-content: flex-end;
     gap: 3px;
+    font-size: 0.74em;
+    font-variant-numeric: tabular-nums;
+    color: var(--text-dim);
+    white-space: nowrap;
+}
+.vfos__bw .vfos__knob-val { width: calc(6ch + 24px); }
+/* The same as main's: nothing to point out, so it is said quietly. */
+.vfos__knob-val.is-same { color: var(--text-faint); }
+/* Different from main's: outlined in the VFO's colour, and a press matches it.
+   The text stays in the ink colour — see the note on colour above. */
+button.vfos__knob-val.is-own {
     padding: 1px 4px;
     border: 1px solid var(--vfo-colour, var(--border));
     border-radius: var(--radius-sm);
@@ -13594,7 +13613,27 @@ button.vfos__knob-val.is-own {
     cursor: pointer;
 }
 button.vfos__knob-val.is-own:hover { border-color: var(--accent); }
-button.vfos__knob-val.is-own svg { opacity: 0.7; }
+button.vfos__knob-val.is-own svg { flex: none; opacity: 0.7; }
+
+@container vfoctl (max-width: 379px) {
+    .vfos__knob-num { display: none; }
+    .vfos__knob-val,
+    .vfos__bw .vfos__knob-val { width: 20px; justify-content: center; }
+    button.vfos__knob-val.is-own { padding: 1px 0; }
+}
+@container vfoctl (max-width: 329px) {
+    .vfos__knob { flex-basis: 100%; }
+    .vfos__knob-num { display: inline; }
+    .vfos__knob-val { width: calc(4ch + 24px); justify-content: flex-end; }
+    .vfos__bw .vfos__knob-val { width: calc(6ch + 24px); }
+    button.vfos__knob-val.is-own { padding: 1px 4px; }
+}
+@container vfoctl (max-width: 199px) {
+    .vfos__knob-num { display: none; }
+    .vfos__knob-val,
+    .vfos__bw .vfos__knob-val { width: 20px; justify-content: center; }
+    button.vfos__knob-val.is-own { padding: 1px 0; }
+}
 /* The squelch's Auto: the size of the output buttons, never the slider's room. */
 .vfos__auto {
     flex: 0 0 auto;

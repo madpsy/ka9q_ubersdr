@@ -20,7 +20,7 @@ global.localStorage = {
 const {
     LISTEN_IQ_REASON, VFO_IDS, cleanListen, clearListening, filterFamily, getVfos, isListening,
     listenBlockedReason, listenEdges, listenOf, listenThreshold, listenVfo, listeningVfos, loadVfos,
-    setVfoFilter, setVfoSquelch, withListenFilter, withListenSquelch,
+    seedListen, setVfoFilter, setVfoSquelch, withListenFilter, withListenSquelch,
     nextScanVfo, patchListen, retuneListening, scannableVfos, selectVfo, setListen, setVfoListen,
     setVfos, switchTo, tuneListening, vfoSnapshot,
 } = require('./.build/vfos.cjs');
@@ -297,10 +297,35 @@ t('a lazy write reaches listeners at once and the disk later', () => {
 
 // --- a listening VFO's own filter -------------------------------------------
 
-t('a listening VFO plays with main\'s filter until it is given its own', () => {
+t('until seeded a listening VFO plays with main\'s filter, as a stand-in', () => {
     const e = listenEdges(cleanListen({ on: true }), tuning(7100000, 'usb', 50, 2700));
     assert.deepStrictEqual(e, { low: 50, high: 2700, own: false });
-    assert.ok(!('bw' in cleanListen({ on: true })), 'no own filter is no field at all');
+    assert.ok(!('bw' in cleanListen({ on: true })), 'no filter is no field at all');
+});
+
+t('seeding copies main\'s filter and squelch once; after that main moving moves neither', () => {
+    let s = setListen(base(), 'B', true, { limit: 4 });
+    const main = tuning(14200000, 'usb', 50, 2700);
+    s = seedListen(s, 'B', main, 6);
+    assert.deepStrictEqual(listenOf(s, 'B').bw, { ssb: [50, 2700] });
+    assert.strictEqual(listenOf(s, 'B').sq, 6);
+    assert.strictEqual(seedListen(s, 'B', main, 6), s, 'nothing left to fill in');
+    // Main's filter and squelch move: B's stay where they were.
+    const moved = tuning(14200000, 'usb', 50, 1800);
+    assert.strictEqual(seedListen(s, 'B', moved, 12), s);
+    assert.deepStrictEqual(listenEdges(listenOf(s, 'B'), moved), { low: 50, high: 2700, own: true });
+    assert.deepStrictEqual(listenThreshold(listenOf(s, 'B'), 12), { threshold: 6, own: true });
+    // Main's squelch off is copied as off.
+    const off = seedListen(setListen(base(), 'C', true, { limit: 4 }), 'C', main, null);
+    assert.strictEqual(listenOf(off, 'C').sq, 'off');
+});
+
+t('a mode family met for the first time starts from main\'s filter as it is then', () => {
+    let s = seedListen(setListen(base(), 'B', true, { limit: 4 }), 'B', tuning(1, 'usb', 50, 1800), 6);
+    s = seedListen(s, 'B', tuning(1, 'am', -4000, 4000), 6);
+    assert.deepStrictEqual(listenOf(s, 'B').bw, { ssb: [50, 1800], am: [-4000, 4000] });
+    // Back in SSB it is its own again, untouched by AM.
+    assert.deepStrictEqual(listenEdges(listenOf(s, 'B'), tuning(1, 'usb', 50, 2700)), { low: 50, high: 1800, own: true });
 });
 
 t('its own filter is kept per mode family, SSB mirrored for LSB', () => {
@@ -316,14 +341,16 @@ t('its own filter is kept per mode family, SSB mirrored for LSB', () => {
     assert.strictEqual(filterFamily('iq'), null);
 });
 
-t('set back to main\'s edges, or to null, it follows main again', () => {
+t('setting main\'s edges keeps them its own; null copies main\'s as it stands', () => {
     const usb = tuning(14074000, 'usb', 50, 2700);
     const own = withListenFilter(cleanListen({ on: true }), usb, [100, 1900]);
-    assert.ok(!('bw' in withListenFilter(own, usb, [50, 2700])));
-    assert.ok(!('bw' in withListenFilter(own, usb, null)));
-    // Only its own family goes.
+    const same = withListenFilter(own, usb, [50, 2700]);
+    assert.deepStrictEqual(same.bw, { ssb: [50, 2700] });
+    assert.strictEqual(listenEdges(same, usb).own, false, 'the same as main\'s, so nothing to match');
+    assert.deepStrictEqual(withListenFilter(own, tuning(1, 'usb', 50, 2400), null).bw, { ssb: [50, 2400] });
+    // Only its own family is touched.
     const both = withListenFilter(own, tuning(9500000, 'am', -5000, 5000), [-3000, 3000]);
-    assert.deepStrictEqual(withListenFilter(both, usb, null).bw, { am: [-3000, 3000] });
+    assert.deepStrictEqual(withListenFilter(both, usb, null).bw, { ssb: [50, 2700], am: [-3000, 3000] });
 });
 
 t('a stored filter that is malformed or too narrow is not used', () => {
@@ -342,8 +369,8 @@ t('setVfoFilter writes the listen entry and never the active VFO', () => {
     assert.ok(!setVfoFilter('B', usb, [50, 1800]), 'the same again changes nothing');
     assert.ok(!setVfoFilter('A', usb, [50, 1800]), 'not the main receiver');
     assert.ok(!setVfoFilter('B', tuning(1, 'iq', -6000, 6000), [-100, 100]), 'nothing in IQ');
-    assert.ok(setVfoFilter('B', usb, null));
-    assert.ok(!('bw' in listenOf(getVfos(), 'B')));
+    assert.ok(setVfoFilter('B', usb, null), 'matching main\'s');
+    assert.deepStrictEqual(listenOf(getVfos(), 'B').bw, { ssb: [50, 2700] });
 });
 
 t('a swap takes each filter with its station', () => {
@@ -362,35 +389,36 @@ t('a swap takes each filter with its station', () => {
     assert.ok(!('bw' in listenOf(after, 'B')), 'the main one keeps no filter of its own');
 });
 
-t('a swap with neither filter its own tunes the frequency only', () => {
+t('a swap where the filters match tunes the frequency only', () => {
     setVfos(setListen(base(), 'B', true, { limit: 4 }));
     const radio = fakeRadio(tuning(14200000, 'usb', 50, 2700));
     assert.ok(selectVfo(radio, 'B', { limit: 4 }));
     assert.deepStrictEqual(radio.calls, [['tuneTo', { frequency: 14074000 }]]);
-    assert.ok(!('bw' in listenOf(getVfos(), 'A')));
+    assert.deepStrictEqual(listenOf(getVfos(), 'A').bw, { ssb: [50, 2700] }, 'A keeps a copy of its own');
 });
 
 // --- a listening VFO's own squelch ------------------------------------------
 
-t('a listening VFO follows main\'s squelch until given its own, which may be off', () => {
+t('a listening VFO\'s squelch is its own, and may be off while main\'s is on', () => {
     const l = cleanListen({ on: true });
     assert.ok(!('sq' in l));
-    assert.deepStrictEqual(listenThreshold(l, 6), { threshold: 6, own: false });
-    assert.deepStrictEqual(listenThreshold(l, null), { threshold: null, own: false });
+    assert.deepStrictEqual(listenThreshold(l, 6), { threshold: 6, own: false }, 'main\'s stands in until seeded');
     const own = withListenSquelch(l, 6, 12);
     assert.deepStrictEqual(listenThreshold(own, 6), { threshold: 12, own: true });
     assert.deepStrictEqual(listenThreshold(own, null), { threshold: 12, own: true }, 'on with main\'s off');
-    // The slider's floor is off, and off is its own setting while main's is on.
+    assert.deepStrictEqual(listenThreshold(withListenSquelch(l, 6, 6), 6), { threshold: 6, own: false });
+    // The slider's floor is off.
     const off = withListenSquelch(l, 6, -10);
     assert.strictEqual(off.sq, 'off');
     assert.deepStrictEqual(listenThreshold(off, 6), { threshold: null, own: true });
 });
 
-t('set to main\'s, or to null, it follows main again', () => {
-    const own = withListenSquelch(cleanListen({}), 6, 12);
-    assert.ok(!('sq' in withListenSquelch(own, 6, 6)));
-    assert.ok(!('sq' in withListenSquelch(own, 6, null)));
-    assert.ok(!('sq' in withListenSquelch(own, null, 'off')), 'off with main\'s off is following');
+t('a squelch set to main\'s stays put when main\'s moves; null copies main\'s now', () => {
+    const same = withListenSquelch(cleanListen({}), 6, 6);
+    assert.strictEqual(same.sq, 6);
+    assert.deepStrictEqual(listenThreshold(same, 9), { threshold: 6, own: true });
+    assert.strictEqual(withListenSquelch(same, 9, null).sq, 9);
+    assert.strictEqual(withListenSquelch(same, null, null).sq, 'off');
 });
 
 t('a stored squelch survives a reload only if it is one the slider could set', () => {
@@ -405,8 +433,8 @@ t('setVfoSquelch writes the listen entry and never the active VFO', () => {
     assert.strictEqual(listenOf(getVfos(), 'B').sq, 10);
     assert.ok(!setVfoSquelch('B', 6, 10), 'the same again changes nothing');
     assert.ok(!setVfoSquelch('A', 6, 10), 'not the main receiver');
-    assert.ok(setVfoSquelch('B', 6, null));
-    assert.ok(!('sq' in listenOf(getVfos(), 'B')));
+    assert.ok(setVfoSquelch('B', 6, null), 'matching main\'s');
+    assert.strictEqual(listenOf(getVfos(), 'B').sq, 6);
 });
 
 t('a swap hands the squelch over with the roles', () => {
@@ -436,14 +464,16 @@ t('a swap from a VFO with its squelch off turns main\'s off', () => {
     assert.strictEqual(listenOf(getVfos(), 'A').sq, 6);
 });
 
-t('a swap following main\'s squelch leaves it alone', () => {
-    setVfos(setListen(base(), 'B', true, { limit: 4 }));
+t('a swap where the squelches match leaves main\'s alone', () => {
+    let s = setListen(base(), 'B', true, { limit: 4 });
+    s = { ...s, listen: { ...s.listen, B: withListenSquelch(listenOf(s, 'B'), 6, 6) } };
+    setVfos(s);
     const radio = fakeRadio(tuning(14200000, 'usb', 50, 2700));
     radio.squelch = { value: 6, enabled: true, threshold: 6 };
     radio.actions.setSquelch = (x) => radio.calls.push(['setSquelch', x]);
     assert.ok(selectVfo(radio, 'B', { limit: 4 }));
     assert.ok(!radio.calls.some((c) => c[0] === 'setSquelch'));
-    assert.ok(!('sq' in listenOf(getVfos(), 'A')));
+    assert.strictEqual(listenOf(getVfos(), 'A').sq, 6, 'A keeps a copy of its own');
 });
 
 if (!process.exitCode) console.log(`\n${pass} passed`);

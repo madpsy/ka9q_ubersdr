@@ -32253,7 +32253,7 @@ const willMakeWorse = (calibrationData.existingCalibrate !== 0 &&
                 console.error('Error loading web logs:', error);
                 const display = document.getElementById('webLogsDisplay');
                 if (display) {
-                    display.innerHTML = `<div style="color: #f00; padding: 20px; text-align: center;">Error loading web logs: ${error.message}</div>`;
+                    display.innerHTML = `<div style="color: #f00; padding: 20px; text-align: center;">Error loading web logs: ${escapeHtml(error.message)}</div>`;
                 }
             }
         }

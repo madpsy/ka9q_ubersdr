@@ -94,6 +94,18 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
+  // The offline page is a page. Handed to anything else — a fetch() of
+  // /admin/http-logs, say — it arrives as 200 text/html, response.ok is true,
+  // and the caller's response.json() fails on '<h1>UberSDR' instead of the
+  // fetch rejecting. Everything that isn't a navigation fails the ordinary way
+  // when neither the network nor the cache can answer it.
+  const offline = () =>
+    event.request.mode === 'navigate'
+      ? new Response('<h1>UberSDR</h1><p>You are offline. Please reconnect to use UberSDR.</p>', {
+          headers: { 'Content-Type': 'text/html' },
+        })
+      : Response.error();
+
   event.respondWith(
     fetch(event.request)
       .then((response) => {
@@ -116,17 +128,10 @@ self.addEventListener('fetch', (event) => {
             // reach it. '/' is pre-cached and redirects to /v2/ whenever the v2
             // interface is enabled, so this case is reachable — fall through to
             // the offline message instead.
-            (cached && !cached.redirected ? cached : null) ||
-            new Response('<h1>UberSDR</h1><p>You are offline. Please reconnect to use UberSDR.</p>', {
-              headers: { 'Content-Type': 'text/html' },
-            })
+            (cached && !cached.redirected ? cached : null) || offline()
         )
       )
       // Safety net: ensure respondWith never rejects, even if caches.match() fails
-      .catch(() =>
-        new Response('<h1>UberSDR</h1><p>You are offline. Please reconnect to use UberSDR.</p>', {
-          headers: { 'Content-Type': 'text/html' },
-        })
-      )
+      .catch(offline)
   );
 });

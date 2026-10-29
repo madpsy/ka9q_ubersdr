@@ -59,73 +59,69 @@ EOF
     fi
 }
 
+# Print the value of a direct child of the top-level instance_reporting: block.
+# The admin UI rewrites config.yaml with keys sorted and lists expanded, and the
+# example config has long comment blocks, so a key can sit anywhere in the block.
+# Only keys at the block's own indent match, so the nested instance: host/port
+# are never mistaken for the collector's.
+# Parameters: $1 = key
+get_reporting_value() {
+    [ -f "$CONFIG_FILE" ] || return 0
+    awk -v key="$1" '
+        /^instance_reporting:[[:space:]]*(#.*)?$/ { inblock = 1; next }
+        !inblock { next }
+        /^[^[:space:]#]/ { exit }
+        /^[[:space:]]*(#.*)?$/ { next }
+        {
+            match($0, /^[[:space:]]*/)
+            if (indent == "") indent = RLENGTH
+            if (RLENGTH != indent) next
+            line = substr($0, RLENGTH + 1)
+            if (index(line, key ":") != 1) next
+            val = substr(line, length(key) + 2)
+            sub(/^[[:space:]]+/, "", val)
+            sub(/[[:space:]]+#.*$/, "", val)
+            sub(/[[:space:]]+$/, "", val)
+            gsub(/^["\047]|["\047]$/, "", val)
+            print val
+            exit
+        }
+    ' "$CONFIG_FILE"
+}
+
 # Function to check if remote_logging is enabled
 check_remote_logging() {
-    if [ -f "$CONFIG_FILE" ]; then
-        REMOTE_LOGGING=$(grep -A 10 "instance_reporting:" "$CONFIG_FILE" | \
-                         grep "remote_logging:" | \
-                         sed 's/.*remote_logging: *\(.*\)/\1/')
-        
-        if [ "$REMOTE_LOGGING" = "false" ]; then
-            echo "false"
-        else
-            echo "true"
-        fi
+    if [ -f "$CONFIG_FILE" ] && [ "$(get_reporting_value remote_logging)" = "false" ]; then
+        echo "false"
     else
-        echo "true"  # Default to enabled if config not found
+        echo "true"  # Default to enabled if unset or config not found
     fi
 }
 
 # Function to extract UUID
 get_uuid() {
-    if [ -f "$CONFIG_FILE" ]; then
-        # Match both quoted and unquoted UUIDs
-        UUID=$(grep "instance_uuid:" "$CONFIG_FILE" | sed 's/.*instance_uuid: *//; s/"//g; s/ *$//')
-        echo "$UUID"
-    fi
+    get_reporting_value instance_uuid
 }
 
-# Function to extract hostname
+# Function to extract hostname (same default as the server's config loader)
 get_hostname() {
-    if [ -f "$CONFIG_FILE" ]; then
-        # Scope to instance_reporting block to avoid picking up the station's own hostname
-        HOSTNAME=$(grep -A 10 "instance_reporting:" "$CONFIG_FILE" | \
-                   grep "hostname:" | \
-                   head -1 | \
-                   sed 's/.*hostname: *//; s/"//g; s/ *$//')
-        echo "$HOSTNAME"
-    fi
+    HOSTNAME=$(get_reporting_value hostname)
+    echo "${HOSTNAME:-instances.ubersdr.org}"
 }
 
 # Function to extract port
 get_port() {
-    if [ -f "$CONFIG_FILE" ]; then
-        PORT=$(grep -A 10 "instance_reporting:" "$CONFIG_FILE" | \
-              grep "port:" | \
-              head -1 | \
-              sed 's/.*port: *\([0-9]*\).*/\1/')
-        if [ -z "$PORT" ]; then
-            echo "443"
-        else
-            echo "$PORT"
-        fi
-    else
-        echo "443"
-    fi
+    PORT=$(get_reporting_value port)
+    case "$PORT" in
+        ''|0|*[!0-9]*) echo "443" ;;
+        *) echo "$PORT" ;;
+    esac
 }
 
 # Function to extract use_https
 get_use_https() {
-    if [ -f "$CONFIG_FILE" ]; then
-        USE_HTTPS=$(grep -A 10 "instance_reporting:" "$CONFIG_FILE" | \
-                   grep "use_https:" | \
-                   sed 's/.*use_https: *\(.*\)/\1/')
-        
-        if [ "$USE_HTTPS" = "false" ]; then
-            echo "Off"
-        else
-            echo "On"
-        fi
+    if [ "$(get_reporting_value use_https)" = "false" ]; then
+        echo "Off"
     else
         echo "On"
     fi

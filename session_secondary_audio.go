@@ -16,11 +16,13 @@ package main
 //     max_sessions and max_sessions_ip, so a secondary is not counted again, is
 //     not logged or announced as a connect, and is left out of every listener
 //     list and every "the audio session of this UUID" lookup.
-//   - They are never IQ and never get the DSP insert.  The client mixes them
-//     into its main audio context at the main channel's rate, so anything but
-//     a demodulated mono stream has nowhere to go.  They use whichever audio
-//     format the client's main audio does (opus or pcm-zstd), so a listener
-//     recording losslessly gets lossless secondaries too.
+//   - They are never wide IQ and never get the DSP insert.  The client mixes
+//     them into its main audio context, and only lets a secondary play a mode
+//     at the same rate as the main channel's; plain "iq" is 12 kHz like SSB
+//     and CW, so it is allowed, but iq48 and up are not.  They use whichever
+//     audio format the client's main audio does (opus or pcm-zstd), so a
+//     listener recording losslessly gets lossless secondaries too -- except
+//     IQ, which the stream always sends lossless whatever was asked for.
 //   - They are never pinged, so the idle sweep skips them; their lifetime is
 //     the primary's.
 
@@ -66,10 +68,16 @@ func secondaryAudioConnectError(vfo int, mode string) error {
 	if vfo == 0 {
 		return nil
 	}
-	if isIQModeName(mode) {
+	if !secondaryModeAllowed(mode) {
 		return fmt.Errorf("Mode '%s' is not available on an additional VFO", mode)
 	}
 	return nil
+}
+
+// secondaryModeAllowed reports whether a secondary may play mode: anything but
+// the wide IQ presets.  Plain "iq" is allowed -- see the top of this file.
+func secondaryModeAllowed(mode string) bool {
+	return mode == "iq" || !isIQModeName(mode)
 }
 
 // checkSecondaryAudioLocked is the session-state half of admitting a secondary:
@@ -82,7 +90,7 @@ func (sm *SessionManager) checkSecondaryAudioLocked(mode, clientIP, userSessionI
 	if limit := sm.config.Server.AudioVFOLimit(clientIP, password); vfo >= limit {
 		return fmt.Errorf("This receiver allows %d VFOs", limit)
 	}
-	if isIQModeName(mode) {
+	if !secondaryModeAllowed(mode) {
 		return fmt.Errorf("Mode '%s' is not available on an additional VFO", mode)
 	}
 	if _, ok := sm.uuidAudioSessions[userSessionID]; !ok {

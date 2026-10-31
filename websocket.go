@@ -999,8 +999,8 @@ func (wsh *WebSocketHandler) handleMessages(conn *wsConn, sessionHolder *session
 					continue // Don't close connection, just reject this tune request
 				}
 
-				// A secondary VFO is never IQ, on connect or after.
-				if currentSession.IsSecondary && isIQModeName(msg.Mode) {
+				// A secondary VFO is never wide IQ, on connect or after.
+				if currentSession.IsSecondary && !secondaryModeAllowed(msg.Mode) {
 					wsh.sendError(conn, fmt.Sprintf("Mode '%s' is not available on an additional VFO", msg.Mode))
 					continue
 				}

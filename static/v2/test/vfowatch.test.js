@@ -93,15 +93,15 @@ t('the main socket\'s format is pushed in, read off the connection', () => {
     r.cleanups.forEach((off) => off());
 });
 
-t('in IQ the hook says listening is not available', () => {
+t('in wide IQ the hook says listening is not available', () => {
     reset();
     let got = null;
     const Probe = () => { got = useSubReceivers(); return null; };
-    const ctx = ctxFor('iq');
+    const ctx = ctxFor('iq96');
     const w = render(SubReceiversWatch, {}, ctx);
     reset();
     const p = render(Probe, {}, ctx);
-    assert.strictEqual(got.snap.listenBlocked, 'Not available while main is in IQ');
+    assert.strictEqual(got.snap.listenBlocked, 'Not available while main is in wide IQ');
     p.cleanups.forEach((off) => off());
     w.cleanups.forEach((off) => off());
     reset();

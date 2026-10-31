@@ -13,7 +13,7 @@
 
 import { freqInRange } from './format.js';
 import {
-    FILTER_WIDTH_MIN, SQUELCH_MAX, SQUELCH_MIN, bandwidthLimits, isIQ,
+    FILTER_WIDTH_MIN, MODE_BY_ID, SQUELCH_MAX, SQUELCH_MIN, bandwidthLimits, isIQ, isWideIQ, modeStreamRate,
 } from '../radio/constants.js';
 import { getVfoLimit } from '../radio/session.js';
 
@@ -81,20 +81,27 @@ export function cleanSlot(s) {
 // A listening VFO is *live*: its frequency is written back to its slot as it
 // is tuned (throttled, see tuneListening), since there is no "switching away"
 // moment to store it at. Its own saved mode and filter are deliberately left
-// alone, though. A listening VFO always plays in the main receiver's mode — the
-// streams then share one sample rate and one audio context with no resampling
-// — and writing that borrowed mode into the slot would lose the one it had, so
-// that it came back as something else when it stopped listening.
+// alone, though.
 //
-// The filter is the exception to the lock, because it costs nothing: the
-// width does not change the stream's rate. Each listening VFO has its own, set
-// on the spectrum by its passband edges or by its slider in the VFOs panel, and
+// A listening VFO plays in its own saved mode when that mode's stream runs at
+// the same rate as the main receiver's (modeStreamRate): LSB beside USB, CW or
+// plain IQ — all 12 kHz — or NFM beside AM, all 24 kHz. Otherwise it plays in
+// main's mode, and writing that borrowed mode into the slot would lose the one
+// it had, so it is not: it comes back as itself when main returns to its rate,
+// or when it stops listening. The wide IQ presets are never heard on a
+// listening VFO (the server refuses them there), and a main receiver in one
+// ends listening altogether. See heardTuning.
+//
+// The filter is the VFO's own, because it costs nothing: the width does not
+// change the stream's rate. Each listening VFO has its own, set on the
+// spectrum by its passband edges or by its slider in the VFOs panel, and
 // independent of main's: moving main's filter moves no other. It starts as a
-// copy of main's (seedListen), so turning a VFO on sounds the way the main one
-// does. It is remembered per mode family in the listen entry, not in the slot,
-// for the same reason the mode is not: the slot's own filter belongs to its own
-// mode. A family the VFO has never played in starts from main's again the first
-// time main takes it there.
+// copy of the one heardTuning gives it — main's, mirrored for the other
+// sideband, where the VFO plays in main's mode family, and its own slot's
+// otherwise (seedListen). It is remembered per mode family in the listen
+// entry, not in the slot, for the same reason the mode is not: the slot's own
+// filter belongs to its own mode. A family the VFO has never played in starts
+// afresh the first time it plays in it.
 //
 // The squelch is its own in the same way, and for a better reason still: VFOs
 // on different bands sit on different noise, and a threshold that keeps main
@@ -104,10 +111,10 @@ export function cleanSlot(s) {
 // The stored flag is not the whole answer. It is kept whatever the server's
 // VFO count is — that reads 1 until /connection answers, and a reload must not
 // wipe the set — so every question about who is listening *now* takes the
-// limit, and at 1 the answer is nobody. And IQ ends listening outright: the
-// server will not demodulate a secondary beside an IQ main, so entering IQ
-// clears every flag (clearListening, called by radio/subReceivers.js) and the
-// VFOs fall back to being ordinary memories, their own mode and filter intact.
+// limit, and at 1 the answer is nobody. And wide IQ ends listening outright:
+// nothing a listening VFO may play shares its rate, so entering one clears
+// every flag (clearListening, called by radio/subReceivers.js) and the VFOs
+// fall back to being ordinary memories, their own mode and filter intact.
 
 export const LISTEN_OUTS = ['auto', 'left', 'right', 'both'];
 
@@ -177,10 +184,11 @@ export function withListenSquelch(listen, mainThreshold, value) {
  * for every listening VFO, so it covers however the VFO came to be listening.
  */
 export function seedListen(state, id, tuning, mainThreshold) {
-    const fam = filterFamily(tuning && tuning.mode);
+    const heard = listenTuning(state, id, tuning);
+    const fam = filterFamily(heard && heard.mode);
     const was = listenOf(state, id);
     let next = was;
-    if (fam && !(was.bw && was.bw[fam])) next = withListenFilter(next, tuning, null);
+    if (fam && !(was.bw && was.bw[fam])) next = withListenFilter(next, heard, null);
     if (!('sq' in was)) next = withListenSquelch(next, mainThreshold, null);
     if (next === was) return state;
     return { ...state, listen: { ...(state.listen || {}), [id]: cleanListen(next) } };
@@ -226,6 +234,52 @@ function cleanBw(bw) {
 
 // Stored edges <-> the edges in `mode`: LSB is the stored USB pair mirrored.
 const flipFor = (mode, [lo, hi]) => (mode === 'lsb' ? [-hi, -lo] : [lo, hi]);
+
+/**
+ * Whether a VFO saved in `mode` may play in it beside a main receiver in
+ * `mainMode`: both streams at the same rate, and never a wide IQ preset.
+ */
+export function sharesRate(mode, mainMode) {
+    if (!mode || !mainMode || isWideIQ(mode) || isWideIQ(mainMode)) return false;
+    const r = modeStreamRate(mode);
+    return r != null && r === modeStreamRate(mainMode);
+}
+
+/**
+ * The mode a listening VFO saved as `slot` plays in beside a main receiver in
+ * `tuning`, and the filter it starts from before any of its own:
+ * `{mode, bandwidthLow, bandwidthHigh, ownMode}`.
+ *
+ * Its own mode where that shares main's rate (sharesRate), main's otherwise —
+ * `ownMode` saying which. The starting filter is main's in main's mode, main's
+ * mirrored into the other sideband for LSB beside USB and the other way round,
+ * IQ's whole ±6 kHz for IQ, and the slot's own for any other family. Any filter
+ * the listen entry holds for the family goes over it (listenEdges).
+ */
+export function heardTuning(slot, tuning) {
+    const mainMode = tuning && tuning.mode;
+    const main = [Number(tuning && tuning.bandwidthLow) || 0, Number(tuning && tuning.bandwidthHigh) || 0];
+    const own = !!slot && slot.mode !== mainMode && sharesRate(slot.mode, mainMode);
+    if (!own) return { mode: mainMode, bandwidthLow: main[0], bandwidthHigh: main[1], ownMode: false };
+    const mode = slot.mode;
+    let edges;
+    if (isIQ(mode)) {
+        edges = [MODE_BY_ID.iq.low, MODE_BY_ID.iq.high];
+    } else if (filterFamily(mode) && filterFamily(mode) === filterFamily(mainMode)) {
+        edges = flipFor(mode, flipFor(mainMode, main));
+    } else {
+        const lo = Number(slot.bandwidthLow);
+        const hi = Number(slot.bandwidthHigh);
+        const m = MODE_BY_ID[mode];
+        edges = Number.isFinite(lo) && Number.isFinite(hi) && hi > lo ? [lo, hi] : [m ? m.low : 0, m ? m.high : 0];
+    }
+    return { mode, bandwidthLow: edges[0], bandwidthHigh: edges[1], ownMode: true };
+}
+
+/** heardTuning for VFO `id` in `state`. */
+export function listenTuning(state, id, tuning) {
+    return heardTuning(cleanSlot(state && state.slots && state.slots[id]), tuning);
+}
 
 /**
  * The filter a listening VFO plays with, with the main receiver in `tuning`:
@@ -293,10 +347,10 @@ export function listeningVfos(state, limit = getVfoLimit()) {
 }
 
 /** Why no VFO may listen with the main receiver in `mode`, or null when one may. */
-export const LISTEN_IQ_REASON = 'Not available while main is in IQ';
+export const LISTEN_IQ_REASON = 'Not available while main is in wide IQ';
 
 export function listenBlockedReason(mode) {
-    return isIQ(mode) ? LISTEN_IQ_REASON : null;
+    return isWideIQ(mode) ? LISTEN_IQ_REASON : null;
 }
 
 /** Every listening flag off; the slots and how each was heard are kept. */
@@ -515,8 +569,8 @@ function applyView(radio, recall) {
  */
 export function selectVfo(radio, to, { limit = getVfoLimit() } = {}) {
     const before = getVfos();
-    // Nor in IQ, where a swap would make the old main a listener nothing can
-    // play; the flags are cleared there anyway, but not before the next render.
+    // Nor in wide IQ, where a swap would make the old main a listener nothing
+    // can play; the flags are cleared there anyway, but not before the next render.
     if (isListening(before, to, limit) && !listenBlockedReason(radio.tuning && radio.tuning.mode)) {
         return swapVfo(radio, to);
     }
@@ -556,13 +610,13 @@ export function selectVfo(radio, to, { limit = getVfoLimit() } = {}) {
 // than switching: the one you were on starts listening where it is, and the one
 // you picked becomes the main receiver at its own frequency.
 //
-// The mode is kept, not recalled. The listening VFO was being heard in the main
-// receiver's mode all along (see the note on listening above), so recalling its
-// own saved mode at the moment it is promoted would change what the operator
-// was just hearing on it — the swap is "bring that one to the front", and it
-// should sound the same when it gets there. Its saved mode is spent by this:
-// the active slot's copy is rewritten from live the next time it is left, which
-// is the ordinary rule for the VFO you are on.
+// It comes to the front in the mode it was being heard in (heardTuning) — its
+// own where that shared main's rate, main's otherwise — so it sounds the same
+// when it gets there; the swap is "bring that one to the front". Where it was
+// borrowing main's mode its saved one is spent by this: the active slot's copy
+// is rewritten from live the next time it is left, which is the ordinary rule
+// for the VFO you are on. The one displaced was main, so its mode shares the
+// new main's rate and it carries on listening in it.
 //
 // The listen entries swap with the roles, so a VFO pinned to the left ear is
 // still heard on the left when it comes back from being the main receiver. The
@@ -582,12 +636,12 @@ function swapVfo(radio, to) {
     const lFrom = listenOf(before, from);
     const lTo = listenOf(before, to);
     const t = radio.tuning || {};
-    const heard = listenEdges(lTo, t);
-    const promoted = { ...t, bandwidthLow: heard.low, bandwidthHigh: heard.high };
-    let entryFrom = withListenFilter({ ...lTo, on: true }, promoted, [t.bandwidthLow, t.bandwidthHigh]);
-    // The new main's entry keeps nothing for this mode: if it is heard again
-    // later, it starts from main's as it then is.
-    let entryTo = dropFor({ ...lFrom, on: false }, t.mode);
+    const ht = heardTuning(target, t);
+    const heard = listenEdges(lTo, ht);
+    let entryFrom = withListenFilter({ ...lTo, on: true }, t, [t.bandwidthLow, t.bandwidthHigh]);
+    // The new main's entry keeps nothing for the mode it now plays in: if it
+    // is heard again later, it starts afresh.
+    let entryTo = dropFor({ ...lFrom, on: false }, ht.mode);
     const sq = radio.squelch && radio.actions.setSquelch ? radio.squelch : null;
     let squelchTo;
     if (sq) {
@@ -603,9 +657,15 @@ function swapVfo(radio, to) {
         slots: { ...before.slots, [from]: live },
         listen: { ...(before.listen || {}), [from]: entryFrom, [to]: entryTo },
     });
-    radio.actions.tuneTo(heard.own
-        ? { frequency: target.frequency, bandwidthLow: heard.low, bandwidthHigh: heard.high }
-        : { frequency: target.frequency });
+    if (ht.ownMode) {
+        radio.actions.tuneTo({
+            frequency: target.frequency, mode: ht.mode, bandwidthLow: heard.low, bandwidthHigh: heard.high,
+        });
+    } else {
+        radio.actions.tuneTo(heard.own
+            ? { frequency: target.frequency, bandwidthLow: heard.low, bandwidthHigh: heard.high }
+            : { frequency: target.frequency });
+    }
     if (squelchTo != null) radio.actions.setSquelch(squelchTo);
     return true;
 }
@@ -647,15 +707,18 @@ function dropFor(listen, mode) {
 }
 
 /**
- * Set listening VFO `id`'s filter in the main receiver's mode, or with null
- * copy main's as it stands (see listenEdges). Lazy on disk like a retune:
- * a slider or an edge drag is a stream of them.
+ * Set listening VFO `id`'s filter in the mode it plays in beside a main
+ * receiver in `tuning` (heardTuning), or with null copy the one it starts from
+ * (see listenEdges). Lazy on disk like a retune: a slider or an edge drag is a
+ * stream of them.
  */
 export function setVfoFilter(id, tuning, edges) {
     const before = getVfos();
-    if (!VFO_IDS.includes(id) || id === before.active || !filterFamily(tuning && tuning.mode)) return false;
+    if (!VFO_IDS.includes(id) || id === before.active) return false;
+    const heard = listenTuning(before, id, tuning);
+    if (!filterFamily(heard.mode)) return false;
     const was = listenOf(before, id);
-    const next = cleanListen(withListenFilter(was, tuning, edges));
+    const next = cleanListen(withListenFilter(was, heard, edges));
     if (JSON.stringify(next.bw || null) === JSON.stringify(was.bw || null)) return false;
     setVfos({ ...before, listen: { ...(before.listen || {}), [id]: next } }, { lazy: true });
     return true;

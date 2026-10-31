@@ -32,7 +32,7 @@ import React, { useEffect, useRef, useState } from '../react.js';
 import { useRadio } from '../radio/RadioContext.jsx';
 import {
     LISTEN_IQ_REASON, VFO_IDS, copyVfo, getVfos, isListening, listenEdges, listenOf, listenThreshold,
-    listeningVfos, nextScanVfo, onVfosChanged, scannableVfos, selectVfo,
+    listenTuning, listeningVfos, nextScanVfo, onVfosChanged, scannableVfos, selectVfo,
 } from '../lib/vfos.js';
 import {
     SCAN_DWELL_MS, SCAN_MODE_DWELL_MS, SCAN_MODE_SETTLE_MS, SCAN_SETTLE_MS,
@@ -41,7 +41,7 @@ import { formatFilterWidth, formatHz } from '../lib/format.js';
 import { bandForFrequency } from '../lib/bands.js';
 import {
     FILTER_WIDTH_MIN, FILTER_WIDTH_STEP, SQUELCH_MAX, SQUELCH_MIN, SQUELCH_STEP, edgesForWidth, isIQ,
-    maxFilterWidth,
+    isWideIQ, maxFilterWidth,
 } from '../radio/constants.js';
 import { useSubReceivers } from '../radio/useSubReceivers.js';
 import { vfoColour } from '../lib/vfoColours.js';
@@ -59,13 +59,14 @@ import { Icon, Slider } from '../components/ui.jsx';
  */
 //
 // A listening VFO is the exception to "a slot shows what it holds": it plays in
-// the main receiver's mode (the mode lock — see lib/vfos.js) and in main's
-// filter or one of its own, so that is what its row shows, with its own saved
-// mode kept as `savedMode` for the note saying it will come back to it. `low`,
-// `high` and `ownFilter` are the filter it is playing with.
+// its own mode only where that shares the main receiver's stream rate, and in
+// main's otherwise (the rate lock — see lib/vfos.js heardTuning), so the mode it
+// is playing in is what its row shows, with its own saved mode kept as
+// `savedMode` for the note saying it will come back to it. `low`, `high` and
+// `ownFilter` are the filter it is playing with; `rawMode` the mode as an id.
 //
 // `listen` is false where nothing can be heard alongside the main receiver —
-// one VFO on this server, or the main one in IQ. A stored flag is then a
+// one VFO on this server, or the main one in wide IQ. A stored flag is then a
 // leftover, not something playing, and the row shows the slot as it is.
 function rowsFor(vfos, tuning, listen = false) {
     return VFO_IDS.map((id) => {
@@ -73,9 +74,9 @@ function rowsFor(vfos, tuning, listen = false) {
         const listening = listen && isListening(vfos, id);
         const s = active ? tuning : vfos.slots[id];
         if (!s || !(s.frequency > 0)) return { id, active, listening: false, empty: true };
-        const shape = listening ? tuning : s;
+        const shape = listening ? listenTuning(vfos, id, tuning) : s;
         const edges = listening
-            ? listenEdges(listenOf(vfos, id), tuning)
+            ? listenEdges(listenOf(vfos, id), shape)
             : { low: shape.bandwidthLow, high: shape.bandwidthHigh, own: false };
         return {
             id,
@@ -84,6 +85,7 @@ function rowsFor(vfos, tuning, listen = false) {
             empty: false,
             frequency: s.frequency,
             mode: (shape.mode || '').toUpperCase(),
+            rawMode: shape.mode || '',
             savedMode: (s.mode || '').toUpperCase(),
             width: formatFilterWidth(edges.low, edges.high),
             low: edges.low,
@@ -338,12 +340,10 @@ export default function VfosPanel({ minimal }) {
     const { subs, snap } = useSubReceivers(8);
     const limit = snap.limit || 1;
     const multi = limit > 1;
-    // In IQ the main receiver's left and right are I and Q, so there is no
-    // stereo field to share out and nothing else is played. The speakers stay
-    // on show, disabled with the reason, rather than the panel changing shape
-    // every time the mode does.
-    const mainIQ = isIQ(tuning.mode);
-    const canListen = multi && !mainIQ;
+    // In wide IQ nothing shares the main receiver's rate, so nothing else is
+    // played. The speakers stay on show, disabled with the reason, rather than
+    // the panel changing shape every time the mode does.
+    const canListen = multi && !isWideIQ(tuning.mode);
     const extras = canListen ? listeningVfos(vfos).length : 0;
     const spare = limit - 1;
     const full = extras >= spare;
@@ -395,7 +395,7 @@ export default function VfosPanel({ minimal }) {
             // own keeps it.
             setWidth: (w) => {
                 touchVfo(v.id);
-                subs.setFilter(v.id, edgesForWidth(tuning.mode, w, { bandwidthLow: v.low, bandwidthHigh: v.high }));
+                subs.setFilter(v.id, edgesForWidth(v.rawMode, w, { bandwidthLow: v.low, bandwidthHigh: v.high }));
             },
             matchFilter: () => subs.setFilter(v.id, null),
             // The stored setting, not the engine's: the slider moves at once.
@@ -507,7 +507,9 @@ export default function VfosPanel({ minimal }) {
         const sqText = sqLabel(s.threshold);
         const mainSq = sqLabel(mainThreshold);
         const width = Math.abs(v.high - v.low);
-        const max = maxFilterWidth(tuning.mode);
+        const max = maxFilterWidth(v.active ? tuning.mode : v.rawMode);
+        // IQ has neither: no squelch, and the filter is the whole stream.
+        const iq = isIQ(v.active ? tuning.mode : v.rawMode);
         const widthText = formatFilterWidth(0, width);
         const mainWidthText = formatFilterWidth(0, mainWidth);
         const main = v.active;
@@ -540,7 +542,7 @@ export default function VfosPanel({ minimal }) {
                         kind="squelch"
                         id={v.id}
                         label="SQ"
-                        title={[
+                        title={iq ? `VFO ${v.id}: no squelch in IQ` : [
                             main
                                 ? `VFO ${v.id} squelch: ${sqText}`
                                 : s.sqOwn
@@ -553,6 +555,7 @@ export default function VfosPanel({ minimal }) {
                             min: SQUELCH_MIN,
                             max: SQUELCH_MAX,
                             step: SQUELCH_STEP,
+                            disabled: iq,
                             onChange: s.setSquelch,
                             // The live SNR on the track, in the gate's colour:
                             // the row's meter and its squelch state in one.
@@ -560,7 +563,7 @@ export default function VfosPanel({ minimal }) {
                             markerTone: s.threshold != null && !open ? 'closed' : 'open',
                         }}
                         value={sqLabel(s.threshold, false)}
-                        own={!main && s.sqOwn}
+                        own={!iq && !main && s.sqOwn}
                         same={!main}
                         reset={{
                             aria: `VFO ${v.id}: match ${vfos.active}'s squelch`,
@@ -573,7 +576,7 @@ export default function VfosPanel({ minimal }) {
                                 className="vfos__auto"
                                 aria-label={`VFO ${v.id}: set the squelch automatically`}
                                 title={`Set VFO ${v.id}'s squelch just above the noise it is hearing`}
-                                disabled={snr == null}
+                                disabled={iq || snr == null}
                                 onClick={(e) => { e.stopPropagation(); s.autoSquelch(); }}
                             >
                                 Auto
@@ -584,7 +587,7 @@ export default function VfosPanel({ minimal }) {
                         kind="bw"
                         id={v.id}
                         label="BW"
-                        title={main
+                        title={iq ? `VFO ${v.id}: IQ is the whole ${widthText} stream` : main
                             ? `VFO ${v.id} filter width: ${widthText}`
                             : v.ownFilter
                                 ? `VFO ${v.id} filter width: ${widthText} (${vfos.active} ${mainWidthText}) — or drag its passband edge on the spectrum`
@@ -594,13 +597,14 @@ export default function VfosPanel({ minimal }) {
                             min: FILTER_WIDTH_MIN,
                             max,
                             step: FILTER_WIDTH_STEP,
+                            disabled: iq,
                             onChange: s.setWidth,
                             // Main's width on the track, so how the two compare
                             // shows without reading either number.
                             marker: main ? null : mainWidth,
                         }}
                         value={widthText}
-                        own={!main && v.ownFilter}
+                        own={!iq && !main && v.ownFilter}
                         same={!main}
                         reset={{
                             aria: `VFO ${v.id}: match ${vfos.active}'s filter`,

@@ -25,23 +25,25 @@
 //                  one at a time STAGGER_MS apart: the server's connection
 //                  rate limit allows a burst of four a second per IP, and the
 //                  main socket and the spectrum have already spent two.
-//   main tuning    MODE LOCK. Every secondary plays in the main receiver's mode
-//                  at its own frequency. The streams then all arrive at the
-//                  context's own rate and nothing resamples. A listening VFO's
-//                  saved mode stays in its slot (lib/vfos.js) for when it stops
-//                  listening. The filter is the VFO's own (setFilter), copied
-//                  from main's when it starts — see _seed.
+//   main tuning    RATE LOCK. Every secondary plays at its own frequency, in
+//                  its own saved mode where that mode's stream runs at the
+//                  main receiver's rate and in main's mode otherwise
+//                  (lib/vfos.js heardTuning). The filter is the VFO's own
+//                  (setFilter), seeded when it starts — see _seed.
 //   main format    every secondary is in the main socket's format, Opus or
 //                  lossless (the Audio panel's choice, or the recorder's hold
 //                  on lossless). The server fixes the format at connect, so a
 //                  change closes them all and they come back on the stagger
 //                  behind the main socket's own reconnect.
-//   IQ             ends listening. The server refuses IQ on a secondary, and a
-//                  secondary's radiod channel is worth handing back for as
-//                  long as the operator stays in IQ, so every stream is closed
-//                  and every listening flag cleared (lib/vfos.js clearListening).
-//                  The VFOs are ordinary memories again, and leaving IQ brings
-//                  none of them back by itself. While in IQ listening is
+//   IQ             plain IQ is 12 kHz like SSB and CW, so it may be heard on a
+//                  secondary, or be main's mode beside them. Such a stream is
+//                  I/Q stereo: never panned, never squelched, and always sent
+//                  lossless by the server whatever the format.
+//   wide IQ        ends listening. The server refuses it on a secondary and
+//                  nothing shares its rate, so every stream is closed and
+//                  every listening flag cleared (lib/vfos.js clearListening).
+//                  The VFOs are ordinary memories again, and leaving it brings
+//                  none of them back by itself. While in it listening is
 //                  refused, with listenBlocked saying why.
 //   squelch        each stream's own threshold (setSquelch), copied from
 //                  main's when it starts — see _seed. Sent as min_snr on
@@ -56,13 +58,13 @@
 
 import { AudioConnection } from './audio-connection.js';
 import { getOpusDecoderClass } from './audio-player.js';
-import { SQUELCH_AUTO_SAMPLES, SQUELCH_SENTINEL, autoSquelchValue, isIQ } from './constants.js';
+import { SQUELCH_AUTO_SAMPLES, SQUELCH_SENTINEL, autoSquelchValue, isIQ, isWideIQ } from './constants.js';
 import { Emitter } from './emitter.js';
 import { squelchState } from './squelchState.js';
 import { getVfoLimit, onVfoLimit } from './session.js';
 import {
-    clearListening, getVfos, listenBlockedReason, listenEdges, listenOf, listenThreshold, listenVfo,
-    listeningVfos, onVfosChanged, seedListen, setVfoFilter, setVfoListen, setVfoSquelch, setVfos,
+    clearListening, getVfos, listenBlockedReason, listenEdges, listenOf, listenThreshold, listenTuning,
+    listenVfo, listeningVfos, onVfosChanged, seedListen, setVfoFilter, setVfoListen, setVfoSquelch, setVfos,
     tuneListening,
 } from '../lib/vfos.js';
 import { vfoPans } from '../lib/vfoPan.js';
@@ -160,7 +162,7 @@ export class SubReceivers extends Emitter {
 
         // Whether or not the receiver is on: a stale flag restored into IQ
         // would otherwise come back to life on the way out of it.
-        if (this._iq(main)) this._endListening();
+        if (this._wide(main)) this._endListening();
 
         const formatChanged = main.format !== prev.format;
         if (formatChanged) {
@@ -200,7 +202,7 @@ export class SubReceivers extends Emitter {
 
         // Unforced: each VFO has its own filter, so main's moving retunes none
         // of them; only a mode change does.
-        if (!this._iq(main) && modeChanged(prev.tuning, main.tuning)) {
+        if (!this._wide(main) && modeChanged(prev.tuning, main.tuning)) {
             for (const lane of this._assigned()) this._tune(lane, false);
         }
 
@@ -220,7 +222,7 @@ export class SubReceivers extends Emitter {
 
     /**
      * Start or stop listening to `id`. False when refused: past the limit, the
-     * active VFO, or the main receiver in IQ (listenBlocked).
+     * active VFO, or the main receiver in wide IQ (listenBlocked).
      */
     setListening(id, on) {
         if (on && this.listenBlocked) return false;
@@ -228,16 +230,16 @@ export class SubReceivers extends Emitter {
     }
 
     /**
-     * Why no VFO may start listening just now, or null when one may. Only IQ
-     * stops it; the limit is answered per VFO, by `refused` and the count.
+     * Why no VFO may start listening just now, or null when one may. Only wide
+     * IQ stops it; the limit is answered per VFO, by `refused` and the count.
      */
     get listenBlocked() {
         return listenBlockedReason(this.main.tuning && this.main.tuning.mode);
     }
 
     /**
-     * Give listening VFO `id` its own filter, `[low, high]` in the main
-     * receiver's mode, or with null put it back on main's.
+     * Give listening VFO `id` its own filter, `[low, high]` in the mode it
+     * plays in, or with null put it back on the one it starts from.
      */
     setFilter(id, edges) {
         return setVfoFilter(id, this.main.tuning, edges);
@@ -367,7 +369,7 @@ export class SubReceivers extends Emitter {
                 overLimit: true,
             };
         }
-        // `listenBlocked` is the reason listening cannot start (IQ), or null;
+        // `listenBlocked` is the reason listening cannot start (wide IQ), or null;
         // `format` is what every secondary connects in, the main socket's.
         return { limit, listenBlocked: this.listenBlocked, format: this.main.format, mainPan: this.mainPan, vfos };
     }
@@ -388,7 +390,7 @@ export class SubReceivers extends Emitter {
         const limit = this.limitSource.get();
         // listeningVfos answers none at a limit of 1, so a stored flag the
         // server has no room for is not shown as refused either: it is inert.
-        const want = this.main.running && !this._iq(this.main) ? listeningVfos(state, limit) : [];
+        const want = this.main.running && !this._wide(this.main) ? listeningVfos(state, limit) : [];
         const room = Math.max(0, limit - 1);
         const keep = want.slice(0, room);
         this.overLimit = want.slice(room).map((v) => v.id);
@@ -443,7 +445,7 @@ export class SubReceivers extends Emitter {
     // main's settings before then may not be the restored ones.
     _seed() {
         const main = this.main;
-        if (!main.running || !main.tuning || this._iq(main)) return false;
+        if (!main.running || !main.tuning || this._wide(main)) return false;
         const before = this.store.get();
         let state = before;
         for (const v of listeningVfos(before, this.limitSource.get())) {
@@ -577,7 +579,7 @@ export class SubReceivers extends Emitter {
     _connect(lane) {
         const main = this.main;
         if (!lane.slotId || lane.refused || !main.running || !main.open) return false;
-        if (this._iq(main) || this._live(lane)) return false;
+        if (this._wide(main) || this._live(lane)) return false;
         const params = this._params(lane);
         if (!params) return false;
         lane.conn.setFormat(main.format);
@@ -603,7 +605,16 @@ export class SubReceivers extends Emitter {
         return !!(main.tuning && isIQ(main.tuning.mode));
     }
 
-    // IQ ends listening: see the note at the top. Clearing the flags is what
+    _wide(main) {
+        return !!(main.tuning && isWideIQ(main.tuning.mode));
+    }
+
+    // Whether the lane's stream is I/Q, from the mode last sent for it.
+    _laneIQ(lane) {
+        return !!lane.sentMode && isIQ(lane.sentMode.split('|')[0]);
+    }
+
+    // Wide IQ ends listening: see the note at the top. Clearing the flags is what
     // closes the streams — the store's change runs _sync, and nothing is
     // wanted.
     _endListening() {
@@ -613,16 +624,18 @@ export class SubReceivers extends Emitter {
     }
 
     // What a secondary on this lane should be tuned to: its own frequency, the
-    // main receiver's mode, and its own filter or else main's.
+    // mode it plays in beside main (lib/vfos.js heardTuning), and its own
+    // filter or else the one that mode starts from.
     _params(lane) {
         const state = this.store.get();
         const slot = state.slots[lane.slotId];
         const t = this.main.tuning;
-        if (!slot || !t || isIQ(t.mode)) return null;
-        const edges = listenEdges(listenOf(state, lane.slotId), t);
+        if (!slot || !t || isWideIQ(t.mode)) return null;
+        const heard = listenTuning(state, lane.slotId, t);
+        const edges = listenEdges(listenOf(state, lane.slotId), heard);
         return {
             frequency: slot.frequency,
-            mode: t.mode,
+            mode: heard.mode,
             bandwidthLow: edges.low,
             bandwidthHigh: edges.high,
         };
@@ -633,7 +646,12 @@ export class SubReceivers extends Emitter {
     // connect carries it in the URL (_connect) and the open sends it again.
     _gate(lane) {
         const state = this.store.get();
-        const gate = listenThreshold(listenOf(state, lane.slotId), this.main.threshold);
+        const t = this.main.tuning;
+        // An IQ stream has no squelch, as main's has none in IQ.
+        const iq = !!t && isIQ(listenTuning(state, lane.slotId, t).mode);
+        const gate = iq
+            ? { threshold: null, own: false }
+            : listenThreshold(listenOf(state, lane.slotId), this.main.threshold);
         lane.squelchOwn = gate.own;
         if (lane.threshold === gate.threshold) return;
         lane.threshold = gate.threshold;
@@ -641,8 +659,8 @@ export class SubReceivers extends Emitter {
     }
 
     // Sends a tune when the lane's frequency, mode or filter has moved since
-    // the last one — or always, with `force`. Nothing in IQ, which a secondary
-    // may not have; there are no lanes then anyway.
+    // the last one — or always, with `force`. Nothing in wide IQ, which a
+    // secondary may not have; there are no lanes then anyway.
     _tune(lane, force) {
         const p = this._params(lane);
         if (!p) return;
@@ -707,7 +725,7 @@ export class SubReceivers extends Emitter {
         const gate = squelchState({
             snr: m.snr,
             threshold: lane.threshold == null ? null : lane.threshold,
-            iq: false,
+            iq: this._laneIQ(lane),
             now: this.now(),
             lastOpenAt: m.lastOpenAt,
         });
@@ -732,8 +750,9 @@ export class SubReceivers extends Emitter {
             .catch(() => { /* one bad frame */ });
     }
 
-    // Lossless frames arrive already decoded by the AudioConnection. Mono: a
-    // secondary is never IQ, so the first plane is the whole of it. Queued
+    // Lossless frames arrive already decoded by the AudioConnection. Mono, or
+    // I and Q for a secondary in IQ — the server sends IQ lossless whatever
+    // the socket's format, so this is the only way IQ arrives. Queued
     // behind any Opus still decoding from before a format change, so the two
     // cannot be scheduled out of order.
     _onPcm(lane, planes, sampleRate) {
@@ -743,7 +762,8 @@ export class SubReceivers extends Emitter {
                 // Freed here rather than on arrival, where a decode could still
                 // be running inside it.
                 if (lane.decoder) this._dropDecoder(lane);
-                if (lane.slotId) this._schedule(lane, [planes[0]], planes[0].length, sampleRate);
+                const used = planes.length >= 2 && this._laneIQ(lane) ? planes.slice(0, 2) : [planes[0]];
+                if (lane.slotId) this._schedule(lane, used, planes[0].length, sampleRate);
             })
             .catch(() => { /* one bad frame */ });
     }
@@ -849,22 +869,26 @@ export class SubReceivers extends Emitter {
     }
 
     // Every VFO being heard, main included, placed by lib/vfoPan.js. One VFO
-    // alone gives the sides back to the Audio panel's channel picker — as IQ
-    // always does, there being no listening VFOs there and its left and right
-    // being I and Q.
+    // alone gives the sides back to the Audio panel's channel picker. A stream
+    // in IQ takes no part — its left and right are I and Q — and stays centred,
+    // which leaves both channels where they are.
     _applyPans() {
-        const lanes = this._assigned().filter((l) => !l.refused);
+        const all = this._assigned().filter((l) => !l.refused);
         const state = this.store.get();
         const t = this.main.tuning;
         const p = this.player;
-        if (!this.main.running || !t || this._iq(this.main) || !lanes.length) {
+        const mainIQ = this._iq(this.main);
+        const lanes = all.filter((l) => !this._laneIQ(l));
+        for (const lane of all) if (this._laneIQ(lane)) this._setLanePan(lane, null);
+        const heard = lanes.length + (mainIQ ? 0 : 1);
+        if (!this.main.running || !t || this._wide(this.main) || !lanes.length || heard < 2) {
             if (this.mainPan != null && p && p.setPan) p.setPan(null);
             this.mainPan = null;
             this.panState = null;
             for (const lane of lanes) this._setLanePan(lane, null);
             return;
         }
-        const list = [{ id: state.active, frequency: t.frequency, out: listenOf(state, state.active).out }];
+        const list = mainIQ ? [] : [{ id: state.active, frequency: t.frequency, out: listenOf(state, state.active).out }];
         for (const lane of lanes) {
             const slot = state.slots[lane.slotId];
             list.push({
@@ -874,7 +898,7 @@ export class SubReceivers extends Emitter {
             });
         }
         this.panState = vfoPans(list, this.panState);
-        const main = this.panState.pans[state.active];
+        const main = mainIQ ? null : this.panState.pans[state.active];
         if (main !== this.mainPan && p && p.setPan) p.setPan(main);
         this.mainPan = main;
         for (const lane of lanes) this._setLanePan(lane, this.panState.pans[lane.slotId]);

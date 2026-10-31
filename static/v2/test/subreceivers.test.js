@@ -274,23 +274,27 @@ t('at a limit of one stored flags are inert: nothing connects and nothing is ref
 });
 
 // --- the mode lock -----------------------------------------------------------
+//
+// In this rig B and D are saved in USB, which shares LSB's rate, so they play
+// in USB throughout; C's saved mode is not one with a rate, so it follows main.
 
-t('a mode change retunes every secondary into it, each keeping its own filter', () => {
+t('a mode change retunes a VFO following main into it, keeping its own filter', () => {
     const r = track(rig());
     up(r);
-    // Each was seeded with main's LSB filter as it started.
+    // Each was seeded as it started: B in its own USB, main's LSB mirrored.
     assert.deepStrictEqual(listenOf(getVfos(), 'B').bw, { ssb: [50, 2700] });
+    assert.strictEqual(r.byVfo(1).connects[0].params.mode, 'usb');
+    assert.strictEqual(r.byVfo(2).connects[0].params.mode, 'lsb');
     r.conns.forEach((c) => { c.sent = []; });
     r.subs.update({ tuning: { frequency: 7100000, mode: 'usb', bandwidthLow: 50, bandwidthHigh: 2800 } });
-    for (const c of r.conns) {
-        const tune = c.sent.find((m) => m.type === 'tune');
-        assert.ok(tune, `vfo ${c.vfo} retuned`);
-        assert.strictEqual(tune.mode, 'usb');
-        // Its own SSB filter, mirrored — not main's new 2800.
-        assert.deepStrictEqual([tune.bandwidthLow, tune.bandwidthHigh], [50, 2700]);
-        assert.strictEqual(tune.frequency, c.params.frequency);
-    }
-    assert.strictEqual(r.byVfo(1).sent.find((m) => m.type === 'tune').frequency, 14074000);
+    const tune = r.byVfo(2).sent.find((m) => m.type === 'tune');
+    assert.ok(tune, 'vfo 2 retuned');
+    assert.strictEqual(tune.mode, 'usb');
+    // Its own SSB filter, mirrored — not main's new 2800.
+    assert.deepStrictEqual([tune.bandwidthLow, tune.bandwidthHigh], [50, 2700]);
+    assert.strictEqual(tune.frequency, 10136000);
+    // B and D were in USB already, in a filter of their own: nothing to send.
+    for (const i of [1, 3]) assert.ok(!r.byVfo(i).sent.some((m) => m.type === 'tune'), `vfo ${i} untouched`);
 });
 
 t('a mode family a VFO has not played in starts from main\'s filter', () => {
@@ -311,13 +315,13 @@ t('the main receiver moving frequency does not retune anybody', () => {
     assert.ok(r.conns.every((c) => !c.sent.some((m) => m.type === 'tune')));
 });
 
-t('retuning a listening VFO tunes its stream, with the locked mode', () => {
+t('retuning a listening VFO tunes its stream, in the mode it plays in', () => {
     const r = track(rig());
     up(r);
     r.conns.forEach((c) => { c.sent = []; });
     r.subs.tuneVfo('B', 14075000);
     const tune = r.byVfo(1).sent.find((m) => m.type === 'tune');
-    assert.deepStrictEqual(tune, { type: 'tune', frequency: 14075000, mode: 'lsb', bandwidthLow: -2700, bandwidthHigh: -50 });
+    assert.deepStrictEqual(tune, { type: 'tune', frequency: 14075000, mode: 'usb', bandwidthLow: 50, bandwidthHigh: 2700 });
     assert.strictEqual(getVfos().slots.B.mode, 'usb');
 });
 
@@ -328,11 +332,11 @@ t('each VFO\'s filter is its own: setting one retunes only it, and main\'s retun
     const r = track(rig());
     up(r);
     r.conns.forEach((c) => { c.sent = []; });
-    // Main is in LSB; B is set to 1.8 kHz on that sideband.
-    assert.ok(r.subs.setFilter('B', [-1850, -50]));
-    const tune = r.byVfo(1).sent.find((m) => m.type === 'tune');
-    assert.deepStrictEqual(tune, { type: 'tune', frequency: 14074000, mode: 'lsb', bandwidthLow: -1850, bandwidthHigh: -50 });
-    for (const i of [2, 3]) assert.ok(!r.byVfo(i).sent.some((m) => m.type === 'tune'), `vfo ${i} untouched`);
+    // Main is in LSB, and so is C, following it; C is set to 1.8 kHz there.
+    assert.ok(r.subs.setFilter('C', [-1850, -50]));
+    const tune = r.byVfo(2).sent.find((m) => m.type === 'tune');
+    assert.deepStrictEqual(tune, { type: 'tune', frequency: 10136000, mode: 'lsb', bandwidthLow: -1850, bandwidthHigh: -50 });
+    for (const i of [1, 3]) assert.ok(!r.byVfo(i).sent.some((m) => m.type === 'tune'), `vfo ${i} untouched`);
     // Main's filter moving moves nobody else's.
     r.conns.forEach((c) => { c.sent = []; });
     await pastThrottle();
@@ -342,14 +346,14 @@ t('each VFO\'s filter is its own: setting one retunes only it, and main\'s retun
     r.conns.forEach((c) => { c.sent = []; });
     await pastThrottle();
     r.subs.update({ tuning: { ...LSB, mode: 'usb', bandwidthLow: 50, bandwidthHigh: 2700 } });
-    const usb = r.byVfo(1).sent.find((m) => m.type === 'tune');
+    const usb = r.byVfo(2).sent.find((m) => m.type === 'tune');
     assert.deepStrictEqual([usb.bandwidthLow, usb.bandwidthHigh], [50, 1850]);
     // Matching main's copies it once.
     r.conns.forEach((c) => { c.sent = []; });
     await pastThrottle();
-    assert.ok(r.subs.setFilter('B', null));
+    assert.ok(r.subs.setFilter('C', null));
     await pastThrottle();
-    const back = r.byVfo(1).sent.filter((m) => m.type === 'tune').pop();
+    const back = r.byVfo(2).sent.filter((m) => m.type === 'tune').pop();
     assert.deepStrictEqual([back.bandwidthLow, back.bandwidthHigh], [50, 2700]);
 });
 
@@ -392,9 +396,10 @@ t('a VFO\'s own squelch rides its connect URL', () => {
 // IQ ends listening: the streams close, handing their radiod channels back, and
 // the flags are cleared so the VFOs are ordinary memories again.
 
-const IQ = { frequency: 7100000, mode: 'iq', bandwidthLow: -6000, bandwidthHigh: 6000 };
+// Wide IQ: nothing a listening VFO may play shares its rate.
+const IQ = { frequency: 7100000, mode: 'iq96', bandwidthLow: -48000, bandwidthHigh: 48000 };
 
-t('entering IQ closes every secondary and clears the listening flags', () => {
+t('entering wide IQ closes every secondary and clears the listening flags', () => {
     const r = track(rig());
     up(r);
     r.subs.update({ tuning: IQ });
@@ -407,15 +412,15 @@ t('entering IQ closes every secondary and clears the listening flags', () => {
     assert.deepStrictEqual(getVfos().slots.C, slot(10136000, 'cw', -250, 250));
     const snap = r.subs.snapshot();
     assert.deepStrictEqual(snap.vfos, {});
-    assert.strictEqual(snap.listenBlocked, 'Not available while main is in IQ');
+    assert.strictEqual(snap.listenBlocked, 'Not available while main is in wide IQ');
     assert.strictEqual(r.player.pans[r.player.pans.length - 1], null, 'the I/Q picker has the sides back');
 });
 
-t('listening is refused while the main receiver is in IQ', () => {
+t('listening is refused while the main receiver is in wide IQ', () => {
     const r = track(rig({ listening: [] }));
     r.subs.update({ running: true, open: true, tuning: IQ });
     r.subs.setRadio({ tuning: IQ, view: null, actions: {} });
-    assert.strictEqual(r.subs.listenBlocked, 'Not available while main is in IQ');
+    assert.strictEqual(r.subs.listenBlocked, 'Not available while main is in wide IQ');
     assert.strictEqual(r.subs.setListening('B', true), false);
     // Even with a radio facade that has not caught up with the mode.
     r.subs.setRadio({ tuning: LSB, view: null, actions: {} });
@@ -428,7 +433,7 @@ t('listening is refused while the main receiver is in IQ', () => {
     assert.ok(r.subs.setListening('B', true), 'allowed again out of IQ');
 });
 
-t('leaving IQ brings nothing back', () => {
+t('leaving wide IQ brings nothing back', () => {
     const r = track(rig());
     up(r);
     r.subs.update({ tuning: IQ });
@@ -441,7 +446,7 @@ t('leaving IQ brings nothing back', () => {
     assert.deepStrictEqual(r.subs.snapshot().vfos, {});
 });
 
-t('flags restored into IQ are cleared before anything connects', () => {
+t('flags restored into wide IQ are cleared before anything connects', () => {
     const r = track(rig());
     r.subs.update({ running: true, open: true, tuning: IQ });
     r.clock.advance(5000);
@@ -633,7 +638,9 @@ t('swapping the main receiver with a listening VFO hands the stream over', () =>
         actions: { tuneTo: (x) => tuned.push(x) },
     };
     assert.ok(selectVfo(radio, 'B', { limit: 2 }));
-    assert.deepStrictEqual(tuned, [{ frequency: 14074000 }]);
+    // B is saved in USB, which shares LSB's rate, so it was being heard in USB
+    // — main's filter mirrored — and comes to the front as it sounded.
+    assert.deepStrictEqual(tuned, [{ frequency: 14074000, mode: 'usb', bandwidthLow: 50, bandwidthHigh: 2700 }]);
     assert.strictEqual(c.disconnects, 0, 'not closed and reopened');
     assert.strictEqual(r.conns.length, 1);
     const tune = c.sent.find((m) => m.type === 'tune');
@@ -707,6 +714,108 @@ t('a rebuilt context gets new voices', async () => {
     await settle();
     const after = [...r.player.started[1].src.out][0];
     assert.notStrictEqual(after, before);
+});
+
+// --- the rate lock -------------------------------------------------------------
+//
+// A listening VFO plays in its own mode where that mode's stream runs at main's
+// rate, and in main's otherwise. 12 kHz: SSB, CW and plain IQ. 24 kHz: AM, SAM,
+// FM, NFM.
+
+const AM = { frequency: 7100000, mode: 'am', bandwidthLow: -5000, bandwidthHigh: 5000 };
+const USB = { frequency: 14074000, mode: 'usb', bandwidthLow: 50, bandwidthHigh: 2700 };
+const PLAIN_IQ = { frequency: 7100000, mode: 'iq', bandwidthLow: -6000, bandwidthHigh: 6000 };
+
+// B saved in USB, C in NFM, D in IQ.
+function mixedRig() {
+    const r = track(rig({ listening: [] }));
+    let state = {
+        active: 'A',
+        slots: {
+            A: slot(7100000, 'lsb', -2700, -50),
+            B: slot(14074000, 'usb', 50, 2700),
+            C: slot(145500000, 'nfm', -5000, 5000),
+            D: slot(7074000, 'iq', -6000, 6000),
+        },
+    };
+    for (const id of ['B', 'C', 'D']) state = setListen(state, id, true, { limit: 4 });
+    setVfos(state);
+    return r;
+}
+
+const modeOf = (r, i) => r.byVfo(i).params.mode;
+
+t('a VFO plays its own mode where it shares main\'s rate, and main\'s where not', async () => {
+    const r = mixedRig();
+    up(r);
+    const first = (i) => r.byVfo(i).connects[0].params;
+    // Beside LSB: USB and IQ are 12 kHz like it; NFM is not.
+    assert.deepStrictEqual(first(1), { frequency: 14074000, mode: 'usb', bandwidthLow: 50, bandwidthHigh: 2700 },
+        'USB beside LSB, main\'s filter mirrored');
+    assert.strictEqual(first(2).mode, 'lsb', 'NFM beside LSB falls back to LSB');
+    assert.deepStrictEqual(first(3), { frequency: 7074000, mode: 'iq', bandwidthLow: -6000, bandwidthHigh: 6000 });
+    // The slots keep their own modes whatever they are heard in.
+    assert.deepStrictEqual(['B', 'C', 'D'].map((id) => getVfos().slots[id].mode), ['usb', 'nfm', 'iq']);
+
+    // Main to AM: now NFM shares its rate, and USB and IQ do not.
+    r.subs.update({ tuning: AM });
+    assert.deepStrictEqual([1, 2, 3].map((i) => modeOf(r, i)), ['am', 'nfm', 'am']);
+    // And back: each returns to its own where it can. (Past the tune throttle.)
+    await pastThrottle();
+    r.subs.update({ tuning: LSB });
+    await pastThrottle();
+    assert.deepStrictEqual([1, 2, 3].map((i) => modeOf(r, i)), ['usb', 'lsb', 'iq']);
+});
+
+t('main in plain IQ keeps every listening VFO, and none is panned against I/Q', () => {
+    const r = mixedRig();
+    up(r, { tuning: PLAIN_IQ });
+    assert.strictEqual(r.subs.listenBlocked, null);
+    assert.deepStrictEqual(['B', 'C', 'D'].map(on), [true, true, true]);
+    assert.ok(r.conns.every((c) => c.state === 'open'), 'nothing closed');
+    assert.deepStrictEqual([1, 2, 3].map((i) => r.byVfo(i).connects[0].params.mode), ['usb', 'iq', 'iq']);
+    assert.strictEqual(r.player.pans[r.player.pans.length - 1] ?? null, null, 'main\'s I/Q left where it is');
+    // B is the only one not in IQ: nothing to spread it against.
+    assert.strictEqual(r.subs.snapshot().vfos.B.pan, null);
+    assert.strictEqual(r.subs.snapshot().vfos.D.pan, null);
+});
+
+t('a VFO in IQ is never squelched, whatever main\'s threshold', () => {
+    const r = mixedRig();
+    up(r, { tuning: USB, threshold: 12 });
+    assert.strictEqual(r.byVfo(3).connects[0].params.mode, 'iq');
+    assert.strictEqual(r.byVfo(3).connects[0].gate, null, 'no min_snr on an IQ stream');
+    assert.strictEqual(r.byVfo(1).connects[0].gate, 12, 'the USB one is gated as before');
+    r.byVfo(3).emit('quality', { basebandPower: -100, noisePower: -90 });
+    assert.strictEqual(r.subs.snapshot().vfos.D.squelchOpen, true);
+});
+
+t('a VFO in IQ is scheduled as I and Q, both channels', async () => {
+    const r = mixedRig();
+    up(r, { tuning: USB });
+    const i = new Float32Array(240).fill(0.25);
+    const q = new Float32Array(240).fill(-0.25);
+    r.byVfo(3).emit('pcm', { planes: [i, q], sampleRate: 12000, channels: 2 });
+    await settle();
+    const src = r.player.started[r.player.started.length - 1].src;
+    assert.strictEqual(src.buffer.ch, 2);
+    assert.strictEqual(src.buffer.rate, 12000);
+    // A mono VFO given a stereo frame still takes the one plane.
+    r.byVfo(1).emit('pcm', { planes: [i, q], sampleRate: 12000, channels: 2 });
+    await settle();
+    assert.strictEqual(r.player.started[r.player.started.length - 1].src.buffer.ch, 1);
+});
+
+t('a listening VFO saved in a wide IQ preset plays in main\'s mode', () => {
+    const r = track(rig({ listening: [] }));
+    let state = {
+        active: 'A',
+        slots: { A: slot(7100000, 'lsb', -2700, -50), B: slot(14074000, 'iq96', -48000, 48000), C: null, D: null },
+    };
+    state = setListen(state, 'B', true, { limit: 4 });
+    setVfos(state);
+    up(r);
+    assert.strictEqual(r.byVfo(1).connects[0].params.mode, 'lsb');
 });
 
 (async () => {

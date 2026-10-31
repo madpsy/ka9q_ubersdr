@@ -133,6 +133,19 @@ export function isWideIQ(mode) {
     return WIDE_IQ_MODES.some((m) => m.id === mode);
 }
 
+// The rate each mode's stream arrives at: radiod's own presets
+// (ubersdr-radiod config/presets.conf, the only authority on it — ubersdr never
+// sends a rate). The wide IQ presets are left out: nothing that asks this wants
+// them. null for a mode it does not know.
+const STREAM_RATES = {
+    usb: 12000, lsb: 12000, cwu: 12000, cwl: 12000, iq: 12000,
+    am: 24000, sam: 24000, fm: 24000, nfm: 24000,
+};
+
+export function modeStreamRate(mode) {
+    return STREAM_RATES[String(mode || '').toLowerCase()] || null;
+}
+
 // Whether a mode carries a stereo I/Q pair rather than demodulated audio.
 //
 // Only plain `iq` is offered here, but this is written as a prefix test so the

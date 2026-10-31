@@ -22,7 +22,7 @@ const {
     listenBlockedReason, listenEdges, listenOf, listenThreshold, listenVfo, listeningVfos, loadVfos,
     seedListen, setVfoFilter, setVfoSquelch, withListenFilter, withListenSquelch,
     nextScanVfo, patchListen, retuneListening, scannableVfos, selectVfo, setListen, setVfoListen,
-    setVfos, switchTo, tuneListening, vfoSnapshot,
+    setVfos, switchTo, tuneListening, vfoSnapshot, heardTuning, sharesRate,
 } = require('./.build/vfos.cjs');
 
 let pass = 0;
@@ -216,23 +216,80 @@ t('at a limit of one a scan visits a VFO still marked listening', () => {
     assert.strictEqual(nextScanVfo(scannableVfos(s, tuning(7100000), 1), 'A'), 'B');
 });
 
+// --- the rate lock ---------------------------------------------------------------
+
+t('sharesRate groups modes by the rate radiod streams them at', () => {
+    for (const m of ['usb', 'lsb', 'cwu', 'cwl', 'iq']) {
+        for (const n of ['usb', 'lsb', 'cwu', 'cwl', 'iq']) assert.ok(sharesRate(m, n), `${m}/${n}`);
+        for (const n of ['am', 'sam', 'fm', 'nfm']) assert.ok(!sharesRate(m, n), `${m}/${n}`);
+    }
+    for (const m of ['am', 'sam', 'fm', 'nfm']) {
+        for (const n of ['am', 'sam', 'fm', 'nfm']) assert.ok(sharesRate(m, n), `${m}/${n}`);
+    }
+    // The wide IQ presets share with nothing, themselves included.
+    for (const w of ['iq48', 'iq96', 'iq192', 'iq384']) {
+        assert.ok(!sharesRate(w, w));
+        assert.ok(!sharesRate('usb', w));
+        assert.ok(!sharesRate(w, 'iq'));
+    }
+    assert.ok(!sharesRate('cw', 'usb'), 'an unknown mode shares with nothing');
+    assert.ok(!sharesRate(null, 'usb'));
+});
+
+t('heardTuning: own mode where the rate matches, main\'s otherwise', () => {
+    const lsbMain = tuning(7100000, 'lsb', -2400, -100);
+    // The other sideband: main's filter mirrored.
+    assert.deepStrictEqual(heardTuning(slot(1, 'usb', 50, 2700), lsbMain),
+        { mode: 'usb', bandwidthLow: 100, bandwidthHigh: 2400, ownMode: true });
+    // Same mode: main's, as it always was.
+    assert.deepStrictEqual(heardTuning(slot(1, 'lsb', -2700, -50), lsbMain),
+        { mode: 'lsb', bandwidthLow: -2400, bandwidthHigh: -100, ownMode: false });
+    // Another family at the same rate: the slot's own filter.
+    assert.deepStrictEqual(heardTuning(slot(1, 'cwu', -250, 250), lsbMain),
+        { mode: 'cwu', bandwidthLow: -250, bandwidthHigh: 250, ownMode: true });
+    // IQ: the whole stream, whatever the slot says.
+    assert.deepStrictEqual(heardTuning(slot(1, 'iq', -100, 100), lsbMain),
+        { mode: 'iq', bandwidthLow: -6000, bandwidthHigh: 6000, ownMode: true });
+    // Another rate: main's mode and filter.
+    assert.deepStrictEqual(heardTuning(slot(1, 'nfm', -5000, 5000), lsbMain),
+        { mode: 'lsb', bandwidthLow: -2400, bandwidthHigh: -100, ownMode: false });
+    assert.strictEqual(heardTuning(slot(1, 'iq96', -48000, 48000), lsbMain).mode, 'lsb');
+    // NFM beside AM.
+    assert.deepStrictEqual(heardTuning(slot(1, 'nfm', -5000, 5000), tuning(1, 'am', -4000, 4000)),
+        { mode: 'nfm', bandwidthLow: -5000, bandwidthHigh: 5000, ownMode: true });
+    // Beside a plain IQ main, USB plays as itself.
+    assert.strictEqual(heardTuning(slot(1, 'usb', 50, 2700), tuning(1, 'iq', -6000, 6000)).mode, 'usb');
+});
+
+t('a listening VFO\'s own filter is kept for the mode it plays in', () => {
+    setVfos(setListen(base(), 'B', true, { limit: 4 }));
+    // B is saved in USB; beside an LSB main it plays USB, so the edges are USB's.
+    const lsbMain = tuning(7100000, 'lsb', -2700, -50);
+    assert.ok(setVfoFilter('B', lsbMain, [50, 1800]));
+    assert.deepStrictEqual(listenOf(getVfos(), 'B').bw, { ssb: [50, 1800] });
+    assert.deepStrictEqual(listenEdges(listenOf(getVfos(), 'B'), heardTuning(getVfos().slots.B, lsbMain)),
+        { low: 50, high: 1800, own: true });
+});
+
 // --- IQ ------------------------------------------------------------------------
 
-t('listening cannot start while the main receiver is in IQ', () => {
+t('listening cannot start while the main receiver is in wide IQ', () => {
     const s = base();
-    assert.strictEqual(listenBlockedReason('iq'), 'Not available while main is in IQ');
-    assert.strictEqual(listenBlockedReason('iq96'), LISTEN_IQ_REASON);
+    assert.strictEqual(listenBlockedReason('iq96'), 'Not available while main is in wide IQ');
+    assert.strictEqual(listenBlockedReason('iq384'), LISTEN_IQ_REASON);
+    assert.strictEqual(listenBlockedReason('iq'), null, 'plain IQ is 12 kHz, like SSB');
     assert.strictEqual(listenBlockedReason('usb'), null);
     assert.strictEqual(setListen(s, 'B', true, { limit: 4, mainMode: 'iq48' }), s);
-    const live = vfoSnapshot(tuning(7100000, 'iq', -6000, 6000), null);
+    const live = vfoSnapshot(tuning(7100000, 'iq192', -96000, 96000), null);
     assert.strictEqual(setListen(s, 'B', true, { limit: 4, live }), s, 'the mode comes from live');
     // Stopping is always allowed.
     const on = setListen(s, 'B', true, { limit: 4 });
-    assert.strictEqual(setListen(on, 'B', false, { limit: 4, mainMode: 'iq' }).listen.B.on, false);
+    assert.strictEqual(setListen(on, 'B', false, { limit: 4, mainMode: 'iq96' }).listen.B.on, false);
 
     setVfos(base());
-    assert.ok(!listenVfo(fakeRadio(tuning(7100000, 'iq', -6000, 6000)), 'B', true, 4));
+    assert.ok(!listenVfo(fakeRadio(tuning(7100000, 'iq96', -48000, 48000)), 'B', true, 4));
     assert.strictEqual(listenOf(getVfos(), 'B').on, false);
+    assert.ok(listenVfo(fakeRadio(tuning(7100000, 'iq', -6000, 6000)), 'B', true, 4), 'plain IQ may');
 });
 
 t('clearListening turns every flag off and keeps the rest', () => {
@@ -246,9 +303,9 @@ t('clearListening turns every flag off and keeps the rest', () => {
     assert.strictEqual(clearListening(after), after, 'nothing to clear is no change');
 });
 
-t('selecting a VFO still marked listening while in IQ recalls it', () => {
+t('selecting a VFO still marked listening while in wide IQ recalls it', () => {
     setVfos(setListen(base(), 'C', true, { limit: 4 }));
-    const radio = fakeRadio(tuning(7100000, 'iq', -6000, 6000));
+    const radio = fakeRadio(tuning(7100000, 'iq96', -48000, 48000));
     assert.ok(selectVfo(radio, 'C', { limit: 4 }));
     assert.strictEqual(radio.calls.find((c) => c[0] === 'tuneTo')[1].mode, 'cw', 'not swapped');
     assert.strictEqual(listenOf(getVfos(), 'A').on, false);
@@ -368,7 +425,7 @@ t('setVfoFilter writes the listen entry and never the active VFO', () => {
     assert.strictEqual(getVfos().slots.B.bandwidthHigh, 2700, 'the slot\'s own filter is left alone');
     assert.ok(!setVfoFilter('B', usb, [50, 1800]), 'the same again changes nothing');
     assert.ok(!setVfoFilter('A', usb, [50, 1800]), 'not the main receiver');
-    assert.ok(!setVfoFilter('B', tuning(1, 'iq', -6000, 6000), [-100, 100]), 'nothing in IQ');
+    assert.ok(!setVfoFilter('B', tuning(1, 'iq96', -48000, 48000), [-100, 100]), 'nothing in wide IQ');
     assert.ok(setVfoFilter('B', usb, null), 'matching main\'s');
     assert.deepStrictEqual(listenOf(getVfos(), 'B').bw, { ssb: [50, 2700] });
 });

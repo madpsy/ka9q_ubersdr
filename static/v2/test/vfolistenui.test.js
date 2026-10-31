@@ -227,17 +227,17 @@ t('every VFO colour reads on the near-black spectrum canvas', () => {
 
 const TUNING = { frequency: 14_074_000, mode: 'usb', bandwidthLow: 50, bandwidthHigh: 2700 };
 
-t('listening passbands take the main filter shape and skip what is not playing', async () => {
+t('listening passbands take the shape of the mode played in and skip what is not playing', async () => {
     // isListening reads the session's VFO count, and one plays nothing.
     await setLimit(4);
     state({ B: true, C: true });
     const snap = { vfos: { B: { squelchOpen: true }, C: { overLimit: true } } };
     const list = marks.listeningPassbands(getVfos(), snap, TUNING);
     assert.deepStrictEqual(list.map((v) => v.id), ['B'], 'an over-limit VFO is drawn');
-    // B is saved in LSB, but it plays in USB like the main receiver: the
-    // passband drawn is the one being demodulated.
-    assert.strictEqual(list[0].low, 50);
-    assert.strictEqual(list[0].high, 2700);
+    // B is saved in LSB, which shares USB's rate, so it plays in LSB: main's
+    // filter mirrored onto the lower sideband, the one being demodulated.
+    assert.strictEqual(list[0].low, -2700);
+    assert.strictEqual(list[0].high, -50);
     assert.strictEqual(list[0].frequency, 7_100_000);
     assert.strictEqual(list[0].open, true);
     assert.strictEqual(list[0].colour, colours.VFO_COLOURS.B);
@@ -265,7 +265,8 @@ t('a listening passband with its own filter is drawn with it', async () => {
     const list = marks.listeningPassbands(getVfos(), null, TUNING);
     const b = list.find((x) => x.id === 'B');
     const c = list.find((x) => x.id === 'C');
-    assert.deepStrictEqual([b.low, b.high, b.own], [50, 1850, true]);
+    // Kept in upper-sideband terms, drawn on B's own lower sideband.
+    assert.deepStrictEqual([b.low, b.high, b.own], [-1850, -50, true]);
     assert.deepStrictEqual([c.low, c.high, c.own], [50, 2700, false]);
     assert.notStrictEqual(marks.passbandsKey([b]), marks.passbandsKey([{ ...b, high: 2700 }]), 'the cache key moves with it');
 });
@@ -437,8 +438,9 @@ for (const minimal of [false, true]) {
         assert.strictEqual(ia.props.style['--vfo-colour'], 'var(--accent)');
         assert.strictEqual(ic.props.style, undefined, 'a parked VFO in colour');
         assert.strictEqual(byClass(ic, 'vfos__badge').length, 0);
-        // B plays in USB like the main one, and shows it.
-        assert.strictEqual(byClass(ib, 'vfos__mode')[0].props.children, 'USB');
+        // B is saved in LSB, which runs at USB's rate, so it plays in its own
+        // mode beside the USB main, and shows it.
+        assert.strictEqual(byClass(ib, 'vfos__mode')[0].props.children, 'LSB');
 
         // Outputs on the main and the listening row, nowhere else.
         assert.strictEqual(byClass(tree, 'vfos__seg').length, 2);
@@ -455,9 +457,10 @@ for (const minimal of [false, true]) {
         assert.strictEqual(byClass(tree, 'vfos__ctl').length, minimal ? 0 : 2);
         assert.strictEqual(byClass(tree, 'vfos__squelch').length, minimal ? 0 : 2);
         assert.strictEqual(byClass(tree, 'vfos__bw').length, minimal ? 0 : 2);
-        assert.strictEqual(byClass(tree, 'vfos__note').length, minimal ? 0 : 1);
+        // Nothing to explain: B plays in the mode it was saved in.
+        assert.strictEqual(byClass(tree, 'vfos__note').length, 0);
         if (!minimal) {
-            assert.ok(/LSB saved · listening in USB/.test(text(ib)), text(ib));
+            assert.ok(!/saved · listening in/.test(text(ib)), text(ib));
             // Two rows: how it is heard, then what it lets through.
             const rows = byClass(byClass(ib, 'vfos__ctl')[0], 'vfos__ctl-row');
             assert.strictEqual(rows.length, 2);
@@ -498,20 +501,20 @@ for (const minimal of [false, true]) {
         assert.strictEqual(items(tree)[2].props.style['--vfo-colour'], colours.VFO_COLOURS.C);
     });
 
-    t(`${view}: main in IQ disables every speaker, says why, and pauses nothing on show`, async () => {
+    t(`${view}: main in wide IQ disables every speaker, says why, and pauses nothing on show`, async () => {
         await setLimit(4);
         reset();
         // A listening flag the engine has not cleared yet: the panel must not
         // show it as playing either way.
         state({ B: true });
-        const ctx = context({ tuning: { frequency: 14_074_000, mode: 'iq', bandwidthLow: -6000, bandwidthHigh: 6000 } });
+        const ctx = context({ tuning: { frequency: 14_074_000, mode: 'iq96', bandwidthLow: -48000, bandwidthHigh: 48000 } });
         run(ctx);
         const tree = frame(VfosPanel, { minimal }, ctx);
         const said = text(tree);
         assert.strictEqual(speakers(tree).length, 3, 'hidden rather than disabled');
         for (const s of speakers(tree)) {
             assert.strictEqual(s.props['aria-disabled'], true);
-            assert.strictEqual(s.props.title, 'Not available while main is in IQ');
+            assert.strictEqual(s.props.title, 'Not available while main is in wide IQ');
             assert.strictEqual(s.props['aria-pressed'], false);
         }
         assert.ok(!/Paused/.test(said), said);
@@ -521,7 +524,7 @@ for (const minimal of [false, true]) {
         // B shows its own mode, not an IQ it is not heard in.
         assert.strictEqual(byClass(items(tree)[1], 'vfos__mode')[0].props.children, 'LSB');
         speakers(tree)[1].props.onClick(ev());
-        assert.strictEqual(getVfos().listen.C.on, false, 'started in IQ');
+        assert.strictEqual(getVfos().listen.C.on, false, 'started in wide IQ');
     });
 }
 

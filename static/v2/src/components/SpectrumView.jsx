@@ -2437,7 +2437,8 @@ export default function SpectrumView() {
                     const offset = Math.round((f - v.frequency) / FILTER_WIDTH_STEP) * FILTER_WIDTH_STEP;
                     const minHz = EDGE_FLOOR_PX * (cfg.span / r.width);
                     const shape = { bandwidthLow: v.low, bandwidthHigh: v.high };
-                    const [low, high] = edgesForEdgeDrag(t.mode, g.edge.which, offset, shape, minHz);
+                    // In the mode it plays in, which need not be main's.
+                    const [low, high] = edgesForEdgeDrag(v.mode || t.mode, g.edge.which, offset, shape, minHz);
                     if (low !== v.low || high !== v.high) {
                         setListeningFilter(subsRef.current, v.id, t, [low, high]);
                     }

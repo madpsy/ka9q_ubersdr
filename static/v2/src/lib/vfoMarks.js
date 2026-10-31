@@ -7,12 +7,14 @@
 //
 // A listening VFO is drawn like the main receiver: a wash over its passband and
 // the dial and edge lines, in its own colour (lib/vfoColours.js). The passband is
-// the filter it is playing with about the VFO's own frequency — its own, which
-// starts as a copy of main's (lib/vfos.js listenEdges) — never its saved slot's,
-// which belongs to a mode it is not in and would show a passband nothing is
-// demodulating.
+// the filter it is playing with about the VFO's own frequency, in the mode it
+// is playing in (lib/vfos.js heardTuning, listenEdges) — never just its saved
+// slot's, which may belong to a mode it is not in and would show a passband
+// nothing is demodulating.
 
-import { VFO_IDS, cleanSlot, isListening, listenBlockedReason, listenEdges, listenOf } from './vfos.js';
+import {
+    VFO_IDS, cleanSlot, isListening, listenBlockedReason, listenEdges, listenOf, listenTuning,
+} from './vfos.js';
 import { vfoColour } from './vfoColours.js';
 import { edgeHit } from './edgeHit.js';
 
@@ -23,11 +25,13 @@ import { edgeHit } from './edgeHit.js';
  * @param snap    the engine's snapshot() (radio/subReceivers.js), or null. A VFO
  *                the server's limit leaves out (`overLimit`) is not playing and
  *                is not drawn.
- * @param tuning  the main receiver's, for the mode and main's filter. In IQ nothing is
- *                drawn: listening ends there (lib/vfos.js), and this answers so
- *                from the same render rather than a frame after the flags clear.
+ * @param tuning  the main receiver's, for the mode and main's filter. In wide IQ
+ *                nothing is drawn: listening ends there (lib/vfos.js), and this
+ *                answers so from the same render rather than a frame after the
+ *                flags clear.
  * @param limit   the server's VFO count; at 1 nothing is listening.
- * @returns {Array<{id, frequency, low, high, own, colour, open, gated}>} —
+ * @returns {Array<{id, mode, frequency, low, high, own, colour, open, gated}>} —
+ *          `mode` the one it plays in,
  *          `own` when the filter differs from main's, `gated` when its
  *          squelch is on.
  */
@@ -40,9 +44,11 @@ export function listeningPassbands(state, snap, tuning, limit) {
         if (!slot) continue;
         const live = snap && snap.vfos ? snap.vfos[id] : null;
         if (live && live.overLimit) continue;
-        const edges = listenEdges(listenOf(state, id), tuning);
+        const heard = listenTuning(state, id, tuning);
+        const edges = listenEdges(listenOf(state, id), heard);
         out.push({
             id,
+            mode: heard.mode,
             frequency: slot.frequency,
             low: edges.low,
             high: edges.high,

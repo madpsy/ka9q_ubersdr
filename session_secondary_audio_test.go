@@ -326,7 +326,7 @@ func TestSecondaryIndexLimit(t *testing.T) {
 	}
 }
 
-func TestSecondaryRefusesIQ(t *testing.T) {
+func TestSecondaryRefusesWideIQ(t *testing.T) {
 	cases := []struct {
 		vfo  int
 		mode string
@@ -336,7 +336,8 @@ func TestSecondaryRefusesIQ(t *testing.T) {
 		{0, "usb", true},
 		{1, "usb", true},
 		{1, "am", true},
-		{1, "iq", false},
+		{1, "iq", true}, // 12 kHz, the same rate as SSB and CW
+		{1, "iq48", false},
 		{2, "iq96", false},
 	}
 	for _, c := range cases {
@@ -346,11 +347,11 @@ func TestSecondaryRefusesIQ(t *testing.T) {
 		}
 	}
 
-	// And at the session layer, which also guards the IQ case for any caller.
+	// And at the session layer, which also guards the wide IQ case for any caller.
 	sm := newVFOTestManager(t, 4)
 	mustPrimary(t, sm, vfoTestUser, 7100000)
-	if _, err := sm.CreateSecondaryAudioSession(7150000, "iq", 3000, vfoTestIP, vfoTestIP, vfoTestUser, "", 1); err == nil {
-		t.Error("an IQ secondary was created")
+	if _, err := sm.CreateSecondaryAudioSession(7150000, "iq96", 3000, vfoTestIP, vfoTestIP, vfoTestUser, "", 1); err == nil {
+		t.Error("a wide IQ secondary was created")
 	}
 }
 

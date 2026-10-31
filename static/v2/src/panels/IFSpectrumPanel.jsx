@@ -39,6 +39,8 @@ import {
     GRAD_STOPS, TRACE_FLOOR, TRACE_WIDTH, drawDbScale, paletteGradients, themeColors,
 } from '../lib/spectrumTrace.js';
 import { RING_BG, RING_PAD, ringSlices, smoothInterval } from '../lib/waterfallRing.js';
+import { clearTimeMarks, createTimeMarks, drawTimeMarks, noteRows, rowWallTime } from '../lib/waterfallTimes.js';
+import { getTimeshift } from '../lib/timeshift.js';
 import { retentionFor } from '../lib/timeConstant.js';
 import { readoutClearsOn, tipPlacement } from '../lib/hoverTip.js';
 import { haptic } from '../lib/haptics.js';
@@ -111,7 +113,7 @@ const NO_DATA = (255 << 24)
     | parseInt(RING_BG.slice(1, 3), 16);
 
 export default function IFSpectrumPanel({ minimal }) {
-    const { tuning, running, spectrumConn, view, actions } = useRadio();
+    const { tuning, running, spectrumConn, view, actions, serverInfo } = useRadio();
     const display = useDisplay();
 
     const viewMode = normaliseView(display.ifView);
@@ -207,6 +209,7 @@ export default function IFSpectrumPanel({ minimal }) {
         ring: null, ringCtx: null, ringH: 0,
         rowPx: null, rowBuf: null,
         head: 0,
+        times: createTimeMarks(),    // time stamps down the left; lib/waterfallTimes.js
         rowH: 2,
         lastRowAt: 0, rowDt: 0, lastGap: 0,
         smooth: true,
@@ -223,6 +226,7 @@ export default function IFSpectrumPanel({ minimal }) {
     st.cfg = view;
     st.tuning = tuning;
     st.d = display;
+    st.rx = serverInfo ? serverInfo.receiver : null;   // for the time stamps' zone
     st.marks = markColors(display);
     st.rowH = Math.max(1, Math.round(display.rowHeight || 2));
     st.smooth = display.smoothScroll !== false;
@@ -1240,6 +1244,7 @@ function clearRing(st) {
     st.ring = null;
     st.ringCtx = null;
     st.head = 0;
+    clearTimeMarks(st.times);
     st.lastRowAt = 0;
     st.rowDt = 0;
     st.lastGap = 0;
@@ -1293,6 +1298,7 @@ function commitRow(st, now, levels) {
         st.head = (st.head - 1 + st.ringH) % st.ringH;
         st.ringCtx.putImageData(st.rowPx, 0, st.head);
     }
+    noteRows(st.times, st.rowH, rowWallTime(getTimeshift()), now, st.dpr);
 
     const gap = st.lastRowAt ? now - st.lastRowAt : 0;
     st.rowDt = smoothInterval(st.rowDt, gap, st.lastGap);
@@ -1317,6 +1323,11 @@ function drawWaterfall(st, canvas) {
     // the main waterfall; see lib/waterfallRing.js.
     for (const s of ringSlices(st.head, st.ringH, st.ringH)) {
         c.drawImage(st.ring, 0, s.sy, ROW_BINS, s.sh, 0, s.dy, w, s.sh);
+    }
+    // On the visible canvas, not the ring, so they slide with the rows.
+    if (!st.d || st.d.waterfallTimes !== false) {
+        drawTimeMarks(c, st.times, canvas.height, st.dpr,
+            { limit: st.ringH, zone: st.d && st.d.waterfallTimeZone, rx: st.rx });
     }
 
     // The picture has just moved down a row inside the canvas, so putting the

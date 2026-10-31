@@ -508,6 +508,8 @@ esbuild ../src/lib/noiseBlanker.js --bundle --format=cjs --platform=node \
     --outfile=.build/noiseblanker.cjs --log-level=warning
 esbuild ../src/lib/waterfallRing.js --bundle --format=cjs --platform=node \
     --outfile=.build/waterfallring.cjs --log-level=warning
+esbuild ../src/lib/waterfallTimes.js --bundle --format=cjs --platform=node \
+    --outfile=.build/waterfalltimes.cjs --log-level=warning
 esbuild ../src/extensions/whisper/frames.js --bundle --format=cjs --platform=node \
     --outfile=.build/whisper.cjs --log-level=warning
 esbuild ../src/extensions/whisper/speech.js --bundle --format=cjs --platform=node \
@@ -608,6 +610,7 @@ node whisperengines.test.js
 node whisperpanel.test.js
 node whisperwasm.test.js
 node waterfall.test.js
+node waterfalltimes.test.js
 node timeconstant.test.js
 node mediasession.test.js
 node announce.test.js

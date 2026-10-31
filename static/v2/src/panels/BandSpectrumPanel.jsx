@@ -63,6 +63,7 @@ import { haptic } from '../lib/haptics.js';
 import { getVfos, onVfosChanged } from '../lib/vfos.js';
 import { formatRate } from '../lib/format.js';
 import { RING_BG, RING_PAD, ringSlices, smoothInterval } from '../lib/waterfallRing.js';
+import { clearTimeMarks, createTimeMarks, drawTimeMarks, noteRows } from '../lib/waterfallTimes.js';
 import { TRACE_WIDTH, binsToPixels, paletteGradients, themeColors } from '../lib/spectrumTrace.js';
 import { retentionFor } from '../lib/timeConstant.js';
 import useFeedsAllowed from '../lib/useServerFeeds.js';
@@ -86,7 +87,7 @@ const THEME_VARS = ['--spec-bg', '--spec-grid'];
 const HISTORY_ROWS = 400;
 
 export default function BandSpectrumPanel({ minimal }) {
-    const { tuning, actions } = useRadio();
+    const { tuning, actions, serverInfo } = useRadio();
     const display = useDisplay();
     const [bands, setBands] = useState(null);       // name → config, or null while loading
     const [prefs, setPrefs] = useState(savedPrefs);
@@ -335,6 +336,7 @@ function BandChart({ band, meta, prefs, display, tuning, vfoId, onTune, onRate }
     const st = useRef({
         bins: null,
         rows: [],                    // raw dBFS history, newest last
+        times: createTimeMarks(),    // time stamps down the left; lib/waterfallTimes.js
         auto: createAutoRange(),
         prefs,
         // The palette as packed ABGR, one entry per level — what colouring a
@@ -382,8 +384,15 @@ function BandChart({ band, meta, prefs, display, tuning, vfoId, onTune, onRate }
     // same ones the main spectrum and waterfall do, so one switch governs both
     // and neither drifts away from the other.
     st.d = display;
+    st.rx = serverInfo ? serverInfo.receiver : null;   // for the time stamps' zone
     st.zoom = zoom;
-    st.rowH = Math.max(1, Math.round(display.rowHeight || 2));
+    {
+        const rowH = Math.max(1, Math.round(display.rowHeight || 2));
+        // The history is repainted at the new row height, which moves every
+        // row a stamp was counted against.
+        if (st.rowH && rowH !== st.rowH) clearTimeMarks(st.times);
+        st.rowH = rowH;
+    }
     st.smooth = display.smoothScroll !== false;
 
     // Palette as one Uint32 per level, which is what writing a waterfall row
@@ -986,6 +995,8 @@ function commit(st, binCount) {
     } else if (!built) {
         writeRow(st, row);
     }
+    // Either way the history has one more row at the top.
+    noteRows(st.times, st.rowH, now, now, st.dpr);
     st.scrolled = false;                    // the slide is started by the draw
     st.dirty = true;
 }
@@ -1326,6 +1337,11 @@ function drawWaterfall(st, canvas) {
     const sw = Math.max(1, (st.zoom.end - st.zoom.start) * rw);
     for (const s2 of ringSlices(st.head, st.ringH, st.ringH)) {
         c.drawImage(st.ring, sx, s2.sy, sw, s2.sh, 0, s2.dy, w, s2.sh);
+    }
+    // On the visible canvas, not the ring, so they slide with the rows.
+    if (!st.d || st.d.waterfallTimes !== false) {
+        drawTimeMarks(c, st.times, canvas.height, st.dpr,
+            { limit: st.ringH, zone: st.d && st.d.waterfallTimeZone, rx: st.rx });
     }
 
     // The picture has just moved down a row within the canvas, so putting the

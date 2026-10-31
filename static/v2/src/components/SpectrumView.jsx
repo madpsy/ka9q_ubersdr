@@ -94,6 +94,7 @@ import { measureState, setSelection } from '../lib/measureTool.js';
 import { grabMode } from '../lib/measure.js';
 import useTimeshift, { formatBehind, tuningNote } from '../lib/useTimeshift.js';
 import { getTimeshift, tuningDiffers } from '../lib/timeshift.js';
+import { clearTimeMarks, createTimeMarks, drawTimeMarks, noteRows, rowWallTime } from '../lib/waterfallTimes.js';
 
 // How near a passband edge counts as grabbing it, and how wide the passband
 // has to be on screen before either edge can be grabbed at all.
@@ -1079,6 +1080,8 @@ export default function SpectrumView() {
         ring: null,          // offscreen canvas
         ringCtx: null,
         ringHead: 0,
+        // Which ring rows carry a time stamp — see lib/waterfallTimes.js.
+        times: createTimeMarks(),
         // The surface's own magnitude ring, and whether its canvas needs
         // repainting. Null until a mode that draws one is chosen, so 2D pays
         // nothing for a feature it is not using.
@@ -1129,6 +1132,8 @@ export default function SpectrumView() {
     subsRef.current = getSubReceivers(radio.player);
     const squelchRef = useRef(radio.squelch);
     squelchRef.current = radio.squelch;
+    // The receiver's zone, for the waterfall's time stamps.
+    gfx.current.rxInfo = radio.serverInfo ? radio.serverInfo.receiver : null;
     // The draw loop's paint, for the frame handler to call while the tab is
     // hidden — see the data effect. Null while the loop is not running.
     const paintRef = useRef(null);
@@ -1371,7 +1376,10 @@ export default function SpectrumView() {
             // changes how many pixels it takes, not which frequencies it covers,
             // so the recorded centre and span stand. A dropped one has no view,
             // and the next draw records the current one.
-            if (!keep) g.ringSpan = 0;
+            if (!keep) {
+                g.ringSpan = 0;
+                clearTimeMarks(g.times);
+            }
         }
         g.dirty = true;
     }, [sizes.w, sizes.h, specH, wfH, heatH, dssH, midH, wfScaleH, renderScale]);
@@ -4519,6 +4527,9 @@ function drawWaterfall(g, d, wf, wfMarks, wfH, pxW, floor, range, commitRow, cfg
             g.ringHead = (g.ringHead - 1 + H) % H;
             rctx.putImageData(img, 0, g.ringHead);
         }
+        // Noted whether or not the stamps are shown, so switching them on has
+        // the recent history labelled rather than starting from nothing.
+        noteRows(g.times, rowH, rowWallTime(getTimeshift()), performance.now(), g.dpr);
     }
 
     const octx = wf.getContext('2d', { alpha: false });
@@ -4533,6 +4544,13 @@ function drawWaterfall(g, d, wf, wfMarks, wfH, pxW, floor, range, commitRow, cfg
     // where the canvas clips it — harmless, and a blit of rows nobody sees.
     for (const s of ringSlices(g.ringHead, H, Math.min(H, wf.height))) {
         octx.drawImage(ring, 0, s.sy, pxW, s.sh, 0, s.dy, pxW, s.sh);
+    }
+    // On the visible canvas rather than in the ring, so they ride the smooth
+    // scroll with the rows but are never shifted by a pan or smeared by a
+    // resize. See lib/waterfallTimes.js.
+    if (d.waterfallTimes !== false) {
+        drawTimeMarks(octx, g.times, Math.min(H, wf.height), g.dpr,
+            { limit: H, zone: d.waterfallTimeZone, rx: g.rxInfo });
     }
 
     // The picture has just moved down a row within the canvas, so putting the
@@ -4652,6 +4670,7 @@ function alignRingToView(g, d, cfg) {
     if (t.drop) {
         c.fillStyle = RING_BG;
         c.fillRect(0, 0, W, H);
+        clearTimeMarks(g.times);
         return;
     }
 

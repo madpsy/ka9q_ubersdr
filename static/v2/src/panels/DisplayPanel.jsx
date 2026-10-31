@@ -21,6 +21,7 @@ import { freqRefAvailable } from '../lib/freqRef.js';
 import { WHEEL_ACCELS, nearestWheelAccel, wheelAccelLabel } from '../lib/wheelStep.js';
 import WheelAccelReset from '../components/WheelAccelReset.jsx';
 import { voiceSkimmerAvailable } from '../lib/voiceSkimmer.js';
+import { browserZone, receiverOffsetMin } from '../lib/ntpTime.js';
 import {
     UI_THEMES, canvasContrast, contrastMin, effectiveColors, matchUiTheme, pageContrast,
     themeSwatch, uiColorsFrom,
@@ -36,6 +37,8 @@ const FPS_CHOICES = [0, 60, 30, 20, 15, 10];
 export default function DisplayPanel() {
     const d = useDisplay();
     const { serverInfo, actions } = useRadio();
+    // Whether the receiver's clock can be offered for the waterfall stamps.
+    const rxZoneKnown = receiverOffsetMin(serverInfo && serverInfo.receiver) != null;
     // Two settings resolve per device — the zoom anchor and the idle throttle —
     // and both have to show what is actually in force, not what is stored. The
     // same query IdleWatch and the spectrum use to decide, so the control and
@@ -496,6 +499,38 @@ export default function DisplayPanel() {
                             title="Slide each row into view instead of letting it step in. Most noticeable on a wide span, where the receiver sends fewer frames a second. Costs no extra work per frame, but the picture is very slightly softer while it is moving"
                         />
                     </Field>
+
+                    <Field label="Time stamps" inline>
+                        <Switch
+                            checked={d.waterfallTimes !== false}
+                            onChange={(v) => d.set({ waterfallTimes: v })}
+                            title="Show the time down the left of the waterfall every so often, scrolling with it, so you can see roughly when a signal was there. The spacing follows the waterfall speed"
+                        />
+                    </Field>
+                    {d.waterfallTimes !== false && (
+                        <Field label="Time stamp zone">
+                            <Segmented
+                                value={d.waterfallTimeZone || 'me'}
+                                onChange={(v) => d.set({ waterfallTimeZone: v })}
+                                options={[
+                                    {
+                                        value: 'me',
+                                        label: 'Mine',
+                                        title: `Your own time zone${browserZone() ? ` (${browserZone()})` : ''}`,
+                                    },
+                                    {
+                                        value: 'rx',
+                                        label: 'Receiver',
+                                        title: rxZoneKnown
+                                            ? `The receiver's time zone${serverInfo.receiver.timezone ? ` (${serverInfo.receiver.timezone})` : ''}`
+                                            : 'This receiver has not said what time zone it is in',
+                                        disabled: !rxZoneKnown,
+                                    },
+                                    { value: 'utc', label: 'UTC', title: 'Coordinated Universal Time, marked Z' },
+                                ]}
+                            />
+                        </Field>
+                    )}
 
                     <Field label="Update in background" inline>
                         <Switch

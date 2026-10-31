@@ -48,6 +48,13 @@ export const DEFAULTS = {
     // row — but it is a switch because the browser resamples the picture while
     // it is in flight, which is very slightly soft on a non-HiDPI screen.
     smoothScroll: true,
+    // A clock reading down the left of the waterfall every so often, scrolling
+    // with the rows it labels, so a signal can be put at a rough time without
+    // counting rows. See lib/waterfallTimes.js.
+    waterfallTimes: true,
+    // Whose clock the stamps read: 'me' (this browser's zone), 'rx' (the
+    // receiver's, from its admin timezone) or 'utc' — the Time panel's three.
+    waterfallTimeZone: 'me',
     // Keep the waterfall running while the tab is in the background, so coming
     // back to it shows what happened in the meantime (issue #136). Off, because
     // the default is to give the spectrum socket up five seconds after the tab

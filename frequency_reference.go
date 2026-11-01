@@ -163,6 +163,9 @@ func (frm *FrequencyReferenceMonitor) Start() error {
 		SSRC:         ssrc,
 		SessionID:    sessionID,
 		SpectrumChan: spectrumChan,
+		// Seeded so the watchdog also retries a channel that never delivered
+		// a single frame, not only one that stopped.
+		LastDataTime: time.Now(),
 	}
 
 	frm.spectrumReady = true
@@ -190,6 +193,10 @@ func (frm *FrequencyReferenceMonitor) Start() error {
 	// Start hourly aggregation loop
 	frm.wg.Add(1)
 	go frm.hourlyAggregateLoop()
+
+	// Start stall watchdog
+	frm.wg.Add(1)
+	go frm.watchdogLoop()
 
 	log.Printf("Frequency reference monitor started (%.6f MHz ± 500 Hz, %.2f Hz resolution, max drift: ±%.1f Hz)",
 		float64(frm.centerFreq)/1e6, frm.binBandwidth, frm.config.FrequencyReference.MaxDriftFreq)
@@ -275,6 +282,78 @@ func (frm *FrequencyReferenceMonitor) monitorLoop() {
 			frm.processSpectrum(spectrum)
 		}
 	}
+}
+
+// Watchdog timing, matching the noise floor monitor's band watchdog.
+const (
+	freqRefWatchdogInterval  = 30 * time.Second
+	freqRefStallThreshold    = 90 * time.Second
+	freqRefReconnectCooldown = 60 * time.Second
+)
+
+// watchdogLoop recreates the reference spectrum channel when it stops delivering.
+//
+// The channel is created once, and since spectrum channels carry a LIFETIME
+// (spectrumLifetimeFrames) the background poll is its only keepalive. Anything
+// that keeps radiod from seeing polls for that long -- a radiod restart, a
+// stalled command thread, lost multicast -- makes radiod reap it, and polling
+// the dead SSRC does not bring it back. Without this the monitor reported
+// "No data received" until ubersdr itself was restarted.
+func (frm *FrequencyReferenceMonitor) watchdogLoop() {
+	defer frm.wg.Done()
+
+	ticker := time.NewTicker(freqRefWatchdogInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-frm.stopChan:
+			return
+		case <-ticker.C:
+			frm.checkAndReconnectStalled(time.Now())
+		}
+	}
+}
+
+// freqRefNeedsReconnect reports whether a channel last heard from at lastData,
+// and last reconnected at lastReconnect, should be recreated at now.
+func freqRefNeedsReconnect(now, lastData, lastReconnect time.Time) bool {
+	return now.Sub(lastData) > freqRefStallThreshold &&
+		now.Sub(lastReconnect) >= freqRefReconnectCooldown
+}
+
+// checkAndReconnectStalled recreates the channel with the same SSRC if it has
+// stalled, so the session registered in the session manager keeps routing.
+func (frm *FrequencyReferenceMonitor) checkAndReconnectStalled(now time.Time) {
+	bs := frm.refSpectrum
+	if bs == nil {
+		return
+	}
+
+	bs.mu.Lock()
+	lastData := bs.LastDataTime
+	if !freqRefNeedsReconnect(now, lastData, bs.LastReconnect) {
+		bs.mu.Unlock()
+		return
+	}
+	bs.LastReconnect = now
+	bs.mu.Unlock()
+
+	log.Printf("WARNING: Frequency reference spectrum stalled (%.0fs since last data), recreating channel with same SSRC 0x%08x",
+		now.Sub(lastData).Seconds(), bs.SSRC)
+
+	if err := frm.radiod.CreateSpectrumChannel(
+		"frequency-reference",
+		bs.Band.CenterFrequency,
+		bs.Band.BinCount,
+		bs.Band.BinBandwidth,
+		bs.SSRC,
+		radiodSpectrumCrossoverHz, // no opinion: radiod's own default
+	); err != nil {
+		log.Printf("ERROR: Failed to recreate frequency reference channel: %v", err)
+		return
+	}
+	log.Printf("Requested recreation of frequency reference channel")
 }
 
 // processSpectrum unwraps FFT data and detects the reference tone

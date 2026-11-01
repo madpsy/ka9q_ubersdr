@@ -52,6 +52,59 @@ type RadiodController struct {
 	// radiod_audio_pacing.go.
 	audioPacerOnce sync.Once
 	audioCmdPacer  *audioCommandPacer
+
+	// FILTER2 blocking factor sent with every CW preset load, from
+	// radiod.cw_filter2. See SetCWFilter2. cwFilter2Set is false on a
+	// zero-value controller, which then uses defaultCWFilter2.
+	cwFilter2    int
+	cwFilter2Set bool
+}
+
+// defaultCWFilter2 is the FILTER2 blocking factor for cwu/cwl when
+// radiod.cw_filter2 is absent or invalid.
+//
+// radiod's main channel filter has an impulse response of blocktime/(overlap-1),
+// 5 ms with the shipped 20 ms / overlap 5, and a 5 ms Kaiser (beta 11) filter has
+// skirts about 1 kHz wide: on a +/-200 Hz CW passband a station 400 Hz off is
+// only ~12 dB down, and AGC brings it straight back up. FILTER2 adds a second,
+// longer filter at the output rate and turns the main one into a roofing filter.
+// At 2 (40 ms blocks, 545 taps at 12 kHz) the response falls from -6 dB at the
+// edge to -110 dB 100 Hz beyond it, for ~63 ms of extra latency; 1 gives -38 dB
+// at 100 Hz beyond for ~31 ms.
+const defaultCWFilter2 = 2
+
+// maxCWFilter2 is the largest radiod.cw_filter2 accepted. radiod itself takes up
+// to 10, but each step adds another blocktime of latency for no audible gain.
+const maxCWFilter2 = 2
+
+// validCWFilter2 reports whether n is an accepted radiod.cw_filter2 value.
+func validCWFilter2(n int) bool { return n >= 0 && n <= maxCWFilter2 }
+
+// SetCWFilter2 sets the FILTER2 blocking factor sent when a channel loads the
+// cwu or cwl preset (0 = off, 1, 2). Anything else selects defaultCWFilter2,
+// matching LoadConfig.
+func (rc *RadiodController) SetCWFilter2(n int) {
+	if !validCWFilter2(n) {
+		n = defaultCWFilter2
+	}
+	rc.cwFilter2 = n
+	rc.cwFilter2Set = true
+}
+
+// filter2ForMode is the FILTER2 value to send alongside PRESET=mode.
+//
+// It has to be sent for every mode, not just CW: radiod's loadpreset() only
+// overwrites the keys a preset names and none of ours name filter2, so a
+// channel switched from cwu to usb would otherwise keep CW's second filter
+// (and its latency). Sending 0 for everything else puts it back.
+func (rc *RadiodController) filter2ForMode(mode string) int {
+	if mode != "cwu" && mode != "cwl" {
+		return 0
+	}
+	if !rc.cwFilter2Set {
+		return defaultCWFilter2
+	}
+	return rc.cwFilter2
 }
 
 // SetSpectrumFFTAverages sets the SPECTRUM_AVG value used for new spectrum
@@ -482,11 +535,26 @@ func (rc *RadiodController) CreateChannelWithBandwidth(name string, frequency ui
 	return rc.CreateChannelWithSquelch(name, frequency, mode, sampleRate, ssrc, bandwidth, nil, nil)
 }
 
-// CreateChannelWithSquelch creates a new radiod channel with optional squelch parameters
-// squelchOpen and squelchClose are pointers to allow nil (disabled) vs 0.0 (valid value)
-// Values are in dB SNR - typical: open=10.0, close=8.0 for hysteresis
-// Special value: squelchOpen=-999 sets "always open" mode (sends -999 for both thresholds)
-func (rc *RadiodController) CreateChannelWithSquelch(name string, frequency uint64, mode string, sampleRate int, ssrc uint32, bandwidth int, squelchOpen, squelchClose *float32) error {
+// createPacket is the create packet CreateChannelWithSquelch sends, with this
+// controller's FILTER2 choice for mode.
+func (rc *RadiodController) createPacket(ssrc uint32, frequency uint64, mode string, squelchOpen, squelchClose *float32) []byte {
+	return buildCreateCommand(ssrc, frequency, mode, squelchOpen, squelchClose, rc.filter2ForMode(mode))
+}
+
+// updatePacket is the update packet UpdateChannelFull sends. FILTER2 goes only
+// with a preset load (mode != ""): without one radiod keeps the channel's
+// current value, which is already right for its mode.
+func (rc *RadiodController) updatePacket(ssrc uint32, frequency uint64, mode string, bandwidthLow, bandwidthHigh int, sendBandwidth bool, squelchOpen, squelchClose *float32, agc *AGCParams) []byte {
+	filter2 := -1
+	if mode != "" {
+		filter2 = rc.filter2ForMode(mode)
+	}
+	return buildUpdateCommand(ssrc, frequency, mode, bandwidthLow, bandwidthHigh, sendBandwidth, squelchOpen, squelchClose, agc, filter2)
+}
+
+// buildCreateCommand builds the audio channel create packet. filter2 is the
+// FILTER2 blocking factor sent after PRESET (see filter2ForMode).
+func buildCreateCommand(ssrc uint32, frequency uint64, mode string, squelchOpen, squelchClose *float32, filter2 int) []byte {
 	// Build control command with SSRC - match ka9q-multidecoder order exactly
 	buf := make([]byte, 0, 1500)
 
@@ -501,6 +569,9 @@ func (rc *RadiodController) CreateChannelWithSquelch(name string, frequency uint
 
 	// Add PRESET (tag 85 = 0x55)
 	buf = encodeString(&buf, 0x55, mode)
+
+	// FILTER2 after PRESET so it wins; see filter2ForMode.
+	buf = encodeInt32(&buf, tagFilter2, uint32(filter2))
 
 	// Add STATUS_INTERVAL (tag 106 = 0x6A) for 100ms status updates
 	// With default blocktime of 20ms, 5 frames = 100ms (10 Hz update rate)
@@ -529,6 +600,16 @@ func (rc *RadiodController) CreateChannelWithSquelch(name string, frequency uint
 
 	// Add EOL marker
 	buf = append(buf, 0)
+
+	return buf
+}
+
+// CreateChannelWithSquelch creates a new radiod channel with optional squelch parameters
+// squelchOpen and squelchClose are pointers to allow nil (disabled) vs 0.0 (valid value)
+// Values are in dB SNR - typical: open=10.0, close=8.0 for hysteresis
+// Special value: squelchOpen=-999 sets "always open" mode (sends -999 for both thresholds)
+func (rc *RadiodController) CreateChannelWithSquelch(name string, frequency uint64, mode string, sampleRate int, ssrc uint32, bandwidth int, squelchOpen, squelchClose *float32) error {
+	buf := rc.createPacket(ssrc, frequency, mode, squelchOpen, squelchClose)
 
 	// A create is the one command that legitimately follows a teardown of the
 	// same SSRC; see clearTerminated.
@@ -908,7 +989,7 @@ func (rc *RadiodController) UpdateChannelWithSquelch(ssrc uint32, frequency uint
 // UpdateChannelFull is the one place a channel update is sent, carrying every
 // parameter that may have to change together.
 func (rc *RadiodController) UpdateChannelFull(ssrc uint32, frequency uint64, mode string, bandwidthLow, bandwidthHigh int, sendBandwidth bool, squelchOpen, squelchClose *float32, agc *AGCParams) error {
-	if err := rc.sendAudioCommand(ssrc, buildUpdateCommand(ssrc, frequency, mode, bandwidthLow, bandwidthHigh, sendBandwidth, squelchOpen, squelchClose, agc)); err != nil {
+	if err := rc.sendAudioCommand(ssrc, rc.updatePacket(ssrc, frequency, mode, bandwidthLow, bandwidthHigh, sendBandwidth, squelchOpen, squelchClose, agc)); err != nil {
 		return fmt.Errorf("failed to send update command: %w", err)
 	}
 	return nil
@@ -940,7 +1021,10 @@ func (rc *RadiodController) UpdateChannelFull(ssrc uint32, frequency uint64, mod
 //
 // Moving PRESET after the edges, or splitting this packet in two, silently
 // restores the old behaviour -- see TestBuildUpdateCommandOrdering.
-func buildUpdateCommand(ssrc uint32, frequency uint64, mode string, bandwidthLow, bandwidthHigh int, sendBandwidth bool, squelchOpen, squelchClose *float32, agc *AGCParams) []byte {
+//
+// filter2 is the FILTER2 blocking factor to send after PRESET, or negative to
+// send none (for an update that loads no preset, and so leaves filter2 alone).
+func buildUpdateCommand(ssrc uint32, frequency uint64, mode string, bandwidthLow, bandwidthHigh int, sendBandwidth bool, squelchOpen, squelchClose *float32, agc *AGCParams, filter2 int) []byte {
 	buf := make([]byte, 0, 1500)
 
 	// Start with CMD packet type
@@ -957,6 +1041,12 @@ func buildUpdateCommand(ssrc uint32, frequency uint64, mode string, bandwidthLow
 	// Add PRESET (tag 85 = 0x55) if provided.  Everything below overrides it.
 	if mode != "" {
 		buf = encodeString(&buf, tagPreset, mode)
+	}
+
+	// FILTER2 (tag 44).  A preset reload keeps whatever the channel had, so the
+	// value for the new mode rides along with it; see filter2ForMode.
+	if filter2 >= 0 {
+		buf = encodeInt32(&buf, tagFilter2, uint32(filter2))
 	}
 
 	// Add bandwidth via LOW_EDGE and HIGH_EDGE if requested

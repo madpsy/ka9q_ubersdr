@@ -754,6 +754,10 @@ func main() {
 	// spectrumAveragesFor is spent against.
 	radiod.SetFrontendSamprate(config.Receiver.Samprate())
 
+	// Second-stage filter for cwu/cwl; see cw_filter2 in config.yaml.example.
+	// Already validated by LoadConfig.
+	radiod.SetCWFilter2(*config.Radiod.CWFilter2)
+
 	// Initialize GeoIP service (internal use only, admin API access)
 	// Must be initialized BEFORE SessionManager so it can be passed to it
 	var geoIPService *GeoIPService

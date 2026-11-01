@@ -576,7 +576,7 @@ func TestBuildUpdateCommandOrdering(t *testing.T) {
 	hang, recov, thresh := float32(1.1), float32(20), float32(-15)
 	agc := &AGCParams{HangTime: &hang, RecoveryRate: &recov, Threshold: &thresh}
 
-	_, tlvs := parseCommandPacket(t, buildUpdateCommand(4242, 14_074_000, "usb", 50, 2700, true, nil, nil, agc))
+	_, tlvs := parseCommandPacket(t, buildUpdateCommand(4242, 14_074_000, "usb", 50, 2700, true, nil, nil, agc, 0))
 
 	indexOf := func(tag byte) int {
 		for i, e := range tlvs {
@@ -626,7 +626,7 @@ func TestBuildUpdateCommandOrdering(t *testing.T) {
 // with stale values would override the preset of whatever mode is being switched
 // to, which is precisely what the AGC override exists to do deliberately.
 func TestBuildUpdateCommandOmitsUnsetParameters(t *testing.T) {
-	_, tlvs := parseCommandPacket(t, buildUpdateCommand(4242, 0, "", 0, 0, false, nil, nil, nil))
+	_, tlvs := parseCommandPacket(t, buildUpdateCommand(4242, 0, "", 0, 0, false, nil, nil, nil, -1))
 
 	for _, c := range []struct {
 		tag  byte
@@ -639,6 +639,7 @@ func TestBuildUpdateCommandOmitsUnsetParameters(t *testing.T) {
 		{tagAgcRecoveryRate, "AGC_RECOVERY_RATE"},
 		{tagAgcThreshold, "AGC_THRESHOLD"},
 		{tagRadioFrequency, "RADIO_FREQUENCY"},
+		{tagFilter2, "FILTER2"},
 	} {
 		if _, ok := findTLV(tlvs, c.tag); ok {
 			t.Errorf("update packet carries %s when nothing asked for it", c.name)

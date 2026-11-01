@@ -178,8 +178,10 @@ func TestReceiverHasNoConfigYAMLInfluence(t *testing.T) {
 		t.Errorf("radiod conf not honoured: source %q span %d", rc.SamprateSource, rc.SpanHz)
 	}
 
-	// RadiodConfig carries only the multicast wiring — no span-related fields.
-	wiring := map[string]bool{"StatusGroup": true, "DataGroup": true, "Interface": true, "UseDNS": true}
+	// RadiodConfig carries only the multicast wiring and per-channel command
+	// options — no span-related fields. CWFilter2 is the FILTER2 value sent with
+	// CW presets; it shapes a channel's filter, not the receiver's span.
+	wiring := map[string]bool{"StatusGroup": true, "DataGroup": true, "Interface": true, "UseDNS": true, "CWFilter2": true}
 	rt := reflect.TypeOf(RadiodConfig{})
 	for i := 0; i < rt.NumField(); i++ {
 		if name := rt.Field(i).Name; !wiring[name] {

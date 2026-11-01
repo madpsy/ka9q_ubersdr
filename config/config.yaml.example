@@ -136,6 +136,18 @@ radiod:
   # always used as given.
   use_dns: false
 
+  # Second-stage filter for CW (cwu/cwl), sent to radiod as FILTER2.
+  # radiod's main channel filter is short (5 ms with the default 20 ms
+  # blocktime / overlap 5), so on a narrow CW passband its skirts are about
+  # 1 kHz wide: a station 400 Hz off frequency is only ~12 dB down and AGC
+  # brings it back up. FILTER2 adds a longer filter behind it.
+  #   0 = off (radiod's main filter only)
+  #   1 = -38 dB 100 Hz beyond the passband edge, ~31 ms extra latency
+  #   2 = -110 dB 100 Hz beyond the passband edge, ~63 ms extra latency
+  # Other modes always run with it off. Any value other than 0, 1 or 2 uses
+  # the default. Default: 2
+  cw_filter2: 2
+
   # ── How much spectrum this receiver covers ──────────────────────────────────
   #
   # Nothing to set here. The frequency range is derived from the front end

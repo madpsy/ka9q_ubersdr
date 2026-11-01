@@ -355,6 +355,11 @@ type RadiodConfig struct {
 	// UseDNS mirrors radiod's own "dns" setting: when false (the default, as
 	// in radiod) group names are hashed to an address and never looked up.
 	UseDNS bool `yaml:"use_dns"`
+	// CWFilter2 is the FILTER2 blocking factor sent to radiod for cwu/cwl:
+	// 0 = off, 1 or 2 = progressively sharper CW passband skirts. Pointer so
+	// that an explicit 0 can be told apart from an absent key; absent or any
+	// other value means defaultCWFilter2.
+	CWFilter2 *int `yaml:"cw_filter2"`
 }
 
 // SSBAgcConfig holds the server-wide default AGC parameters applied to all new USB/LSB sessions.
@@ -1284,6 +1289,18 @@ func LoadConfig(filename string) (*Config, error) {
 	if *config.Server.SSBAgcDefaults.ThresholdDb > 0.0 {
 		v := float32(0.0)
 		config.Server.SSBAgcDefaults.ThresholdDb = &v
+	}
+
+	// CW second-stage filter: 0, 1 or 2. Absent or anything else falls back to
+	// the default rather than failing the load.
+	if config.Radiod.CWFilter2 == nil {
+		v := defaultCWFilter2
+		config.Radiod.CWFilter2 = &v
+	} else if !validCWFilter2(*config.Radiod.CWFilter2) {
+		log.Printf("WARNING: radiod.cw_filter2 = %d is invalid (must be 0, 1 or 2); using %d",
+			*config.Radiod.CWFilter2, defaultCWFilter2)
+		v := defaultCWFilter2
+		config.Radiod.CWFilter2 = &v
 	}
 
 	// Default and validate admin timezone (IANA name). A bad name falls back to

@@ -510,9 +510,14 @@ export default function DisplayPanel() {
                     {d.waterfallTimes !== false && (
                         <Field label="Time stamp zone">
                             <Segmented
-                                value={d.waterfallTimeZone || 'me'}
+                                value={d.waterfallTimeZone || 'ago'}
                                 onChange={(v) => d.set({ waterfallTimeZone: v })}
                                 options={[
+                                    {
+                                        value: 'ago',
+                                        label: 'Ago',
+                                        title: 'How long ago each row was, counted back from the top of the waterfall',
+                                    },
                                     {
                                         value: 'me',
                                         label: 'Mine',

@@ -52,9 +52,10 @@ export const DEFAULTS = {
     // with the rows it labels, so a signal can be put at a rough time without
     // counting rows. See lib/waterfallTimes.js.
     waterfallTimes: true,
-    // Whose clock the stamps read: 'me' (this browser's zone), 'rx' (the
-    // receiver's, from its admin timezone) or 'utc' — the Time panel's three.
-    waterfallTimeZone: 'me',
+    // What the stamps read: 'ago' (how long before the newest row), or whose
+    // clock — 'me' (this browser's zone), 'rx' (the receiver's, from its admin
+    // timezone) or 'utc', the Time panel's three.
+    waterfallTimeZone: 'ago',
     // Keep the waterfall running while the tab is in the background, so coming
     // back to it shows what happened in the meantime (issue #136). Off, because
     // the default is to give the spectrum socket up five seconds after the tab
@@ -571,7 +572,7 @@ export const UI_SCALE_STEP = 0.05;
 // to. Everything in this file is persisted, defaults included — the save effect
 // writes the whole object on mount — so a stored value cannot be assumed to be
 // a choice somebody made, and a new default reaches nobody without this.
-const SETTINGS_VERSION = 10;
+const SETTINGS_VERSION = 11;
 
 
 
@@ -666,6 +667,14 @@ function migrate(saved) {
     // round back to the bars. They get the line and one tap to put it back,
     // which is the same tap they made before and is what the switch costs.
     if (!(saved.v >= 10) && saved.scopeShape === 'bars') delete saved.scopeShape;
+
+    // v11: the waterfall's time stamps read "how long ago" by default.
+    //
+    // A stored 'me' from before this is the old default written out on first
+    // load — settings are persisted whole — and it would hold the new default
+    // off for ever. 'rx' and 'utc' could only have been picked, so they stay.
+    // Somebody who picked 'Mine' on purpose gets one tap to put it back.
+    if (!(saved.v >= 11) && saved.waterfallTimeZone === 'me') delete saved.waterfallTimeZone;
 
     return saved;
 }

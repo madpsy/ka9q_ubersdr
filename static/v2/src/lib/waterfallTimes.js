@@ -113,8 +113,30 @@ export function markY(tm, mark) {
     return tm.rows - mark.row;
 }
 
-/** The zones a stamp can be read in — the Time panel's three clocks. */
-export const TIME_ZONES = ['me', 'rx', 'utc'];
+/**
+ * The zones a stamp can be read in: 'ago' (how long before the newest row), or
+ * one of the Time panel's three clocks.
+ */
+export const TIME_ZONES = ['ago', 'me', 'rx', 'utc'];
+
+/**
+ * How long ago `ms` is, as the stamp shows it: seconds under a minute, then
+ * minutes and seconds, then hours and minutes. Whole units, rounded — the marks
+ * are seconds apart at the very least, so a tenth would only flicker.
+ */
+export function agoLabel(ms) {
+    const s = Math.max(0, Math.round(ms / 1000));
+    const p = (v) => String(v).padStart(2, '0');
+    if (s < 60) return `${s}s ago`;
+    if (s < 3600) {
+        const m = Math.floor(s / 60);
+        const r = s % 60;
+        return r ? `${m}m${p(r)}s ago` : `${m}m ago`;
+    }
+    const h = Math.floor(s / 3600);
+    const m = Math.floor((s % 3600) / 60);
+    return m ? `${h}h${p(m)}m ago` : `${h}h ago`;
+}
 
 /**
  * Minutes east of UTC that `zone` reads at instant `at`, and the suffix that says
@@ -136,8 +158,14 @@ export function zoneReading(zone, rx, at) {
 /**
  * A mark's label in `zone`: HH:MM, with seconds when the interval needs them.
  * Read from the UTC fields of a shifted epoch, as the Time panel does.
+ *
+ * 'ago' instead counts back from `now`, which the waterfall passes as the wall
+ * time of its newest row — so the top of the picture is "0s ago" even while a
+ * replay is playing history back, and a paused waterfall does not age a picture
+ * that is not moving.
  */
-export function timeMarkLabel(mark, zone = 'utc', rx = null) {
+export function timeMarkLabel(mark, zone = 'utc', rx = null, now = Date.now()) {
+    if (zone === 'ago') return agoLabel(now - mark.t);
     const { offsetMin, suffix } = zoneReading(zone, rx, mark.t);
     const d = new Date(mark.t + offsetMin * 60000);
     const p = (v) => String(v).padStart(2, '0');
@@ -150,7 +178,7 @@ export function timeMarkLabel(mark, zone = 'utc', rx = null) {
  * have scrolled past the bottom of `limit` device px (the ring's height, or the
  * canvas's) — they can never be seen again.
  */
-export function drawTimeMarks(c, tm, H, dpr, { zone = 'utc', rx = null, limit = H } = {}) {
+export function drawTimeMarks(c, tm, H, dpr, { zone = 'ago', rx = null, limit = H } = {}) {
     if (!tm || !tm.marks.length) return;
     while (tm.marks.length && markY(tm, tm.marks[0]) > limit) tm.marks.shift();
     if (!tm.marks.length) return;
@@ -169,10 +197,13 @@ export function drawTimeMarks(c, tm, H, dpr, { zone = 'utc', rx = null, limit = 
         if (y > H) continue;
         const yy = Math.round(y) + 0.5;
         // Cached on the mark, because this runs on every paint and the zone
-        // lookup is the expensive part. The key is what the label depends on.
-        const key = `${zone}|${rx ? `${rx.timezone}|${rx.timezone_offset}` : ''}`;
+        // lookup is the expensive part. The key is what the label depends on —
+        // for 'ago', the age as shown, which changes about once a second.
+        const key = zone === 'ago'
+            ? `ago|${agoLabel(tm.lastT - mk.t)}`
+            : `${zone}|${rx ? `${rx.timezone}|${rx.timezone_offset}` : ''}`;
         if (mk.labelKey !== key) {
-            mk.label = timeMarkLabel(mk, zone, rx);
+            mk.label = timeMarkLabel(mk, zone, rx, tm.lastT);
             mk.labelKey = key;
         }
         const text = mk.label;

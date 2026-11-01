@@ -5,7 +5,7 @@
 
 const assert = require('assert');
 const {
-    MIN_GAP_CSS, STEPS_S, createTimeMarks, clearTimeMarks, timeMarkLabel, markY, noteRows, stepFor,
+    MIN_GAP_CSS, STEPS_S, agoLabel, createTimeMarks, clearTimeMarks, timeMarkLabel, markY, noteRows, stepFor,
 } = require('./.build/waterfalltimes.cjs');
 
 let pass = 0;
@@ -75,6 +75,29 @@ t('"me" follows this machine\'s zone, with no suffix', () => {
     const d = new Date(t0);
     const want = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
     assert.strictEqual(timeMarkLabel({ t: t0, step: 60000 }, 'me'), want);
+});
+
+t('"ago" counts back from the newest row, in whole units', () => {
+    const t0 = Date.UTC(2026, 0, 1, 12, 0, 0);
+    assert.strictEqual(timeMarkLabel({ t: t0, step: 5000 }, 'ago', null, t0 + 37400), '37s ago');
+    assert.strictEqual(timeMarkLabel({ t: t0, step: 60000 }, 'ago', null, t0 + 125000), '2m05s ago');
+    assert.strictEqual(agoLabel(120000), '2m ago');
+    assert.strictEqual(agoLabel(3600000 + 7 * 60000), '1h07m ago');
+    assert.strictEqual(agoLabel(7200000), '2h ago');
+    assert.strictEqual(agoLabel(-500), '0s ago');
+});
+
+t('"ago" is the age against the waterfall, not the clock', () => {
+    // A replay's rows carry history's wall time; the label must not include the
+    // delay, or the top of a replayed waterfall would read minutes old.
+    const tm = feed(createTimeMarks(), { rate: 20, secs: 30, t0: Date.UTC(2026, 0, 1, 11, 0, 3) });
+    const last = tm.marks[tm.marks.length - 1];
+    const c = { save() {}, restore() {}, fillRect() {}, beginPath() {}, moveTo() {}, lineTo() {},
+        stroke() {}, fillText() {}, measureText: (s) => ({ width: s.length * 6 }) };
+    const { drawTimeMarks } = require('./.build/waterfalltimes.cjs');
+    drawTimeMarks(c, tm, 10000, 1, { zone: 'ago' });
+    assert.strictEqual(last.label, agoLabel(tm.lastT - last.t));
+    assert.ok(/^\d+s ago$/.test(last.label), last.label);
 });
 
 t('a clock that goes backwards (replay) makes no mark', () => {

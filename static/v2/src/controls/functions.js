@@ -432,6 +432,18 @@ const SPECTRUM = group('Spectrum', [
         },
     },
     {
+        // A tap on a surface's own picture of the spectrum: `delta` is where,
+        // -127 (left edge) .. +127 (right edge) of the view. Tunes there,
+        // snapped to the Receiver panel's step.
+        id: 'spectrum_tune_at',
+        label: 'Tune to tapped point',
+        accepts: [REL],
+        run: (ev, ctx) => {
+            if (!ctx.actions.tuneInView) return;
+            ctx.actions.tuneInView(detents(ev) / 256, ctx.state().tuneStep || 500);
+        },
+    },
+    {
         id: 'spectrum_reset',
         label: 'Reset zoom',
         accepts: PRESS,

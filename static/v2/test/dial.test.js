@@ -67,6 +67,12 @@ t('a drag is one relative event in pixels, mapped to the pan', () => {
     assert.strictEqual(d.DEFAULT_STATE.dial.mappings.pan_drag.function, 'spectrum_pan');
 });
 
+t('a tap is its position across the view, mapped to tune-at', () => {
+    const evs = d.parseInput(new Uint8Array([98, 64, 98, 0]));  // a quarter right of centre, then dead centre
+    assert.deepStrictEqual(evs.map((e) => [e.key, e.event.delta]), [['tap_tune', 64], ['tap_tune', 0]]);
+    assert.strictEqual(d.DEFAULT_STATE.dial.mappings.tap_tune.function, 'spectrum_tune_at');
+});
+
 t('every key has a label and every default maps to a real function', () => {
     for (const k of d.DIAL_KEYS) assert.notStrictEqual(d.dialKeyLabel(k.key), k.key);
     for (const [key, m] of Object.entries(d.DIAL_DEFAULT_MAPPINGS)) {

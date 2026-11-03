@@ -1887,6 +1887,19 @@ export function RadioProvider({ children }) {
             // Moves the view by a fraction of what's visible (+ = higher
             // frequencies), leaving the tuning alone — a drag from a control
             // surface (the Dial's drag strip). setView keeps it in range.
+            // Tunes to the point `fraction` of the way across the view
+            // (-0.5 left edge .. +0.5 right edge), snapped to `step` — a tap on
+            // a control surface's own picture of the spectrum (the Dial).
+            // Goes through setFrequency, so the tuning lock still applies.
+            tuneInView(fraction, step) {
+                const c = spectrumConn;
+                const span = c.binCount * c.binBandwidth;
+                if (!span || !c.centerFreq || !Number.isFinite(fraction)) return;
+                const s = step > 0 ? step : 1;
+                const hz = Math.round((c.centerFreq + fraction * span) / s) * s;
+                applyTuning({ frequency: hz });
+            },
+
             panSpectrum(fraction) {
                 const c = spectrumConn;
                 const span = c.binCount * c.binBandwidth;

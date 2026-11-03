@@ -20,6 +20,8 @@
 //                      zoom out, zoom reset            (its quick sheets)
 //          code 97     drag across the dial's waterfall: value = pixels moved
 //                      out of 360 (+ = right), one event, not per detent
+//          code 98     tap on the dial's waterfall: value = where, -127..127
+//                      across the view (left..right edge); tune there
 //          code 96     waterfall lines per second the dial wants (value 1..20;
 //                      its battery/smooth setting) — handled here, not mapped
 //   state  89540003-…  write   page -> dial, 20 bytes:
@@ -115,6 +117,7 @@ export const DIAL_KEYS = [
     { key: 'mute_hold', label: 'Mute — hold' },
     { key: 'center_tap', label: 'Centre — tap' },
     { key: 'pan_drag', label: 'Drag — pan the waterfall' },
+    { key: 'tap_tune', label: 'Tap — tune to that point' },
 ];
 
 // Bands in the order the dial's picker numbers them (v2's band functions).
@@ -175,6 +178,7 @@ export const DIAL_DEFAULT_MAPPINGS = {
     // The dial's own centre button: the waterfall toolbar's "centre on tuned".
     center_tap: m('spectrum_center'),
     pan_drag: m('spectrum_pan'),
+    tap_tune: m('spectrum_tune_at'),
 };
 for (const [key, , fn] of Object.values(DIRECT)) DIAL_DEFAULT_MAPPINGS[key] = m(fn);
 
@@ -213,6 +217,9 @@ export function parseInput(bytes) {
         if (code === 97 && value) {
             // A drag is one movement, not a run of detents.
             out.push({ key: 'pan_drag', event: { kind: 'relative', delta: value } });
+        } else if (code === 98) {
+            // A tap's position; 0 (dead centre) is a real position here.
+            out.push({ key: 'tap_tune', event: { kind: 'relative', delta: value } });
         } else if (PAGES[code] && value) {
             // One event per detent: the catalogue's press-type functions
             // (step, volume, bandwidth) act once per event, whatever its size.

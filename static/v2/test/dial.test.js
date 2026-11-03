@@ -99,6 +99,24 @@ t('missing readings use the sentinels, and LSB edges stay negative', () => {
     assert.strictEqual(new DataView(d.encodeState({ mode: 'nonsense' }).buffer).getUint8(5), 255);
 });
 
+t('a spectrum line keeps narrow peaks, carries centre and span, and splits on request', () => {
+    const bins = new Float32Array(2048).fill(-130);
+    bins[1000] = -60;  // one bin wide: must survive the 2048 -> 160 resample
+    const [whole] = d.encodeSpectrum(bins, 14074000, 200000, 7);
+    assert.strictEqual(whole.length, 12 + d.SPEC_POINTS);
+    const v = new DataView(whole.buffer);
+    assert.deepStrictEqual([v.getUint8(0), v.getUint8(1), v.getUint8(2), v.getUint8(3)], [1, 7, 0, d.SPEC_POINTS]);
+    assert.strictEqual(v.getUint32(4, true), 14074000);
+    assert.strictEqual(v.getUint32(8, true), 200000);
+    const pts = whole.subarray(12);
+    assert.strictEqual(Math.max(...pts), (-60 + 160) * 2, 'the peak, at 0.5 dB');
+    assert.strictEqual(pts[0], (-130 + 160) * 2);
+    const pieces = d.encodeSpectrum(bins, 14074000, 200000, 8, 8);
+    assert.strictEqual(pieces.length, d.SPEC_POINTS / 8);
+    assert.ok(pieces.every((p) => p.length === 20), 'fits the smallest MTU');
+    assert.strictEqual(new DataView(pieces[3].buffer).getUint8(2), 24, 'offset of the 4th piece');
+});
+
 // --- the device, faked --------------------------------------------------------
 
 function fakeBluetooth() {

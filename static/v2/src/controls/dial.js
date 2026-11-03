@@ -28,6 +28,11 @@
 //          [10..11] passband low Hz i16   [12..13] passband high Hz i16
 //          [14..17] tuning step Hz u32    [18..19] reserved
 //   name   89540004-…  write   page -> dial: receiver name, UTF-8, <= 32 bytes
+//   spec   89540005-…  write   page -> dial: a spectrum line for its waterfall,
+//          [0] version = 1  [1] line seq u8  [2] first point  [3] point count
+//          [4..7] centre Hz u32  [8..11] span Hz u32  [12..] one byte per point,
+//          dB = byte / 2 - 160. SPEC_POINTS points per line, sent whole, or in
+//          8-point pieces where the link won't carry a long write.
 //
 // The same table lives in the dial's firmware (docs/BLE_PROTOCOL.md there);
 // change both together.
@@ -39,6 +44,40 @@ export const DIAL_SERVICE = '89540001-8c77-4d5f-9411-e7534b50c873';
 export const DIAL_INPUT = '89540002-8c77-4d5f-9411-e7534b50c873';
 export const DIAL_STATE = '89540003-8c77-4d5f-9411-e7534b50c873';
 export const DIAL_NAME = '89540004-8c77-4d5f-9411-e7534b50c873';
+export const DIAL_SPEC = '89540005-8c77-4d5f-9411-e7534b50c873';
+export const SPEC_POINTS = 160;
+
+/**
+ * A spectrum frame as the dial's waterfall line(s): resampled to SPEC_POINTS
+ * by the peak in each slot (a signal narrower than a slot must not vanish),
+ * quantised to 0.5 dB. Returns an array of packets, `chunk` points each.
+ */
+export function encodeSpectrum(bins, centerHz, spanHz, seq, chunk = SPEC_POINTS) {
+    const n = bins.length;
+    const pts = new Uint8Array(SPEC_POINTS);
+    for (let p = 0; p < SPEC_POINTS; p += 1) {
+        const a = Math.floor((p * n) / SPEC_POINTS);
+        const b = Math.max(a + 1, Math.floor(((p + 1) * n) / SPEC_POINTS));
+        let peak = -Infinity;
+        for (let i = a; i < b && i < n; i += 1) if (bins[i] > peak) peak = bins[i];
+        pts[p] = Number.isFinite(peak) ? Math.max(0, Math.min(255, Math.round((peak + 160) * 2))) : 0;
+    }
+    const out = [];
+    for (let off = 0; off < SPEC_POINTS; off += chunk) {
+        const count = Math.min(chunk, SPEC_POINTS - off);
+        const buf = new Uint8Array(12 + count);
+        const v = new DataView(buf.buffer);
+        v.setUint8(0, 1);
+        v.setUint8(1, seq & 0xff);
+        v.setUint8(2, off);
+        v.setUint8(3, count);
+        v.setUint32(4, Math.max(0, Math.min(0xffffffff, Math.round(centerHz || 0))), true);
+        v.setUint32(8, Math.max(0, Math.min(0xffffffff, Math.round(spanHz || 0))), true);
+        buf.set(pts.subarray(off, off + count), 12);
+        out.push(buf);
+    }
+    return out;
+}
 export const STATE_BYTES = 20;
 
 // Mode index sent in the state. The v2 mode table's order, IQ included, so the
@@ -211,6 +250,10 @@ export class DialControl extends Emitter {
         this.device = null;
         this.stateChar = null;
         this.nameChar = null;
+        this.specChar = null;
+        this._specSeq = 0;
+        this._specBusy = false;
+        this._specChunk = SPEC_POINTS;
         this.connected = false;
         this.deviceName = '';
         this._lastState = '';
@@ -260,6 +303,8 @@ export class DialControl extends Emitter {
             const input = await service.getCharacteristic(DIAL_INPUT);
             this.stateChar = await service.getCharacteristic(DIAL_STATE);
             this.nameChar = await service.getCharacteristic(DIAL_NAME).catch(() => null);
+            // Older dial firmware has no waterfall: then there's simply nothing to send.
+            this.specChar = await service.getCharacteristic(DIAL_SPEC).catch(() => null);
             input.addEventListener('characteristicvaluechanged', (e) => {
                 const bytes = new Uint8Array(e.target.value.buffer);
                 for (const ev of parseInput(bytes)) this.emit('input', ev);
@@ -288,6 +333,7 @@ export class DialControl extends Emitter {
         this.device = null;
         this.stateChar = null;
         this.nameChar = null;
+        this.specChar = null;
         if (this.connected) {
             this.connected = false;
             this.emit('state', { connected: false });
@@ -299,6 +345,7 @@ export class DialControl extends Emitter {
         this.device = null;
         this.stateChar = null;
         this.nameChar = null;
+        this.specChar = null;
         if (!this.connected) return;
         this.connected = false;
         this.emit('state', { connected: false });
@@ -318,6 +365,25 @@ export class DialControl extends Emitter {
         this._lastState = sig;
         this._pending = bytes;
         this._flush();
+    }
+
+    /**
+     * One spectrum line for the dial's waterfall background. Dropped rather
+     * than queued while the last one is still going out: the next frame is
+     * newer anyway, and the state record must never wait behind a backlog.
+     */
+    setSpectrum(bins, centerHz, spanHz) {
+        if (!this.connected || !this.specChar || this._specBusy || !bins || !bins.length) return;
+        this._specBusy = true;
+        const packets = encodeSpectrum(bins, centerHz, spanHz, this._specSeq++, this._specChunk);
+        const sendAll = async () => {
+            for (const p of packets) await this.specChar.writeValueWithoutResponse(p);
+        };
+        sendAll().catch(() => {
+            // A link that won't take a 172-byte write: fall back to pieces that
+            // fit the smallest one, from the next line on.
+            if (this._specChunk !== 8) this._specChunk = 8;
+        }).finally(() => { this._specBusy = false; });
     }
 
     /** The receiver's name, shown on the dial. */

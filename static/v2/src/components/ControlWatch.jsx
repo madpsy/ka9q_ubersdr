@@ -44,6 +44,10 @@ const LED_POLL_MS = 250;
 // and only one GATT write at a time, so a quiet receiver costs nothing.
 const DIAL_POLL_MS = 100;
 
+// The Dial's waterfall background: a steady, modest rate. Each line is ~170
+// bytes, so five a second is under 1 KB/s next to the state record.
+const DIAL_SPECTRUM_MS = 200;
+
 // How long after a control on the pad the receiver's own state is read back
 // for a toggle's rumble. Long enough for the render the action caused.
 const LIT_READ_MS = 80;
@@ -249,6 +253,24 @@ export default function ControlWatch() {
         const off = dial.on('state', () => { sentName = null; update(); });
         return () => { clearInterval(t); off(); };
     }, [surface]);
+
+    // The Dial's waterfall background: the latest spectrum frame, sent at a
+    // fixed rate rather than per frame, and only while a dial is connected.
+    const spectrumConn = radio.spectrumConn;
+    useEffect(() => {
+        if (surface !== 'dial' || !spectrumConn) return undefined;
+        const dial = getDial();
+        let latest = null;
+        const off = spectrumConn.on('frame', (f) => { latest = f; });
+        const t = setInterval(() => {
+            if (!latest || !dial.connected) return;
+            const f = latest;
+            latest = null;
+            const span = (spectrumConn.binBandwidth || 0) * f.bins.length;
+            dial.setSpectrum(f.bins, Number(f.frequency), span);
+        }, DIAL_SPECTRUM_MS);
+        return () => { off(); clearInterval(t); };
+    }, [surface, spectrumConn]);
 
     // A game controller's rumble: what a press did, felt rather than seen.
     // Every part of it is the operator's to turn off, and none of it runs for

@@ -53,6 +53,13 @@ const WORDS = {
         // udev rule, and nothing else on screen would say so.
         plugIn: 'Plug the RC-28 in — this list updates on its own. On Linux it also needs the udev rule from the README.',
     },
+    bluetooth: {
+        heading: 'Select a Bluetooth device',
+        title: 'Select Bluetooth device',
+        none: 'Looking for the UberSDR Dial…',
+        noMatch: 'No matching devices',
+        plugIn: 'Start the dial in Controller mode — it appears here once it is advertising.',
+    },
 };
 let words = WORDS.serial;
 

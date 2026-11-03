@@ -24,12 +24,12 @@ import { isCCKey } from '../controls/webmidi.js';
 import { flexAvailable } from '../controls/flexcontrol.js';
 import { rc28Available } from '../controls/rc28.js';
 import { indicatorLeds, ledSettings } from '../controls/rc28leds.js';
-import { squelchEnabled } from '../radio/constants.js';
+import { squelchEnabled, squelchThreshold } from '../radio/constants.js';
 import { getRecorder } from '../lib/recorder.js';
 import { pushNotification } from '../lib/notifications.js';
 import { serialAvailable } from '../controls/radiosync.js';
 import {
-    getGamepad, getRc28, getSurface, getSync, releaseSurfaceExcept, surfaceKeyLabel,
+    getDial, getGamepad, getRc28, getSurface, getSync, releaseSurfaceExcept, surfaceKeyLabel,
 } from '../controls/sources.js';
 
 // How often the RC-28's lamps are brought up to date. Polled rather than
@@ -38,6 +38,11 @@ import {
 // recorder — and a quarter-second late is not late for a lamp. The driver only
 // writes when the byte changes, so a poll that finds nothing new costs nothing.
 const LED_POLL_MS = 250;
+
+// How often the Dial's screen is brought up to date. Its SNR meter wants to
+// move, so faster than the RC-28's lamps; the driver sends only what changed,
+// and only one GATT write at a time, so a quiet receiver costs nothing.
+const DIAL_POLL_MS = 100;
 
 // How long after a control on the pad the receiver's own state is read back
 // for a toggle's rumble. Long enough for the render the action caused.
@@ -145,6 +150,10 @@ export default function ControlWatch() {
             s.open().then((granted) => { if (granted) attempt(); }).catch(() => {});
             return s.on('devices', attempt);
         }
+        // Web Bluetooth has no hotplug event for a device this page has not
+        // connected to; the one attempt above (where the browser can remember
+        // devices at all) is all there is.
+        if (surface === 'dial') return undefined;
         // WebHID's own hotplug event, for the same reason as Web Serial's below.
         if (surface === 'rc28') {
             if (!rc28Available()) return undefined;
@@ -191,6 +200,54 @@ export default function ControlWatch() {
         const t = setInterval(update, LED_POLL_MS);
         return () => clearInterval(t);
     }, [surface, ctx]);
+
+    // The Dial is the one two-way surface: its screen shows this receiver.
+    // Polled for the same reason as the RC-28's lamps — the SNR and the squelch
+    // gate live in a mutable meter nothing re-renders for.
+    const dialRef = useRef(null);
+    dialRef.current = {
+        tuning: radio.tuning,
+        audio: radio.audio,
+        squelch: radio.squelch,
+        meters: radio.meters,
+        audioUp: radio.audioState === 'open',
+        locked: radio.locked,
+        stepHz: cfg.stepHz,
+        name: (radio.serverInfo && radio.serverInfo.receiver
+            && (radio.serverInfo.receiver.callsign || radio.serverInfo.receiver.name)) || '',
+    };
+    useEffect(() => {
+        if (surface !== 'dial') return undefined;
+        const dial = getDial();
+        let sentName = null;
+        const update = () => {
+            if (!dial.connected) { sentName = null; return; }
+            const d = dialRef.current;
+            const m = d.meters.current || {};
+            const sqOn = squelchEnabled(d.squelch.value);
+            dial.setState({
+                frequency: d.tuning.frequency,
+                mode: d.tuning.mode,
+                snr: m.snr,
+                audioUp: d.audioUp,
+                squelchOn: sqOn,
+                // Open with no threshold means nothing is gating, not a signal.
+                squelchOpen: sqOn && !!m.squelchOpen,
+                muted: !!d.audio.muted,
+                locked: !!d.locked,
+                volume: d.audio.volume,
+                squelchDb: sqOn ? squelchThreshold(d.squelch.value) : null,
+                bwLow: d.tuning.bandwidthLow,
+                bwHigh: d.tuning.bandwidthHigh,
+                stepHz: d.stepHz,
+            });
+            if (d.name !== sentName) { sentName = d.name; dial.setName(d.name); }
+        };
+        update();
+        const t = setInterval(update, DIAL_POLL_MS);
+        const off = dial.on('state', () => { sentName = null; update(); });
+        return () => { clearInterval(t); off(); };
+    }, [surface]);
 
     // A game controller's rumble: what a press did, felt rather than seen.
     // Every part of it is the operator's to turn off, and none of it runs for

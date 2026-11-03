@@ -16,6 +16,7 @@ import { isEncoderFunction, runFunction } from './functions.js';
 import { isCCKey } from './webmidi.js';
 import { RC28_DEFAULT_MAPPINGS, RC28_DIAL_MAPPING, RC28_OLD_DIAL_MAPPING } from './rc28.js';
 import { DEFAULT_LEDS, ledSettings } from './rc28leds.js';
+import { DIAL_DEFAULT_MAPPINGS } from './dial.js';
 import { GAMEPAD_DEFAULT_MAPPINGS, rumbleSettings } from './gamepad.js';
 import { saveFile } from '../lib/saveFile.js';
 
@@ -34,7 +35,7 @@ const V1_KEYS = {
 // Not the whole list any more. A surface may also be registered from outside
 // (controls/surfaces.js), and its id goes in the same setting, so anything
 // validating this must ask the registry rather than only this array.
-export const SURFACES = ['off', 'flexcontrol', 'rc28', 'midi', 'gamepad'];
+export const SURFACES = ['off', 'flexcontrol', 'rc28', 'midi', 'gamepad', 'dial'];
 
 /**
  * Whether a chosen surface is one this page opens itself, and so has mappings,
@@ -48,7 +49,7 @@ export const SURFACES = ['off', 'flexcontrol', 'rc28', 'midi', 'gamepad'];
  * should ask this first.
  */
 export function isMappedSurface(id) {
-    return id === 'flexcontrol' || id === 'rc28' || id === 'midi' || id === 'gamepad';
+    return id === 'flexcontrol' || id === 'rc28' || id === 'midi' || id === 'gamepad' || id === 'dial';
 }
 
 export const DEFAULT_STATE = {
@@ -66,6 +67,9 @@ export const DEFAULT_STATE = {
     // `leds` is what its four lamps show — see controls/rc28leds.js.
     rc28: { mappings: RC28_DEFAULT_MAPPINGS, autoConnect: false, leds: DEFAULT_LEDS },
     midi: { mappings: {}, device: '', autoConnect: false },
+    // The UberSDR Dial (Bluetooth). Arrives mapped: each knob page does what
+    // the dial's chip says it does. See controls/dial.js.
+    dial: { mappings: DIAL_DEFAULT_MAPPINGS, autoConnect: false },
     // Arrives mapped, like the RC-28: a pad's layout is known in advance.
     // `device` is the pad's id string, remembered the way MIDI remembers a
     // name. `rumble` is the feedback — see controls/gamepad.js.
@@ -171,6 +175,7 @@ export function loadState() {
         rc28: { ...DEFAULT_STATE.rc28, ...((saved && saved.rc28) || {}) },
         midi: { ...DEFAULT_STATE.midi, ...((saved && saved.midi) || {}) },
         gamepad: { ...DEFAULT_STATE.gamepad, ...((saved && saved.gamepad) || {}) },
+        dial: { ...DEFAULT_STATE.dial, ...((saved && saved.dial) || {}) },
         radiosync: { ...DEFAULT_STATE.radiosync, ...((saved && saved.radiosync) || {}) },
         surfaces: { ...((saved && saved.surfaces) || {}) },
     };

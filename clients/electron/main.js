@@ -28,6 +28,7 @@ const deeplink = require('./deeplink');
 const updates = require('./updates');
 const { browserUserAgent } = require('./useragent');
 const { installHidHandlers, patchRows, pickerTitle } = require('./hid');
+const { installBluetoothHandlers } = require('./bluetooth');
 const { SttService, registerSttIpc, sttPaths, readJson } = require('./stt');
 const { ModelManager } = require('./sttmodels');
 
@@ -605,6 +606,15 @@ function setupSession() {
         choose: chooseDevice,
         changed: pickerDevicesChanged,
         fromFrame: (frame) => webContents.fromFrame(frame) || null,
+        windowOf: (wc) => BrowserWindow.fromWebContents(wc),
+        originOf: serialRequestOrigin,
+    });
+
+    // Web Bluetooth (the UberSDR Dial): no chooser either, and the event is per
+    // webContents rather than per session — see bluetooth.js.
+    installBluetoothHandlers(app, {
+        choose: chooseDevice,
+        changed: pickerDevicesChanged,
         windowOf: (wc) => BrowserWindow.fromWebContents(wc),
         originOf: serialRequestOrigin,
     });

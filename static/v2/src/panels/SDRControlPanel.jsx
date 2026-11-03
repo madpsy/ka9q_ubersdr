@@ -41,6 +41,7 @@ import {
 } from '../controls/mappings.js';
 import { flexAvailable } from '../controls/flexcontrol.js';
 import { rc28Available } from '../controls/rc28.js';
+import { dialAvailable } from '../controls/dial.js';
 import { TX_LED_SOURCES, ledSettings } from '../controls/rc28leds.js';
 import { isCCKey, midiAvailable } from '../controls/webmidi.js';
 import {
@@ -60,6 +61,7 @@ const SURFACE_OPTIONS = [
     { value: 'rc28', label: 'RC-28' },
     { value: 'midi', label: 'MIDI' },
     { value: 'gamepad', label: 'Gamepad', title: 'A game controller — Xbox, PlayStation, Switch Pro, 8BitDo — over USB or Bluetooth' },
+    { value: 'dial', label: 'Dial', title: 'The UberSDR Dial, over Bluetooth — shows this receiver’s frequency, mode, SNR and squelch on its own screen' },
 ];
 
 // A pad's id string carries its vendor and product in brackets — "Xbox
@@ -305,6 +307,7 @@ function SurfaceControl({ id, cfg, update, dspSchemas, hw, onMessage, minimal })
     const isMidi = id === 'midi';
     const isRc28 = id === 'rc28';
     const isPad = id === 'gamepad';
+    const isDial = id === 'dial';
     // The two that list their devices and remember one by name.
     const listed = isMidi || isPad;
     // The two whose buttons send a release as well as a press.
@@ -528,14 +531,14 @@ function SurfaceControl({ id, cfg, update, dspSchemas, hw, onMessage, minimal })
     }, [isPad, connected, devices, deviceId, conf.device]);
 
     const available = isMidi ? midiAvailable()
-        : (isRc28 ? rc28Available() : (isPad ? gamepadAvailable() : flexAvailable()));
+        : (isRc28 ? rc28Available() : (isPad ? gamepadAvailable() : (isDial ? dialAvailable() : flexAvailable())));
     if (!available) {
         // Chrome hides WebHID, Web Serial and Web MIDI from plain-http pages,
         // so there the browser is right and the address is what is wrong.
         if (typeof window !== 'undefined' && window.isSecureContext === false) {
             return (
                 <div className="note note--warn">
-                    {isMidi ? 'MIDI devices' : (isRc28 ? 'The RC-28' : (isPad ? 'Game controllers' : 'Serial ports'))} need this receiver to be opened over https — browsers only offer them to secure pages.
+                    {isMidi ? 'MIDI devices' : (isRc28 ? 'The RC-28' : (isPad ? 'Game controllers' : (isDial ? 'Bluetooth devices' : 'Serial ports')))} need this receiver to be opened over https — browsers only offer them to secure pages.
                 </div>
             );
         }
@@ -544,7 +547,8 @@ function SurfaceControl({ id, cfg, update, dspSchemas, hw, onMessage, minimal })
                 {isMidi && 'This browser has no Web MIDI API. Chrome or Edge is needed — Firefox has never shipped it.'}
                 {isRc28 && 'This browser has no WebHID API. Chrome or Edge is needed — Firefox and Safari have not shipped it.'}
                 {isPad && 'This browser has no Gamepad API.'}
-                {!isMidi && !isRc28 && !isPad && 'This browser has no Web Serial API. Chrome or Edge is needed.'}
+                {isDial && 'This browser has no Web Bluetooth. Chrome or Edge on Windows, macOS, ChromeOS, Linux or Android is needed — not Firefox, Safari or any iOS browser.'}
+                {!isMidi && !isRc28 && !isPad && !isDial && 'This browser has no Web Serial API. Chrome or Edge is needed.'}
             </div>
         );
     }
@@ -555,7 +559,8 @@ function SurfaceControl({ id, cfg, update, dspSchemas, hw, onMessage, minimal })
             <span className="rc-conn__state">
                 {connected
                     ? (isMidi ? surface.deviceName
-                        : (isPad ? padName(surface.deviceName) : `${isRc28 ? 'RC-28' : 'FlexControl'} connected`))
+                        : (isPad ? padName(surface.deviceName)
+                            : (isDial ? `${surface.deviceName} connected` : `${isRc28 ? 'RC-28' : 'FlexControl'} connected`)))
                     : 'Not connected'}
             </span>
         </div>
@@ -597,7 +602,9 @@ function SurfaceControl({ id, cfg, update, dspSchemas, hw, onMessage, minimal })
         ? (conf.device ? `Reconnects to ${isPad ? padName(conf.device) : conf.device}` : 'Connect once first, so there is a device to remember')
         : (isRc28
             ? 'Reopens the dial once you have picked it here'
-            : 'Reopens the dial once you have picked its port here');
+            : (isDial
+                ? 'Reopens the dial once you have picked it here, where the browser supports remembering Bluetooth devices'
+                : 'Reopens the dial once you have picked its port here'));
 
     const auto = (
         <Switch

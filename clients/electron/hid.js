@@ -39,6 +39,11 @@ function devicePermission(details) {
     if (!details) return false;
     if (details.deviceType === 'serial') return true;
     if (details.deviceType === 'hid') return isAllowedHidDevice(details.device);
+    // Web Bluetooth (the UberSDR Dial): only ever a device the operator picked
+    // in the chooser for a requestDevice() filtered to the Dial's own service,
+    // so remembering it is what lets getDevices() reconnect it — see
+    // bluetooth.js. Web Bluetooth reaches nothing but that device's GATT.
+    if (details.deviceType === 'bluetooth') return true;
     return false;
 }
 
@@ -82,6 +87,7 @@ function patchRows(rows, change, row) {
 
 /** The picker window's title, by what it is picking. */
 function pickerTitle(kind) {
+    if (kind === 'bluetooth') return 'Select Bluetooth device';
     return kind === 'hid' ? 'Select USB device' : 'Select serial port';
 }
 

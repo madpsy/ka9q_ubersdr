@@ -20,12 +20,14 @@ import { FlexControl, flexKeyLabel } from './flexcontrol.js';
 import { MIDIControl, midiKeyLabel } from './webmidi.js';
 import { GamepadControl, gamepadKeyLabel } from './gamepad.js';
 import { RC28Control, rc28KeyLabel } from './rc28.js';
+import { DialControl, dialKeyLabel } from './dial.js';
 import { RadioSync } from './radiosync.js';
 
 let flex = null;
 let midi = null;
 let rc28 = null;
 let gamepad = null;
+let dial = null;
 let sync = null;
 
 export function getFlex() {
@@ -41,6 +43,12 @@ export function getRc28() {
 export function getGamepad() {
     if (!gamepad) gamepad = new GamepadControl();
     return gamepad;
+}
+
+// The UberSDR Dial over Web Bluetooth — see controls/dial.js.
+export function getDial() {
+    if (!dial) dial = new DialControl();
+    return dial;
 }
 
 export function getMidi() {
@@ -59,6 +67,7 @@ export function getSurface(id) {
     if (id === 'midi') return getMidi();
     if (id === 'rc28') return getRc28();
     if (id === 'gamepad') return getGamepad();
+    if (id === 'dial') return getDial();
     return getFlex();
 }
 
@@ -67,6 +76,7 @@ export function surfaceKeyLabel(id) {
     if (id === 'midi') return midiKeyLabel;
     if (id === 'rc28') return rc28KeyLabel;
     if (id === 'gamepad') return gamepadKeyLabel;
+    if (id === 'dial') return dialKeyLabel;
     return flexKeyLabel;
 }
 
@@ -79,4 +89,5 @@ export function releaseSurfaceExcept(keep) {
     if (keep !== 'midi' && midi) midi.close();
     if (keep !== 'rc28' && rc28) rc28.disconnect();
     if (keep !== 'gamepad' && gamepad) gamepad.close();
+    if (keep !== 'dial' && dial) dial.disconnect();
 }

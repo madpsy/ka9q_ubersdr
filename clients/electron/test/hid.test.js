@@ -72,7 +72,9 @@ t('HID is allowed for the RC-28 and refused for anything else', () => {
 
 t('device types nobody asked for are refused', () => {
     assert.strictEqual(devicePermission({ deviceType: 'usb', device: RC28 }), false);
-    assert.strictEqual(devicePermission({ deviceType: 'bluetooth' }), false);
+    // Allowed: only a device picked for the Dial's service ever gets this far.
+    assert.strictEqual(devicePermission({ deviceType: 'bluetooth' }), true);
+    assert.strictEqual(devicePermission({ deviceType: 'usb' }), false);
     assert.strictEqual(devicePermission(null), false);
 });
 

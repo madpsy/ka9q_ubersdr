@@ -222,11 +222,18 @@ export default function ControlWatch() {
         name: (radio.serverInfo && radio.serverInfo.receiver
             && (radio.serverInfo.receiver.callsign || radio.serverInfo.receiver.name)) || '',
     };
+    // The state send, shared with the spectrum handler below: Chrome slows
+    // timers in a tab that isn't in front to about once a second, which put the
+    // dial a second or two behind. Spectrum frames arrive over the socket and
+    // aren't throttled, so they drive the sends too; the timer is the fallback.
+    const dialUpdateRef = useRef(null);
     useEffect(() => {
         if (surface !== 'dial') return undefined;
         const dial = getDial();
         let sentName = null;
+        let lastSent = 0;
         const update = () => {
+            lastSent = performance.now();
             if (!dial.connected) { sentName = null; return; }
             const d = dialRef.current;
             const m = d.meters.current || {};
@@ -250,9 +257,10 @@ export default function ControlWatch() {
             if (d.name !== sentName) { sentName = d.name; dial.setName(d.name); }
         };
         update();
+        dialUpdateRef.current = () => { if (performance.now() - lastSent >= DIAL_POLL_MS) update(); };
         const t = setInterval(update, DIAL_POLL_MS);
         const off = dial.on('state', () => { sentName = null; update(); });
-        return () => { clearInterval(t); off(); };
+        return () => { clearInterval(t); off(); dialUpdateRef.current = null; };
     }, [surface]);
 
     // The Dial's waterfall background: the latest spectrum frame, sent at a
@@ -261,22 +269,20 @@ export default function ControlWatch() {
     useEffect(() => {
         if (surface !== 'dial' || !spectrumConn) return undefined;
         const dial = getDial();
-        let latest = null;
-        const off = spectrumConn.on('frame', (f) => { latest = f; });
-        // Paced by the dial's own setting (battery 5/s or smooth 10/s), read
-        // each time so a change on the dial takes effect at once.
-        let t = null;
-        const tick = () => {
-            if (latest && dial.connected) {
-                const f = latest;
-                latest = null;
-                const span = (spectrumConn.binBandwidth || 0) * f.bins.length;
-                dial.setSpectrum(f.bins, Number(f.frequency), span);
-            }
-            t = setTimeout(tick, dial.spectrumIntervalMs || DIAL_SPECTRUM_MS);
-        };
-        tick();
-        return () => { off(); clearTimeout(t); };
+        // Paced by the dial's own setting (battery 5/s or smooth 10/s), and
+        // driven by the frames themselves rather than a timer, so a tab in the
+        // background doesn't starve the dial (see dialUpdateRef above).
+        let lastLine = 0;
+        const off = spectrumConn.on('frame', (f) => {
+            if (!dial.connected) return;
+            const now = performance.now();
+            if (dialUpdateRef.current) dialUpdateRef.current();
+            if (now - lastLine < (dial.spectrumIntervalMs || DIAL_SPECTRUM_MS) - 5) return;
+            lastLine = now;
+            const span = (spectrumConn.binBandwidth || 0) * f.bins.length;
+            dial.setSpectrum(f.bins, Number(f.frequency), span);
+        });
+        return off;
     }, [surface, spectrumConn]);
 
     // A game controller's rumble: what a press did, felt rather than seen.

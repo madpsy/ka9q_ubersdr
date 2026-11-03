@@ -340,8 +340,14 @@ type FrontendStatusTracker struct {
 	// the demod restarted, the rate changed, the channel went idle) -- and it
 	// sends status promptly on each of those -- so a packet without one clears
 	// it: packets then get no timestamp rather than a wrong one.
-	captureRefs    map[uint32]captureRef
-	captureRefAt   map[uint32]time.Time // when each reference arrived
+	captureRefs  map[uint32]captureRef
+	captureRefAt map[uint32]time.Time // when each reference arrived
+	// payloadRates maps, per SSRC, each RTP payload type the channel has
+	// reported (RTP_PT) to the PCM rate it was reported with. radiod gives each
+	// rate/channels/encoding combination its own PT, so a data packet's PT says
+	// which rate its samples are at -- even a packet sent before a mode change
+	// and read after it. See PayloadRate.
+	payloadRates   map[uint32]map[uint8]int
 	statusListener *net.UDPConn
 	stopListener   chan struct{}
 	debugLogged    map[uint32]bool // Track which SSRCs we've logged debug info for
@@ -358,6 +364,7 @@ func NewFrontendStatusTracker() *FrontendStatusTracker {
 		channelStatus:  make(map[uint32]*ChannelStatus),
 		captureRefs:    make(map[uint32]captureRef),
 		captureRefAt:   make(map[uint32]time.Time),
+		payloadRates:   make(map[uint32]map[uint8]int),
 		stopListener:   make(chan struct{}),
 		debugLogged:    make(map[uint32]bool),
 	}
@@ -397,6 +404,7 @@ func (fst *FrontendStatusTracker) cleanupStaleEntries() {
 					delete(fst.channelStatus, ssrc)
 					delete(fst.captureRefs, ssrc)
 					delete(fst.captureRefAt, ssrc)
+					delete(fst.payloadRates, ssrc)
 				}
 			}
 
@@ -768,6 +776,19 @@ func (fst *FrontendStatusTracker) parseStatusPacket(data []byte) {
 		fst.mu.Lock()
 		fst.frontendStatus[frontendStatus.SSRC] = frontendStatus
 		fst.channelStatus[channelStatus.SSRC] = channelStatus
+		// PCM only: an Opus stream's PT says nothing about its decoded rate.
+		if pt := channelStatus.RtpPt; pt > 0 && pt < 128 &&
+			channelStatus.OutputSamprate > 0 && rate == channelStatus.OutputSamprate {
+			if fst.payloadRates == nil {
+				fst.payloadRates = make(map[uint32]map[uint8]int)
+			}
+			rates := fst.payloadRates[channelStatus.SSRC]
+			if rates == nil {
+				rates = make(map[uint8]int, 2)
+				fst.payloadRates[channelStatus.SSRC] = rates
+			}
+			rates[uint8(pt)] = channelStatus.OutputSamprate
+		}
 		if channelStatus.HasCapture && rate > 0 {
 			fst.captureRefs[channelStatus.SSRC] = captureRef{
 				TsRef:      channelStatus.CaptureTsRef,
@@ -801,6 +822,19 @@ func (fst *FrontendStatusTracker) CaptureRef(ssrc uint32) (captureRef, bool) {
 		return captureRef{}, false
 	}
 	return ref, true
+}
+
+// PayloadRate returns the PCM rate radiod has reported for ssrc's stream
+// while it carried RTP payload type pt, and false if it has reported none.
+//
+// A PT never changes meaning within one radiod process, so an entry stays true
+// after the channel moves to another rate: that is what lets a packet left over
+// from the old mode be recognised as such.
+func (fst *FrontendStatusTracker) PayloadRate(ssrc uint32, pt uint8) (int, bool) {
+	fst.mu.RLock()
+	defer fst.mu.RUnlock()
+	rate, ok := fst.payloadRates[ssrc][pt]
+	return rate, ok
 }
 
 // CaptureRefInfo is the latest capture reference for an SSRC as stored, with

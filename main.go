@@ -885,6 +885,7 @@ func main() {
 		log.Fatalf("Failed to initialize audio receiver: %v", err)
 	}
 	audioReceiver.SetCaptureSource(radiod)
+	audioReceiver.SetPayloadRateSource(radiod)
 	audioReceiver.Start()
 	defer audioReceiver.Stop()
 

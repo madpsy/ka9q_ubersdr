@@ -40,6 +40,55 @@ type AudioReceiver struct {
 	// RTP timestamp into the time its samples were captured.  Nil means packets
 	// carry their arrival time.  Set before Start.
 	capture captureSource
+
+	// rates says which PCM rate an RTP payload type stands for on a channel,
+	// from radiod's status. Nil means packets are never split; see
+	// blocksInPacket.  Set before Start.
+	rates payloadRateSource
+}
+
+// payloadRateSource maps a channel's RTP payload type to the PCM rate radiod
+// reported it with. *RadiodController satisfies it.
+type payloadRateSource interface {
+	PayloadRate(ssrc uint32, pt uint8) (int, bool)
+}
+
+// SetPayloadRateSource gives the receiver radiod's payload type rates.  Call
+// before Start.
+func (ar *AudioReceiver) SetPayloadRateSource(src payloadRateSource) {
+	ar.rates = src
+}
+
+// audioBlocksPerSecond is the packet rate every consumer of AudioPacket
+// assumes: one 20 ms block per packet.  The native Opus path drops anything
+// else, and clients size their buffers to it -- the iOS background player
+// takes exactly 960 frames.
+const audioBlocksPerSecond = 50
+
+// blocksInPacket returns how many 20 ms blocks a packet of samples int16
+// samples holds, so routeAudio can hand it on as that many packets; 1 means
+// pass it on whole.
+//
+// radiod sends one packet per output block, and a channel running FILTER2
+// (CW, see filter2ForMode) has blocks FILTER2 times as long: 40 ms at the
+// default of 2.  Splitting restores 20 ms for everything downstream.
+//
+// The packet is only split when its RTP payload type confirms it is at
+// stampedRate.  By length alone, 20 ms at 24 kHz is indistinguishable from
+// 40 ms at 12 kHz, and that is exactly the stray packet a switch from AM to CW
+// leaves queued under the new rate: split, it would play at half speed.  Left
+// whole, the Opus path's length check drops it as it always has.  So does an
+// unknown payload type (no status for the channel yet), which costs a packet or
+// two at channel creation at most.
+func blocksInPacket(samples, channels, stampedRate, payloadRate int, havePayloadRate bool) int {
+	if channels != 1 || !havePayloadRate || payloadRate != stampedRate {
+		return 1
+	}
+	block := stampedRate / audioBlocksPerSecond
+	if block <= 0 || samples <= block || samples%block != 0 {
+		return 1
+	}
+	return samples / block
 }
 
 // SetCaptureSource gives the receiver radiod's capture references.  Call before Start.
@@ -305,7 +354,7 @@ func (ar *AudioReceiver) receiveLoop() {
 
 		// Route to appropriate session using SSRC from RTP header
 		// Pass payload, RTP timestamp, and GPS timestamp
-		ar.routeAudio(packet.SSRC, packet.Payload, packet.Timestamp, rxTimeNs)
+		ar.routeAudio(packet.SSRC, packet.PayloadType, packet.Payload, packet.Timestamp, rxTimeNs)
 	}
 
 	if DebugMode {
@@ -315,7 +364,8 @@ func (ar *AudioReceiver) receiveLoop() {
 
 // routeAudio routes audio data to the appropriate session based on RTP SSRC.
 // rxTimeNs is when the kernel received the packet (system clock).
-func (ar *AudioReceiver) routeAudio(ssrc uint32, pcmData []byte, rtpTimestamp uint32, rxTimeNs int64) {
+// payloadType is its RTP payload type; see blocksInPacket.
+func (ar *AudioReceiver) routeAudio(ssrc uint32, payloadType uint8, pcmData []byte, rtpTimestamp uint32, rxTimeNs int64) {
 	// Look up session by SSRC
 	session, ok := ar.sessions.GetSessionBySSRC(ssrc)
 	if !ok {
@@ -340,7 +390,6 @@ func (ar *AudioReceiver) routeAudio(ssrc uint32, pcmData []byte, rtpTimestamp ui
 	if ar.capture != nil {
 		ref, haveRef = ar.capture.CaptureRef(ssrc)
 	}
-	gpsTimeNs := session.captureStamp.stamp(ref, haveRef, rtpTimestamp, rxTimeNs)
 
 	// Blocked ranges: an ordinary listener tuned inside one hears an
 	// announcement instead of the band.  Done here rather than in each
@@ -351,6 +400,24 @@ func (ar *AudioReceiver) routeAudio(ssrc uint32, pcmData []byte, rtpTimestamp ui
 	// exactly those of the real audio it replaces.  See audio_blocked.go.
 	session.applyBlockedAudio(dataCopy, sampleRate, channels)
 
+	blocks := 1
+	if ar.rates != nil {
+		payloadRate, ok := ar.rates.PayloadRate(ssrc, payloadType)
+		blocks = blocksInPacket(len(dataCopy)/2, channels, sampleRate, payloadRate, ok)
+	}
+	blockBytes := len(dataCopy) / blocks
+	blockFrames := uint32(blockBytes / 2) // mono whenever blocks > 1
+
+	for i := 0; i < blocks; i++ {
+		ts := rtpTimestamp + uint32(i)*blockFrames
+		ar.deliverAudio(session, dataCopy[i*blockBytes:(i+1)*blockBytes:(i+1)*blockBytes], ts,
+			session.captureStamp.stamp(ref, haveRef, ts, rxTimeNs), rxTimeNs, sampleRate, channels)
+	}
+}
+
+// deliverAudio hands one packet's worth of PCM to the session and to its audio
+// extension, if any.
+func (ar *AudioReceiver) deliverAudio(session *Session, dataCopy []byte, rtpTimestamp uint32, gpsTimeNs, rxTimeNs int64, sampleRate, channels int) {
 	// Create audio packet with PCM data and timestamps.
 	// Stamp SampleRate and Channels NOW from the session — by the time the
 	// websocket loop dequeues this packet, both may already reflect a new mode,

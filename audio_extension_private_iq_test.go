@@ -139,7 +139,7 @@ func (s *privateIQManagerSetup) privateSessions() []*Session {
 
 func routePacket(sm *SessionManager, ssrc uint32) {
 	ar := &AudioReceiver{sessions: sm}
-	ar.routeAudio(ssrc, make([]byte, 16), 1, time.Now().UnixNano())
+	ar.routeAudio(ssrc, 0, make([]byte, 16), 1, time.Now().UnixNano())
 }
 
 // ── The lifecycle ────────────────────────────────────────────────────────────

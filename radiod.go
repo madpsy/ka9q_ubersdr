@@ -1322,6 +1322,7 @@ func (rc *RadiodController) markTerminated(ssrc uint32) {
 		delete(rc.frontendTracker.frontendStatus, ssrc)
 		delete(rc.frontendTracker.captureRefs, ssrc)
 		delete(rc.frontendTracker.captureRefAt, ssrc)
+		delete(rc.frontendTracker.payloadRates, ssrc)
 		rc.frontendTracker.mu.Unlock()
 	}
 }
@@ -1633,6 +1634,15 @@ func (rc *RadiodController) CaptureRef(ssrc uint32) (captureRef, bool) {
 		return captureRef{}, false
 	}
 	return rc.frontendTracker.CaptureRef(ssrc)
+}
+
+// PayloadRate returns the PCM rate radiod reported for ssrc's stream under RTP
+// payload type pt; see FrontendStatusTracker.PayloadRate.
+func (rc *RadiodController) PayloadRate(ssrc uint32, pt uint8) (int, bool) {
+	if rc.frontendTracker == nil {
+		return 0, false
+	}
+	return rc.frontendTracker.PayloadRate(ssrc, pt)
 }
 
 // CaptureRefInfo returns the stored capture reference for an SSRC with its

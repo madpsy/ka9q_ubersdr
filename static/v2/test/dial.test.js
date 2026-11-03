@@ -170,18 +170,24 @@ at('writes go one at a time and only the newest waiting state is sent', async ()
     const bt = fakeBluetooth();
     const dial = new d.DialControl();
     assert.strictEqual(await dial.connect(), true);
+    const tick = async (n = 10) => { for (let i = 0; i < n; i++) await Promise.resolve(); };
     dial.setState({ frequency: 1 });
+    await tick();
+    assert.strictEqual(bt.writes.length, 1, 'first write in flight');
     dial.setState({ frequency: 2 });
     dial.setState({ frequency: 3 });
     dial.setState({ frequency: 3 });  // unchanged: nothing new
-    assert.strictEqual(bt.writes.length, 1, 'first write in flight');
+    dial.setName('M9PSY');            // queued behind, never alongside
+    await tick();
+    assert.strictEqual(bt.writes.length, 1, 'one GATT operation at a time');
+    assert.deepStrictEqual(bt.names, []);
     bt.releaseWrite();
-    for (let i = 0; i < 5; i++) await Promise.resolve();
-    assert.strictEqual(bt.writes.length, 2, 'then only the latest');
+    await tick();
+    assert.strictEqual(bt.writes.length, 2, 'then only the latest state');
     assert.strictEqual(new DataView(bt.writes[1].buffer).getUint32(1, true), 3);
-    dial.setName('M9PSY');
-    await Promise.resolve();
-    assert.deepStrictEqual(bt.names, ['M9PSY']);
+    bt.releaseWrite();
+    await tick();
+    assert.deepStrictEqual(bt.names, ['M9PSY'], 'then the name');
 });
 
 at('the knob tunes by the Receiver panel step, and the STEP page changes it', async () => {

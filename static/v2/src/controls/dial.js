@@ -257,7 +257,11 @@ export class DialControl extends Emitter {
         this.connected = false;
         this.deviceName = '';
         this._lastState = '';
-        this._writing = false;
+        // GATT allows one operation at a time; a second write while one is in
+        // flight is rejected ("operation already in progress"). Every write goes
+        // through this chain so state, name and spectrum never collide.
+        this._chain = Promise.resolve();
+        this._stateQueued = false;
         this._pending = null;
         this._onDisconnect = () => this._lost();
     }
@@ -320,6 +324,8 @@ export class DialControl extends Emitter {
         device.addEventListener('gattserverdisconnected', this._onDisconnect);
         this.connected = true;
         this._lastState = '';
+        this._chain = Promise.resolve();
+        this._stateQueued = false;
         this.emit('state', { connected: true });
         this.emit('message', { text: `${this.deviceName} connected`, tone: 'good' });
         return true;
@@ -364,7 +370,22 @@ export class DialControl extends Emitter {
         if (sig === this._lastState) return;
         this._lastState = sig;
         this._pending = bytes;
-        this._flush();
+        if (this._stateQueued) return;  // the queued write will take the newest
+        this._stateQueued = true;
+        this._enqueue(async () => {
+            this._stateQueued = false;
+            const b = this._pending;
+            this._pending = null;
+            if (b && this.stateChar) await this.stateChar.writeValueWithoutResponse(b);
+        });
+    }
+
+    _enqueue(op) {
+        const run = this._chain.then(op);
+        // A failed write is replaced by the next one a moment later; it must
+        // not wedge the chain.
+        this._chain = run.catch(() => {});
+        return run;
     }
 
     /**
@@ -376,10 +397,9 @@ export class DialControl extends Emitter {
         if (!this.connected || !this.specChar || this._specBusy || !bins || !bins.length) return;
         this._specBusy = true;
         const packets = encodeSpectrum(bins, centerHz, spanHz, this._specSeq++, this._specChunk);
-        const sendAll = async () => {
-            for (const p of packets) await this.specChar.writeValueWithoutResponse(p);
-        };
-        sendAll().catch(() => {
+        this._enqueue(async () => {
+            for (const p of packets) if (this.specChar) await this.specChar.writeValueWithoutResponse(p);
+        }).catch(() => {
             // A link that won't take a 172-byte write: fall back to pieces that
             // fit the smallest one, from the next line on.
             if (this._specChunk !== 8) this._specChunk = 8;
@@ -390,21 +410,8 @@ export class DialControl extends Emitter {
     setName(name) {
         if (!this.connected || !this.nameChar) return;
         const bytes = new TextEncoder().encode(String(name || '')).slice(0, 32);
-        this.nameChar.writeValueWithoutResponse(bytes).catch(() => {});
+        this._enqueue(async () => { if (this.nameChar) await this.nameChar.writeValueWithoutResponse(bytes); })
+            .catch(() => {});
     }
 
-    async _flush() {
-        if (this._writing || !this._pending || !this.stateChar) return;
-        this._writing = true;
-        const bytes = this._pending;
-        this._pending = null;
-        try {
-            await this.stateChar.writeValueWithoutResponse(bytes);
-        } catch (err) {
-            // A dropped write is replaced by the next state a moment later.
-        } finally {
-            this._writing = false;
-            if (this._pending) this._flush();
-        }
-    }
 }

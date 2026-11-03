@@ -44,10 +44,10 @@ const LED_POLL_MS = 250;
 // and only one GATT write at a time, so a quiet receiver costs nothing.
 const DIAL_POLL_MS = 100;
 
-// The Dial's waterfall background: a steady, modest rate. Each line is ~170
-// bytes, so ten a second is ~1.7 KB/s next to the state record; ten fine
-// steps scroll the dial’s waterfall far more smoothly than five coarse ones.
-const DIAL_SPECTRUM_MS = 100;
+// The Dial's waterfall background: a steady, modest rate — the dial runs on a
+// battery, and every line is a full-screen redraw there. Each is ~170 bytes,
+// so five a second is under 1 KB/s next to the state record.
+const DIAL_SPECTRUM_MS = 200;
 
 // How long after a control on the pad the receiver's own state is read back
 // for a toggle's rumble. Long enough for the render the action caused.

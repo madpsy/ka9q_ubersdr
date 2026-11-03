@@ -10,9 +10,14 @@
 //
 //   input  89540002-…  notify  dial -> page. 2-byte records [code u8][value i8],
 //                               several may share one notification.
-//          code 1..5   knob turned on page tune/volume/zoom/squelch/bandwidth,
+//          code 1..6   knob turned on page tune/volume/zoom/squelch/bandwidth/step,
 //                      value = signed detents (+ clockwise)
-//          code 16..21 mode tap/hold, freq tap/hold, mute tap/hold (value 1)
+//          code 16..22 mode tap/hold, freq tap/hold, mute tap/hold, centre tap
+//          code 32+i   set mode DIAL_MODES[i]          (the dial's mode picker)
+//          code 48+i   go to band DIAL_BANDS[i]        (its band picker)
+//          code 64+i   set step TUNING_STEPS[i]        (its step picker)
+//          code 80..85 lock toggle, squelch on/off, auto squelch, zoom in,
+//                      zoom out, zoom reset            (its quick sheets)
 //   state  89540003-…  write   page -> dial, 20 bytes:
 //          [0] version = 1
 //          [1..4]  frequency Hz u32       [5] mode index (DIAL_MODES), 255 = ?
@@ -28,7 +33,7 @@
 // change both together.
 
 import { Emitter } from '../radio/emitter.js';
-import { MODES } from '../radio/constants.js';
+import { MODES, TUNING_STEPS } from '../radio/constants.js';
 
 export const DIAL_SERVICE = '89540001-8c77-4d5f-9411-e7534b50c873';
 export const DIAL_INPUT = '89540002-8c77-4d5f-9411-e7534b50c873';
@@ -40,9 +45,10 @@ export const STATE_BYTES = 20;
 // dial can name whatever mode the receiver is in.
 export const DIAL_MODES = MODES.map((m) => m.id);
 
-const PAGES = { 1: 'tune', 2: 'vol', 3: 'zoom', 4: 'sql', 5: 'bw' };
+const PAGES = { 1: 'tune', 2: 'vol', 3: 'zoom', 4: 'sql', 5: 'bw', 6: 'step' };
 const BUTTONS = {
     16: 'mode_tap', 17: 'mode_hold', 18: 'freq_tap', 19: 'freq_hold', 20: 'mute_tap', 21: 'mute_hold',
+    22: 'center_tap',
 };
 
 export const DIAL_KEYS = [
@@ -56,13 +62,42 @@ export const DIAL_KEYS = [
     { key: 'sql_down', label: 'Knob (SQL) — anticlockwise' },
     { key: 'bw_up', label: 'Knob (BW) — clockwise' },
     { key: 'bw_down', label: 'Knob (BW) — anticlockwise' },
+    { key: 'step_up', label: 'Knob (STEP) — clockwise' },
+    { key: 'step_down', label: 'Knob (STEP) — anticlockwise' },
     { key: 'mode_tap', label: 'Mode — tap' },
     { key: 'mode_hold', label: 'Mode — hold' },
     { key: 'freq_tap', label: 'Frequency — tap' },
     { key: 'freq_hold', label: 'Frequency — hold' },
     { key: 'mute_tap', label: 'Mute — tap' },
     { key: 'mute_hold', label: 'Mute — hold' },
+    { key: 'center_tap', label: 'Centre — tap' },
 ];
+
+// Bands in the order the dial's picker numbers them (v2's band functions).
+export const DIAL_BANDS = ['160m', '80m', '60m', '40m', '30m', '20m', '17m', '15m', '12m', '10m', '6m'];
+
+const ACTIONS = {
+    80: ['lock_toggle', 'Tuning lock — toggle', 'tune_lock_toggle'],
+    81: ['sql_toggle', 'Squelch on/off', 'squelch_toggle'],
+    82: ['sql_auto', 'Squelch — auto', 'squelch_auto'],
+    83: ['zoom_in', 'Zoom in', 'zoom_in'],
+    84: ['zoom_out', 'Zoom out', 'zoom_out'],
+    85: ['zoom_reset', 'Zoom — reset', 'spectrum_reset'],
+};
+
+// The "set exactly this" commands the dial's pickers send. Each maps to the
+// catalogue function of the same meaning, so the panel's labels are v2's own.
+const DIRECT = {};
+DIAL_MODES.forEach((id, i) => {
+    const mode = MODES[i];
+    DIRECT[32 + i] = [`mode_${id}`, `Mode picker — ${mode.label}`, `mode_${id}`];
+});
+DIAL_BANDS.forEach((b, i) => { DIRECT[48 + i] = [`band_${b}`, `Band picker — ${b}`, `band_${b}`]; });
+TUNING_STEPS.forEach((hz, i) => {
+    DIRECT[64 + i] = [`step_${hz}`, `Step picker — ${hz >= 1000 ? `${hz / 1000} kHz` : `${hz} Hz`}`, `rx_step_${hz}`];
+});
+Object.assign(DIRECT, ACTIONS);
+for (const [key, label] of Object.values(DIRECT)) DIAL_KEYS.push({ key, label });
 
 const KEY_LABEL = Object.fromEntries(DIAL_KEYS.map((k) => [k.key, k.label]));
 
@@ -75,8 +110,10 @@ const m = (fn) => ({ function: fn, throttleMs: 0, mode: 'none' });
 // Arrives mapped, like the RC-28: every page of the knob does what its label on
 // the dial says. A saved table wins, as for every surface.
 export const DIAL_DEFAULT_MAPPINGS = {
-    tune_up: m('freq_step_up'),
-    tune_down: m('freq_step_down'),
+    // The Receiver panel's step, which the dial also shows — not the SDR
+    // Control panel's own step, which the Dial's section doesn't offer.
+    tune_up: m('freq_rx_step'),
+    tune_down: m('freq_rx_step'),
     vol_up: m('volume_up'),
     vol_down: m('volume_down'),
     zoom_up: m('zoom_dial'),
@@ -85,11 +122,38 @@ export const DIAL_DEFAULT_MAPPINGS = {
     sql_down: m('squelch_set'),
     bw_up: m('bw_widen'),
     bw_down: m('bw_narrow'),
+    step_up: m('rx_step_dial'),
+    step_down: m('rx_step_dial'),
     mode_tap: m('mode_next'),
     mode_hold: m('mode_prev'),
     freq_tap: m('spectrum_center'),
     mute_tap: m('mute_toggle'),
+    // The dial's own centre button: the waterfall toolbar's "centre on tuned".
+    center_tap: m('spectrum_center'),
 };
+for (const [key, , fn] of Object.values(DIRECT)) DIAL_DEFAULT_MAPPINGS[key] = m(fn);
+
+/**
+ * A saved table from before freq_rx_step: the first defaults tuned by the SDR
+ * Control panel's step, which the Dial section no longer shows. Moved over only
+ * when both directions are still exactly those defaults.
+ */
+export function upgradeDialTune(mappings) {
+    if (!mappings) return mappings;
+    let out = mappings;
+    const up = out.tune_up;
+    const down = out.tune_down;
+    if (up && down && up.function === 'freq_step_up' && down.function === 'freq_step_down') {
+        out = { ...out, tune_up: DIAL_DEFAULT_MAPPINGS.tune_up, tune_down: DIAL_DEFAULT_MAPPINGS.tune_down };
+    }
+    // Controls added after a table was saved arrive mapped rather than dead.
+    // (The Dial's section has no mapping editor, so nothing here was removed
+    // on purpose.)
+    for (const [key, mapping] of Object.entries(DIAL_DEFAULT_MAPPINGS)) {
+        if (!out[key]) out = { ...out, [key]: mapping };
+    }
+    return out;
+}
 
 export function dialAvailable() {
     return typeof navigator !== 'undefined' && !!navigator.bluetooth;
@@ -109,6 +173,8 @@ export function parseInput(bytes) {
             for (let n = 0; n < Math.abs(value); n += 1) out.push({ key, event: { kind: 'relative', delta: one } });
         } else if (BUTTONS[code]) {
             out.push({ key: BUTTONS[code], event: { kind: 'trigger' } });
+        } else if (DIRECT[code]) {
+            out.push({ key: DIRECT[code][0], event: { kind: 'trigger' } });
         }
     }
     return out;

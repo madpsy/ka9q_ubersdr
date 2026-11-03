@@ -31,15 +31,34 @@ t('a knob record becomes one relative event per detent, signed', () => {
 });
 
 t('every knob page and button has a key, and they share one notification', () => {
-    const evs = d.parseInput(new Uint8Array([3, 1, 4, 0xff, 5, 1, 16, 1, 17, 1, 18, 1, 19, 1, 20, 1, 21, 1]));
+    const evs = d.parseInput(new Uint8Array([3, 1, 4, 0xff, 5, 1, 6, 0xff, 16, 1, 17, 1, 18, 1, 19, 1, 20, 1, 21, 1, 22, 1]));
     assert.deepStrictEqual(evs.map((e) => e.key), [
-        'zoom_up', 'sql_down', 'bw_up', 'mode_tap', 'mode_hold', 'freq_tap', 'freq_hold', 'mute_tap', 'mute_hold',
+        'zoom_up', 'sql_down', 'bw_up', 'step_down', 'mode_tap', 'mode_hold', 'freq_tap', 'freq_hold', 'mute_tap', 'mute_hold', 'center_tap',
     ]);
-    assert.strictEqual(evs[3].event.kind, 'trigger');
+    assert.strictEqual(evs[4].event.kind, 'trigger');
 });
 
 t('unknown codes, zero turns and a stray odd byte are ignored', () => {
     assert.deepStrictEqual(d.parseInput(new Uint8Array([99, 1, 1, 0, 2])), []);
+});
+
+t('an old saved table moves to the Receiver step and gains the STEP page', () => {
+    const old = { tune_up: { function: 'freq_step_up' }, tune_down: { function: 'freq_step_down' }, mute_tap: { function: 'mute_toggle' } };
+    const up = d.upgradeDialTune(old);
+    assert.strictEqual(up.tune_up.function, 'freq_rx_step');
+    assert.strictEqual(up.step_up.function, 'rx_step_dial');
+    assert.strictEqual(up.mute_tap.function, 'mute_toggle', 'anything else is left alone');
+    assert.strictEqual(up.center_tap.function, 'spectrum_center');
+    const custom = { tune_up: { function: 'freq_enc_10' }, tune_down: { function: 'freq_enc_10' }, step_up: null };
+    assert.strictEqual(d.upgradeDialTune({ ...custom, step_up: { function: 'x' } }).tune_up.function, 'freq_enc_10');
+});
+
+t('picker and quick-sheet codes become their direct functions', () => {
+    const evs = d.parseInput(new Uint8Array([32 + d.DIAL_MODES.indexOf('am'), 1, 48 + 3, 1, 64 + 3, 1, 82, 1, 85, 1]));
+    assert.deepStrictEqual(evs.map((e) => e.key), ['mode_am', 'band_40m', 'step_500', 'sql_auto', 'zoom_reset']);
+    const map = d.DEFAULT_STATE.dial.mappings;
+    assert.deepStrictEqual(evs.map((e) => map[e.key].function),
+        ['mode_am', 'band_40m', 'rx_step_500', 'squelch_auto', 'spectrum_reset']);
 });
 
 t('every key has a label and every default maps to a real function', () => {
@@ -147,21 +166,25 @@ at('writes go one at a time and only the newest waiting state is sent', async ()
     assert.deepStrictEqual(bt.names, ['M9PSY']);
 });
 
-at('a turn of the knob tunes the receiver through the dispatcher, by the panel step', async () => {
+at('the knob tunes by the Receiver panel step, and the STEP page changes it', async () => {
     const bt = fakeBluetooth();
     const dial = d.getDial();
     await dial.connect();
-    const nudges = [];
+    const steps = [];
+    const stepSet = [];
     d.setControlContext({
-        stepHz: 500,
-        state: () => ({ tuning: { frequency: 14074000, mode: 'usb' }, dsp: { schemas: [] } }),
-        actions: { nudge: (hz) => nudges.push(hz) },
+        stepHz: 1000,  // the SDR Control panel's step: not what the dial uses
+        state: () => ({ tuning: { frequency: 14074000, mode: 'usb' }, tuneStep: 500, dsp: { schemas: [] } }),
+        actions: { stepBy: (step, dir, times) => steps.push([step, dir, times]) },
+        setTuneStep: (hz, mode) => stepSet.push([hz, mode]),
     });
     d.setSurfaceMappings('dial', d.DEFAULT_STATE.dial.mappings);
     const off = d.watchSurface('dial');
     try {
         bt.press([1, 0xfe]);  // tune, two detents anticlockwise
-        assert.deepStrictEqual(nudges, [-500, -500]);
+        assert.deepStrictEqual(steps, [[500, -1, 1], [500, -1, 1]], 'the Receiver panel step, via stepBy');
+        bt.press([6, 1]);     // step page, one click clockwise: 500 -> next in the list
+        assert.deepStrictEqual(stepSet, [[1000, 'usb']]);
     } finally {
         off();
         d._resetDispatch();

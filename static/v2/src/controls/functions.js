@@ -27,7 +27,7 @@
 import {
     MODES, MODE_BY_ID, bandwidthLimits, isIQ, maxFilterWidth,
     SQUELCH_MIN, SQUELCH_MAX, SQUELCH_STEP, SQUELCH_DEFAULT_ON, squelchEnabled,
-    MIN_FREQ, MAX_FREQ,
+    MIN_FREQ, MAX_FREQ, TUNING_STEPS,
 } from '../radio/constants.js';
 import { bandsInRange } from '../lib/bands.js';
 import {
@@ -109,6 +109,49 @@ const FREQUENCY = group('Frequency', [
         repeat: true,
         run: (ev, ctx) => ctx.actions.nudge(hz * detents(ev)),
     })),
+    {
+        // The Receiver panel's ± as an encoder: its step (per mode), snapped to
+        // its grid by the same stepBy the buttons use, so a knob and the
+        // buttons can never disagree about how far one click goes.
+        id: 'freq_rx_step',
+        label: 'Encoder (Receiver panel step)',
+        hint: 'the step chosen in the Receiver panel',
+        accepts: [REL, TRIG],
+        encoder: true,
+        repeat: true,
+        run: (ev, ctx) => {
+            const n = detents(ev);
+            if (!n) return;
+            ctx.actions.stepBy(ctx.state().tuneStep || 500, n > 0 ? 1 : -1, Math.abs(n));
+        },
+    },
+    // The Receiver panel's steps by value — what a step picker sends.
+    ...TUNING_STEPS.map((hz) => ({
+        id: `rx_step_${hz}`,
+        label: `Receiver step ${hz >= 1000 ? `${hz / 1000} kHz` : `${hz} Hz`}`,
+        accepts: PRESS,
+        run: (ev, ctx) => { if (ctx.setTuneStep) ctx.setTuneStep(hz, ctx.state().tuning.mode); },
+        lit: (ctx) => ctx.state().tuneStep === hz,
+    })),
+    {
+        // Walks the Receiver panel's own step list, a click at a time, and
+        // records it for the mode the way its dropdown does.
+        id: 'rx_step_dial',
+        label: 'Receiver step (dial)',
+        hint: 'larger clockwise, smaller anticlockwise',
+        accepts: [REL],
+        encoder: true,
+        run: (ev, ctx) => {
+            const n = detents(ev);
+            if (!n || !ctx.setTuneStep) return;
+            const cur = ctx.state().tuneStep;
+            let i = TUNING_STEPS.indexOf(cur);
+            if (i < 0) i = TUNING_STEPS.findIndex((s) => s >= cur);
+            if (i < 0) i = TUNING_STEPS.length - 1;
+            const next = TUNING_STEPS[clamp(i + Math.sign(n), 0, TUNING_STEPS.length - 1)];
+            ctx.setTuneStep(next, ctx.state().tuning.mode);
+        },
+    },
     {
         id: 'freq_step_up',
         label: 'Step up',

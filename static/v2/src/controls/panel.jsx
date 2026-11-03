@@ -7,6 +7,7 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from '../react.js';
 import { useRadio } from '../radio/RadioContext.jsx';
+import { useDisplay } from '../display/DisplayContext.jsx';
 import { controlState, onControlState, updateControlState } from './mappings.js';
 import { antennaInfo, hardwareMessages, readAntenna } from './hardware.js';
 
@@ -28,9 +29,11 @@ export function useControlState() {
 // handed to a singleton once.
 export function useControlContext(stepHz) {
     const radio = useRadio();
+    const display = useDisplay();
     const ref = useRef(null);
     ref.current = {
         actions: radio.actions,
+        setTuneStep: display.setTuneStep,
         stepHz,
         state: () => ({
             tuning: radio.tuning,
@@ -45,11 +48,16 @@ export function useControlContext(stepHz) {
             // the bridge's `lock` command, both of which have to be able to
             // report where they left it.
             locked: radio.locked,
+            // The Receiver panel's step (remembered per mode — see
+            // TuneStepWatch), for the functions that tune the way its ± do.
+            tuneStep: display.tuneStep,
         }),
     };
     return useMemo(() => ({
         get actions() { return ref.current.actions; },
         get stepHz() { return ref.current.stepHz; },
+        // The Receiver panel's step setter (per mode), for rx_step_dial.
+        setTuneStep: (hz, mode) => ref.current.setTuneStep(hz, mode),
         state: () => ref.current.state(),
     }), []);
 }

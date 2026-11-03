@@ -212,7 +212,8 @@ export default function ControlWatch() {
         meters: radio.meters,
         audioUp: radio.audioState === 'open',
         locked: radio.locked,
-        stepHz: cfg.stepHz,
+        // What the dial's TUNE page steps by (freq_rx_step): the Receiver panel's.
+        stepHz: ctx.state().tuneStep,
         name: (radio.serverInfo && radio.serverInfo.receiver
             && (radio.serverInfo.receiver.callsign || radio.serverInfo.receiver.name)) || '',
     };

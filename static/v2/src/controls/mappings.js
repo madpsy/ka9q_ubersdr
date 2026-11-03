@@ -16,7 +16,7 @@ import { isEncoderFunction, runFunction } from './functions.js';
 import { isCCKey } from './webmidi.js';
 import { RC28_DEFAULT_MAPPINGS, RC28_DIAL_MAPPING, RC28_OLD_DIAL_MAPPING } from './rc28.js';
 import { DEFAULT_LEDS, ledSettings } from './rc28leds.js';
-import { DIAL_DEFAULT_MAPPINGS } from './dial.js';
+import { DIAL_DEFAULT_MAPPINGS, upgradeDialTune } from './dial.js';
 import { GAMEPAD_DEFAULT_MAPPINGS, rumbleSettings } from './gamepad.js';
 import { saveFile } from '../lib/saveFile.js';
 
@@ -200,6 +200,7 @@ export function loadState() {
     state.rc28.leds = ledSettings(state.rc28.leds);
     state.rc28.mappings = upgradeRc28Dial(state.rc28.mappings);
     state.gamepad.rumble = rumbleSettings(state.gamepad.rumble);
+    state.dial.mappings = upgradeDialTune(state.dial.mappings);
     const out = saved ? state : adoptV1(state);
     out.midi.mappings = normaliseMidiMappings(out.midi.mappings);
     return out;

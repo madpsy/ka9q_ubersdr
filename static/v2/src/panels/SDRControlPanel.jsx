@@ -547,7 +547,7 @@ function SurfaceControl({ id, cfg, update, dspSchemas, hw, onMessage, minimal })
                 {isMidi && 'This browser has no Web MIDI API. Chrome or Edge is needed — Firefox has never shipped it.'}
                 {isRc28 && 'This browser has no WebHID API. Chrome or Edge is needed — Firefox and Safari have not shipped it.'}
                 {isPad && 'This browser has no Gamepad API.'}
-                {isDial && 'This browser has no Web Bluetooth. Chrome or Edge on Windows, macOS, ChromeOS, Linux or Android is needed — not Firefox, Safari or any iOS browser.'}
+                {isDial && 'This browser has no Web Bluetooth. Chrome or Edge on Windows, macOS, ChromeOS or Android is needed — not Firefox, Safari or any iOS browser. On Linux, Chrome keeps it behind a flag: enable chrome://flags/#enable-experimental-web-platform-features and restart Chrome.'}
                 {!isMidi && !isRc28 && !isPad && !isDial && 'This browser has no Web Serial API. Chrome or Edge is needed.'}
             </div>
         );
@@ -715,213 +715,230 @@ function SurfaceControl({ id, cfg, update, dspSchemas, hw, onMessage, minimal })
                 />
             )}
 
-            <div className="divider" />
-
-            <Field label="Step size" hint="for “step up” and “step down”">
-                <select
-                    className="select"
-                    value={cfg.stepHz}
-                    onChange={(e) => update({ stepHz: Number(e.target.value) })}
-                >
-                    {TUNING_STEPS.map((hz) => <option key={hz} value={hz}>{stepLabel(hz)}</option>)}
-                </select>
-            </Field>
-
-            <div className="divider" />
-
-            <span className="section-label">
-                Learn
-                {!connected && <span className="section-label__note">connect first</span>}
-            </span>
-
-            <Field label="Function">
-                <select
-                    className="select"
-                    value={pick}
-                    disabled={!connected || !!learn || !!assign}
-                    onChange={(e) => setPick(e.target.value)}
-                >
-                    <option value="">Choose a function…</option>
-                    {groups.map(([name, items]) => (
-                        <optgroup key={name} label={name}>
-                            {items.map((f) => <option key={f.id} value={f.id}>{f.label}</option>)}
-                        </optgroup>
-                    ))}
-                </select>
-            </Field>
-
-            {pressRelease && !learn && !assign && (
-                <Switch
-                    checked={!!conf.mapBoth}
-                    onChange={(v) => update((prev) => ({ ...prev, [id]: { ...prev[id], mapBoth: v } }))}
-                    label="Map press and release"
-                    disabled={!connected}
-                />
-            )}
-
-            {assign ? (
-                <PadAssign
-                    assignKey={assign.key}
-                    mapping={assign.key ? mappings[assign.key] : null}
-                    keyLabel={keyLabel}
-                    groups={groups}
-                    onPick={(fn) => assignTo(assign.key, fn)}
-                    onDone={() => setAssign(null)}
-                />
-            ) : learn ? (
-                <div className="rc-learn">
-                    <div className="rc-learn__msg">
-                        {learn.mapBoth && learn.pressKey
-                            ? 'Press captured — now release it'
-                            : `Move the control for “${functionLabel(learn.fn, dspSchemas, hw)}”`}
+            {/* The Dial needs none of the setup below: it tunes by the
+                Receiver panel's step, and its knob pages and buttons do what
+                its own screen says. The mapping still exists (DEFAULT_STATE.dial)
+                and drives it; it just isn't something to fiddle with here. */}
+            {isDial ? (
+                <>
+                    <div className="divider" />
+                    <div className="note">
+                        The dial tunes by the Receiver panel’s step and shows it on its screen. Its knob pages
+                        (TUNE, VOL, ZOOM, SQL, BW) and its mode, frequency and mute buttons do what the dial’s
+                        own labels say.
                     </div>
-                    <Button variant="ghost" size="sm" onClick={() => setLearn(null)}>Cancel</Button>
-                </div>
+                </>
             ) : (
-                <div className="chip-row">
-                    <Button
-                        variant="primary"
-                        size="sm"
-                        disabled={!connected || !pick}
-                        onClick={() => setLearn({ fn: pick, mapBoth: pressRelease && !!conf.mapBoth, pressKey: null })}
+                <>
+                <div className="divider" />
+
+                <Field label="Step size" hint="for “step up” and “step down”">
+                    <select
+                        className="select"
+                        value={cfg.stepHz}
+                        onChange={(e) => update({ stepHz: Number(e.target.value) })}
                     >
-                        Learn
-                    </Button>
-                    {/* The other way round, for a pad: press a control and
-                        choose what it does, one after another, with nothing
-                        reaching the receiver meanwhile. */}
-                    {isPad && (
+                        {TUNING_STEPS.map((hz) => <option key={hz} value={hz}>{stepLabel(hz)}</option>)}
+                    </select>
+                </Field>
+
+                <div className="divider" />
+
+                <span className="section-label">
+                    Learn
+                    {!connected && <span className="section-label__note">connect first</span>}
+                </span>
+
+                <Field label="Function">
+                    <select
+                        className="select"
+                        value={pick}
+                        disabled={!connected || !!learn || !!assign}
+                        onChange={(e) => setPick(e.target.value)}
+                    >
+                        <option value="">Choose a function…</option>
+                        {groups.map(([name, items]) => (
+                            <optgroup key={name} label={name}>
+                                {items.map((f) => <option key={f.id} value={f.id}>{f.label}</option>)}
+                            </optgroup>
+                        ))}
+                    </select>
+                </Field>
+
+                {pressRelease && !learn && !assign && (
+                    <Switch
+                        checked={!!conf.mapBoth}
+                        onChange={(v) => update((prev) => ({ ...prev, [id]: { ...prev[id], mapBoth: v } }))}
+                        label="Map press and release"
+                        disabled={!connected}
+                    />
+                )}
+
+                {assign ? (
+                    <PadAssign
+                        assignKey={assign.key}
+                        mapping={assign.key ? mappings[assign.key] : null}
+                        keyLabel={keyLabel}
+                        groups={groups}
+                        onPick={(fn) => assignTo(assign.key, fn)}
+                        onDone={() => setAssign(null)}
+                    />
+                ) : learn ? (
+                    <div className="rc-learn">
+                        <div className="rc-learn__msg">
+                            {learn.mapBoth && learn.pressKey
+                                ? 'Press captured — now release it'
+                                : `Move the control for “${functionLabel(learn.fn, dspSchemas, hw)}”`}
+                        </div>
+                        <Button variant="ghost" size="sm" onClick={() => setLearn(null)}>Cancel</Button>
+                    </div>
+                ) : (
+                    <div className="chip-row">
                         <Button
-                            variant="ghost"
+                            variant="primary"
                             size="sm"
-                            disabled={!connected}
-                            title="Press each control in turn and pick what it does — the receiver ignores the pad meanwhile"
-                            onClick={() => setAssign({ key: null })}
+                            disabled={!connected || !pick}
+                            onClick={() => setLearn({ fn: pick, mapBoth: pressRelease && !!conf.mapBoth, pressKey: null })}
                         >
-                            Set up by pressing
+                            Learn
                         </Button>
-                    )}
-                </div>
-            )}
+                        {/* The other way round, for a pad: press a control and
+                            choose what it does, one after another, with nothing
+                            reaching the receiver meanwhile. */}
+                        {isPad && (
+                            <Button
+                                variant="ghost"
+                                size="sm"
+                                disabled={!connected}
+                                title="Press each control in turn and pick what it does — the receiver ignores the pad meanwhile"
+                                onClick={() => setAssign({ key: null })}
+                            >
+                                Set up by pressing
+                            </Button>
+                        )}
+                    </div>
+                )}
 
-            <div className="divider" />
+                <div className="divider" />
 
-            <span className="section-label">
-                Mappings
-                <span className="section-label__note">{rows.length}</span>
-            </span>
+                <span className="section-label">
+                    Mappings
+                    <span className="section-label__note">{rows.length}</span>
+                </span>
 
-            {rows.length === 0 ? (
-                <Empty>Nothing mapped yet.</Empty>
-            ) : (
-                <div className="rc-map">
-                    {rows.slice(0, limit).map(([key, m]) => (
-                        <MappingRow
-                            key={key}
-                            mapKey={key}
-                            mapping={m}
-                            isMidi={isMidi}
-                            isPad={isPad}
-                            keyLabel={keyLabel}
-                            dspSchemas={dspSchemas}
-                            hw={hw}
-                            onRelative={(v) => update((prev) => ({
-                                ...prev,
-                                [id]: {
-                                    ...prev[id],
-                                    mappings: { ...prev[id].mappings, [key]: { ...m, relative: v } },
-                                },
-                            }))}
-                            onDelete={() => update((prev) => {
-                                const next = { ...prev[id].mappings };
-                                delete next[key];
-                                return { ...prev, [id]: { ...prev[id], mappings: next } };
-                            })}
-                        />
-                    ))}
-                </div>
-            )}
+                {rows.length === 0 ? (
+                    <Empty>Nothing mapped yet.</Empty>
+                ) : (
+                    <div className="rc-map">
+                        {rows.slice(0, limit).map(([key, m]) => (
+                            <MappingRow
+                                key={key}
+                                mapKey={key}
+                                mapping={m}
+                                isMidi={isMidi}
+                                isPad={isPad}
+                                keyLabel={keyLabel}
+                                dspSchemas={dspSchemas}
+                                hw={hw}
+                                onRelative={(v) => update((prev) => ({
+                                    ...prev,
+                                    [id]: {
+                                        ...prev[id],
+                                        mappings: { ...prev[id].mappings, [key]: { ...m, relative: v } },
+                                    },
+                                }))}
+                                onDelete={() => update((prev) => {
+                                    const next = { ...prev[id].mappings };
+                                    delete next[key];
+                                    return { ...prev, [id]: { ...prev[id], mappings: next } };
+                                })}
+                            />
+                        ))}
+                    </div>
+                )}
 
-            {/* `count` off: ShowMore's other branch is a "34 shown" line, and the section
-                label above already says 34. No longer gated on there being more to see —
-                a fully grown list is when the "Show fewer" under it is wanted. */}
-            <ShowMore
-                shown={limit}
-                total={rows.length}
-                base={PAGE}
-                count={false}
-                onMore={() => setLimit((n) => n + PAGE)}
-                onLess={() => setLimit(PAGE)}
-                label="Show more mappings"
-            />
+                {/* `count` off: ShowMore's other branch is a "34 shown" line, and the section
+                    label above already says 34. No longer gated on there being more to see —
+                    a fully grown list is when the "Show fewer" under it is wanted. */}
+                <ShowMore
+                    shown={limit}
+                    total={rows.length}
+                    base={PAGE}
+                    count={false}
+                    onMore={() => setLimit((n) => n + PAGE)}
+                    onLess={() => setLimit(PAGE)}
+                    label="Show more mappings"
+                />
 
-            <div className="chip-row">
-                <Button
-                    size="sm"
-                    variant="ghost"
-                    icon={<Icon.Download size={13} />}
-                    disabled={!rows.length}
-                    onClick={() => onMessage(`Exported ${exportMappings(id, mappings)} mapping(s)`, 'good')}
-                >
-                    Export
-                </Button>
-                {/* The picker is lib/pickFile.js, not a hidden input beside
-                    this button — see the note there: a panel need not survive
-                    the dialog it opened, and a change event on an unmounted
-                    input is delivered to nothing at all. */}
-                <Button
-                    size="sm"
-                    variant="ghost"
-                    icon={<Icon.Upload size={13} />}
-                    onClick={async () => {
-                        const file = await pickFile({ accept: 'application/json,.json' });
-                        if (!file) return;
-                        try {
-                            const m = await importMappings(file);
-                            // A v1 file carries no encoder flag — see
-                            // normaliseMidiMappings.
-                            const next = isMidi ? normaliseMidiMappings(m) : m;
-                            update((prev) => ({ ...prev, [id]: { ...prev[id], mappings: next } }));
-                            // A fresh list, so back to the first page —
-                            // importing forty mappings must not leave the panel
-                            // forty rows tall.
-                            setLimit(PAGE);
-                            onMessage(`Imported ${Object.keys(next).length} mapping(s)`, 'good');
-                        } catch (err) {
-                            onMessage(`Import failed: ${err.message}`, 'error');
-                        }
-                    }}
-                >
-                    Import
-                </Button>
-                {isPad && (
+                <div className="chip-row">
                     <Button
                         size="sm"
                         variant="ghost"
-                        title="Put back the mapping the controller arrives with"
-                        onClick={() => {
-                            update((prev) => ({ ...prev, gamepad: { ...prev.gamepad, mappings: GAMEPAD_DEFAULT_MAPPINGS } }));
-                            setLimit(PAGE);
-                            onMessage('Restored the default controller mapping', 'info');
+                        icon={<Icon.Download size={13} />}
+                        disabled={!rows.length}
+                        onClick={() => onMessage(`Exported ${exportMappings(id, mappings)} mapping(s)`, 'good')}
+                    >
+                        Export
+                    </Button>
+                    {/* The picker is lib/pickFile.js, not a hidden input beside
+                        this button — see the note there: a panel need not survive
+                        the dialog it opened, and a change event on an unmounted
+                        input is delivered to nothing at all. */}
+                    <Button
+                        size="sm"
+                        variant="ghost"
+                        icon={<Icon.Upload size={13} />}
+                        onClick={async () => {
+                            const file = await pickFile({ accept: 'application/json,.json' });
+                            if (!file) return;
+                            try {
+                                const m = await importMappings(file);
+                                // A v1 file carries no encoder flag — see
+                                // normaliseMidiMappings.
+                                const next = isMidi ? normaliseMidiMappings(m) : m;
+                                update((prev) => ({ ...prev, [id]: { ...prev[id], mappings: next } }));
+                                // A fresh list, so back to the first page —
+                                // importing forty mappings must not leave the panel
+                                // forty rows tall.
+                                setLimit(PAGE);
+                                onMessage(`Imported ${Object.keys(next).length} mapping(s)`, 'good');
+                            } catch (err) {
+                                onMessage(`Import failed: ${err.message}`, 'error');
+                            }
                         }}
                     >
-                        Defaults
+                        Import
                     </Button>
-                )}
-                <Button
-                    size="sm"
-                    variant="danger"
-                    icon={<Icon.Trash size={13} />}
-                    disabled={!rows.length}
-                    onClick={() => {
-                        update((prev) => ({ ...prev, [id]: { ...prev[id], mappings: {} } }));
-                        setLimit(PAGE);
-                        onMessage('Cleared all mappings', 'info');
-                    }}
-                >
-                    Clear
-                </Button>
-            </div>
+                    {isPad && (
+                        <Button
+                            size="sm"
+                            variant="ghost"
+                            title="Put back the mapping the controller arrives with"
+                            onClick={() => {
+                                update((prev) => ({ ...prev, gamepad: { ...prev.gamepad, mappings: GAMEPAD_DEFAULT_MAPPINGS } }));
+                                setLimit(PAGE);
+                                onMessage('Restored the default controller mapping', 'info');
+                            }}
+                        >
+                            Defaults
+                        </Button>
+                    )}
+                    <Button
+                        size="sm"
+                        variant="danger"
+                        icon={<Icon.Trash size={13} />}
+                        disabled={!rows.length}
+                        onClick={() => {
+                            update((prev) => ({ ...prev, [id]: { ...prev[id], mappings: {} } }));
+                            setLimit(PAGE);
+                            onMessage('Cleared all mappings', 'info');
+                        }}
+                    >
+                        Clear
+                    </Button>
+                </div>
+                </>
+            )}
         </>
     );
 }

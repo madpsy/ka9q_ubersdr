@@ -61,6 +61,12 @@ t('picker and quick-sheet codes become their direct functions', () => {
         ['mode_am', 'band_40m', 'rx_step_500', 'squelch_auto', 'spectrum_reset']);
 });
 
+t('a drag is one relative event in pixels, mapped to the pan', () => {
+    const evs = d.parseInput(new Uint8Array([97, 0xe2]));  // -30 px
+    assert.deepStrictEqual(evs, [{ key: 'pan_drag', event: { kind: 'relative', delta: -30 } }]);
+    assert.strictEqual(d.DEFAULT_STATE.dial.mappings.pan_drag.function, 'spectrum_pan');
+});
+
 t('every key has a label and every default maps to a real function', () => {
     for (const k of d.DIAL_KEYS) assert.notStrictEqual(d.dialKeyLabel(k.key), k.key);
     for (const [key, m] of Object.entries(d.DIAL_DEFAULT_MAPPINGS)) {

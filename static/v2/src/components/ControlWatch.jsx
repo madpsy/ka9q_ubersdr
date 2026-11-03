@@ -263,14 +263,20 @@ export default function ControlWatch() {
         const dial = getDial();
         let latest = null;
         const off = spectrumConn.on('frame', (f) => { latest = f; });
-        const t = setInterval(() => {
-            if (!latest || !dial.connected) return;
-            const f = latest;
-            latest = null;
-            const span = (spectrumConn.binBandwidth || 0) * f.bins.length;
-            dial.setSpectrum(f.bins, Number(f.frequency), span);
-        }, DIAL_SPECTRUM_MS);
-        return () => { off(); clearInterval(t); };
+        // Paced by the dial's own setting (battery 5/s or smooth 10/s), read
+        // each time so a change on the dial takes effect at once.
+        let t = null;
+        const tick = () => {
+            if (latest && dial.connected) {
+                const f = latest;
+                latest = null;
+                const span = (spectrumConn.binBandwidth || 0) * f.bins.length;
+                dial.setSpectrum(f.bins, Number(f.frequency), span);
+            }
+            t = setTimeout(tick, dial.spectrumIntervalMs || DIAL_SPECTRUM_MS);
+        };
+        tick();
+        return () => { off(); clearTimeout(t); };
     }, [surface, spectrumConn]);
 
     // A game controller's rumble: what a press did, felt rather than seen.

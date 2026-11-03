@@ -1884,6 +1884,16 @@ export function RadioProvider({ children }) {
 
             centerOnTuned() { spectrumConn.setView(tuningRef.current.frequency, null); },
 
+            // Moves the view by a fraction of what's visible (+ = higher
+            // frequencies), leaving the tuning alone — a drag from a control
+            // surface (the Dial's drag strip). setView keeps it in range.
+            panSpectrum(fraction) {
+                const c = spectrumConn;
+                const span = c.binCount * c.binBandwidth;
+                if (!c.connected || !span || !c.centerFreq || !Number.isFinite(fraction)) return;
+                c.setView(c.centerFreq + fraction * span, null);
+            },
+
             clearLog() { clearEventLog(); },
             log: pushLog,
         };

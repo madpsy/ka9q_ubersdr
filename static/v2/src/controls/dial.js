@@ -18,6 +18,10 @@
 //          code 64+i   set step TUNING_STEPS[i]        (its step picker)
 //          code 80..85 lock toggle, squelch on/off, auto squelch, zoom in,
 //                      zoom out, zoom reset            (its quick sheets)
+//          code 97     drag across the dial's waterfall: value = pixels moved
+//                      out of 360 (+ = right), one event, not per detent
+//          code 96     waterfall lines per second the dial wants (value 1..20;
+//                      its battery/smooth setting) — handled here, not mapped
 //   state  89540003-…  write   page -> dial, 20 bytes:
 //          [0] version = 1
 //          [1..4]  frequency Hz u32       [5] mode index (DIAL_MODES), 255 = ?
@@ -110,6 +114,7 @@ export const DIAL_KEYS = [
     { key: 'mute_tap', label: 'Mute — tap' },
     { key: 'mute_hold', label: 'Mute — hold' },
     { key: 'center_tap', label: 'Centre — tap' },
+    { key: 'pan_drag', label: 'Drag — pan the waterfall' },
 ];
 
 // Bands in the order the dial's picker numbers them (v2's band functions).
@@ -169,6 +174,7 @@ export const DIAL_DEFAULT_MAPPINGS = {
     mute_tap: m('mute_toggle'),
     // The dial's own centre button: the waterfall toolbar's "centre on tuned".
     center_tap: m('spectrum_center'),
+    pan_drag: m('spectrum_pan'),
 };
 for (const [key, , fn] of Object.values(DIRECT)) DIAL_DEFAULT_MAPPINGS[key] = m(fn);
 
@@ -204,7 +210,10 @@ export function parseInput(bytes) {
     for (let i = 0; i + 1 < bytes.length; i += 2) {
         const code = bytes[i];
         const value = bytes[i + 1] > 127 ? bytes[i + 1] - 256 : bytes[i + 1];
-        if (PAGES[code] && value) {
+        if (code === 97 && value) {
+            // A drag is one movement, not a run of detents.
+            out.push({ key: 'pan_drag', event: { kind: 'relative', delta: value } });
+        } else if (PAGES[code] && value) {
             // One event per detent: the catalogue's press-type functions
             // (step, volume, bandwidth) act once per event, whatever its size.
             const key = `${PAGES[code]}_${value > 0 ? 'up' : 'down'}`;
@@ -254,6 +263,8 @@ export class DialControl extends Emitter {
         this._specSeq = 0;
         this._specBusy = false;
         this._specChunk = SPEC_POINTS;
+        // How often the dial wants a waterfall line; it says so on connect.
+        this.spectrumIntervalMs = 200;
         this.connected = false;
         this.deviceName = '';
         this._lastState = '';
@@ -311,6 +322,13 @@ export class DialControl extends Emitter {
             this.specChar = await service.getCharacteristic(DIAL_SPEC).catch(() => null);
             input.addEventListener('characteristicvaluechanged', (e) => {
                 const bytes = new Uint8Array(e.target.value.buffer);
+                // The dial's own preference for the waterfall rate rides in the
+                // same stream; it is a setting, not a control to map.
+                for (let i = 0; i + 1 < bytes.length; i += 2) {
+                    if (bytes[i] === 96 && bytes[i + 1] >= 1 && bytes[i + 1] <= 20) {
+                        this.spectrumIntervalMs = Math.round(1000 / bytes[i + 1]);
+                    }
+                }
                 for (const ev of parseInput(bytes)) this.emit('input', ev);
             });
             await input.startNotifications();

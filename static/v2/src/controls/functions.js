@@ -419,6 +419,19 @@ const SPECTRUM = group('Spectrum', [
         run: (ev, ctx) => ctx.actions.centerOnTuned(),
     },
     {
+        // A drag, in the surface's own units: `delta` is how far it moved out of
+        // 360 (a whole width = the whole span), the way the Dial reports it.
+        // Dragging right brings lower frequencies into view, as on the page.
+        id: 'spectrum_pan',
+        label: 'Pan spectrum (drag)',
+        accepts: [REL],
+        encoder: true,
+        run: (ev, ctx) => {
+            const n = detents(ev);
+            if (n && ctx.actions.panSpectrum) ctx.actions.panSpectrum(-n / 360);
+        },
+    },
+    {
         id: 'spectrum_reset',
         label: 'Reset zoom',
         accepts: PRESS,

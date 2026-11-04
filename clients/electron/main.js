@@ -52,6 +52,22 @@ if (process.platform === 'linux') {
     app.commandLine.appendSwitch('enable-speech-dispatcher');
 }
 
+// Web Bluetooth, for the UberSDR Dial (see bluetooth.js).
+//
+// Chromium ships it as stable on Windows, macOS, ChromeOS and Android and as
+// experimental everywhere else, Linux included — the chrome://flags switch the
+// dial's own error message tells a Chrome user to flip. Electron inherits that
+// default, so without this `navigator.bluetooth` is simply absent on Linux and
+// the Dial's Bluetooth mode reports "no Web Bluetooth". Only the two features
+// the Dial uses are turned on, not the whole experimental set: requestDevice()
+// to pair, getDevices() to reconnect a remembered one on the next launch.
+//
+// The host needs BlueZ running (the bluetooth service); Chromium talks to it
+// over D-Bus.
+if (process.platform === 'linux') {
+    app.commandLine.appendSwitch('enable-blink-features', 'WebBluetooth,WebBluetoothGetDevices');
+}
+
 // The window icon.
 //
 // Only Linux needs this: Windows takes the icon from the resource compiled into

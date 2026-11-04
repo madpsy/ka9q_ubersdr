@@ -723,7 +723,7 @@ function SurfaceControl({ id, cfg, update, dspSchemas, hw, onMessage, minimal })
                 <>
                     <div className="divider" />
                     <div className="note">
-                        The UberSDR Dial is firmware for the Guition JC3636K718 round knob display.
+                        The UberSDR Dial is firmware for the Guition JC3636K518C (also sold as JC3636K718) round knob display.
                         Install it from your browser with the{' '}
                         <a href="https://madpsy.github.io/ubersdr_dial/flash/" target="_blank" rel="noopener noreferrer">
                             UberSDR Dial web flasher

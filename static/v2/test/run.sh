@@ -80,6 +80,8 @@ esbuild oliviapanel.entry.js --bundle --format=cjs --platform=node \
     --outfile=.build/oliviapanel.cjs --log-level=warning
 esbuild ifpanel.entry.js --bundle --format=cjs --platform=node \
     --outfile=.build/ifpanel.cjs --log-level=warning
+esbuild bandpanel.entry.js --bundle --format=cjs --platform=node \
+    --outfile=.build/bandpanel.cjs --log-level=warning
 esbuild drmpanel.entry.js --bundle --format=cjs --platform=node \
     --outfile=.build/drmpanel.cjs --log-level=warning
 esbuild hdradiopanel.entry.js --bundle --format=cjs --platform=node \
@@ -708,6 +710,7 @@ node bandspectrum.test.js
 node ifspectrum.test.js
 node ifshape.test.js
 node ifpanel.test.js
+node bandpanel.test.js
 node audiostats.test.js
 node scopepanel.test.js
 node lightning.test.js

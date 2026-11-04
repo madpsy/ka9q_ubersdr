@@ -164,6 +164,7 @@ export default function BandSpectrumPanel({ minimal }) {
                 prefs={prefs}
                 display={display}
                 tuning={tuning}
+                serverInfo={serverInfo}
                 vfoId={vfoId}
                 onTune={tune}
                 onRate={setRate}
@@ -294,7 +295,7 @@ function formatSpanMHz(meta) {
 // Keyed on the band by its caller, so tuning to another band remounts it — a
 // new stream, a new bin count and an empty history, which is what changing band
 // means. Nothing here has to unpick the old band's state.
-function BandChart({ band, meta, prefs, display, tuning, vfoId, onTune, onRate }) {
+function BandChart({ band, meta, prefs, display, tuning, serverInfo, vfoId, onTune, onRate }) {
     const feeds = useFeedsAllowed();
     const wrapRef = useRef(null);
     // Whether the chart is on screen. The panel being open is not the same

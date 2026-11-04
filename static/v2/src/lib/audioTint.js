@@ -111,6 +111,9 @@ export const TINT_SILENCE_DB = -85;
 // ...and the range over which it fades out, so the gate closing is a wash
 // rather than a switch.
 export const TINT_FADE_DB = 10;
+// What zoneShares reports for a zone with no measurable power at all (every bin
+// non-finite): this far below an even share, rather than -Infinity.
+const EMPTY_ZONE_DB = 10;
 
 /**
  * Each zone's share of the band's power, in dB relative to an even spread.
@@ -153,7 +156,7 @@ export function zoneShares(bins, start, count, out) {
     }
     const even = total / zones;
     for (let z = 0; z < zones; z++) {
-        out[z] = p[z] > 0 ? 10 * Math.log10(p[z] / even) : -TINT_SPAN_DB;
+        out[z] = p[z] > 0 ? 10 * Math.log10(p[z] / even) : -EMPTY_ZONE_DB;
     }
 
     const quiet = Math.max(0, Math.min(1, (peakDb - TINT_SILENCE_DB) / TINT_FADE_DB));

@@ -143,9 +143,9 @@ function fakeBluetooth() {
     let release = null;
     const stateChar = {
         // Held until the test lets it go, so "one write at a time" is visible.
-        writeValueWithoutResponse: (bytes) => new Promise((r) => { writes.push(bytes); release = r; }),
+        writeValueWithResponse: (bytes) => new Promise((r) => { writes.push(bytes); release = r; }),
     };
-    const nameChar = { writeValueWithoutResponse: async (bytes) => { names.push(Buffer.from(bytes).toString()); } };
+    const nameChar = { writeValueWithResponse: async (bytes) => { names.push(Buffer.from(bytes).toString()); } };
     const device = {
         name: 'UberSDR Dial 40E8',
         addEventListener: (ev, fn) => { listeners[ev] = fn; },

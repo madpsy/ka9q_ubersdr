@@ -723,9 +723,12 @@ function SurfaceControl({ id, cfg, update, dspSchemas, hw, onMessage, minimal })
                 <>
                     <div className="divider" />
                     <div className="note">
-                        The dial tunes by the Receiver panel’s step and shows it on its screen. Its knob pages
-                        (TUNE, VOL, ZOOM, SQL, BW) and its mode, frequency and mute buttons do what the dial’s
-                        own labels say.
+                        The UberSDR Dial is firmware for the Guition JC3636K718 round knob display.
+                        Install it from your browser with the{' '}
+                        <a href="https://madpsy.github.io/ubersdr_dial/flash/" target="_blank" rel="noopener noreferrer">
+                            UberSDR Dial web flasher
+                        </a>
+                        . When the dial starts, choose <b>Controller</b> mode, then connect to it here.
                     </div>
                 </>
             ) : (

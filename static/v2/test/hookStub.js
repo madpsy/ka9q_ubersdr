@@ -54,9 +54,14 @@ window.React = {
     useEffect: (fn, deps) => { hooks.effects.push({ fn, deps }); },
     useLayoutEffect: (fn, deps) => { hooks.effects.push({ fn, deps }); },
     useMemo: (fn) => fn(),
+    // A setter writes to the state of the mount it came from. reset() starts a
+    // fresh array, and a parent's setter called after its child was mounted
+    // fresh (the panel's message log, written by the surface editor) used to
+    // land on whatever the child kept at the same index.
     useReducer: (reducer, init) => {
         const i = slot(init);
-        return [hooks.state[i], (action) => { hooks.state[i] = reducer(hooks.state[i], action); }];
+        const st = hooks.state;
+        return [st[i], (action) => { st[i] = reducer(st[i], action); }];
     },
     useRef: (init) => {
         const i = slot(() => ({ current: init }));
@@ -64,8 +69,9 @@ window.React = {
     },
     useState: (init) => {
         const i = slot(init);
-        return [hooks.state[i], (v) => {
-            hooks.state[i] = typeof v === 'function' ? v(hooks.state[i]) : v;
+        const st = hooks.state;
+        return [st[i], (v) => {
+            st[i] = typeof v === 'function' ? v(st[i]) : v;
         }];
     },
 };

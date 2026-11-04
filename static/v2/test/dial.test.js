@@ -332,6 +332,16 @@ at('over USB the port opens, says hello, and connects when the dial answers', as
     assert.strictEqual(new DataView(st.payload.buffer).getUint32(1, true), 7074000);
     const spec = sent.find((f) => f.type === d.FRAME.SPEC);
     assert.strictEqual(spec.payload.length, 12 + d.SPEC_POINTS, 'a whole line in one frame');
+    // The name and state are sent again with each hello: a frame lost on
+    // the way is not resent otherwise, and the name is sent only once.
+    dial.setName('M9PSY');
+    await tick(30);
+    dial._lastHello = -Infinity;
+    const before = sp.frames().length;
+    dial._usbTick();
+    await tick(30);
+    const again = sp.frames().slice(before).map((f) => f.type);
+    assert.deepStrictEqual(again, [d.FRAME.HELLO, d.FRAME.NAME, d.FRAME.STATE]);
     const inputs = [];
     dial.on('input', (e) => inputs.push(e.key));
     sp.send(d.FRAME.INPUT, Uint8Array.of(1, 1, 20, 1));

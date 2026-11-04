@@ -480,6 +480,8 @@ export class DialControl extends Emitter {
 
     _resetLink() {
         this._lastState = '';
+        this._usbName = null;
+        this._usbState = null;
         this._chain = Promise.resolve();
         this._stateQueued = false;
         this._pending = null;
@@ -610,6 +612,14 @@ export class DialControl extends Emitter {
         if (now - this._lastHello >= HELLO_MS) {
             this._lastHello = now;
             this._usbWrite(FRAME.HELLO, Uint8Array.of(1)).catch(() => {});
+            // A damaged frame is dropped, not resent, and the name goes out
+            // once: lose it and the dial's header says "connected" for good.
+            // So the name and the latest state ride along with every hello —
+            // a few dozen bytes a second, and any loss heals within one.
+            if (this.connected) {
+                if (this._usbName) this._usbWrite(FRAME.NAME, this._usbName).catch(() => {});
+                if (this._usbState && !this._stateQueued) this._usbWrite(FRAME.STATE, this._usbState).catch(() => {});
+            }
         }
     }
 
@@ -696,7 +706,7 @@ export class DialControl extends Emitter {
             const b = this._pending;
             this._pending = null;
             if (!b) return;
-            if (this.port) await this._usbWrite(FRAME.STATE, b);
+            if (this.port) { this._usbState = b; await this._usbWrite(FRAME.STATE, b); }
             else if (this.stateChar) await this.stateChar.writeValueWithResponse(b);
         });
     }
@@ -737,7 +747,7 @@ export class DialControl extends Emitter {
         if (!this.connected || !(this.nameChar || this.port)) return;
         const bytes = new TextEncoder().encode(String(name || '')).slice(0, 32);
         this._enqueue(async () => {
-            if (this.port) await this._usbWrite(FRAME.NAME, bytes);
+            if (this.port) { this._usbName = bytes; await this._usbWrite(FRAME.NAME, bytes); }
             else if (this.nameChar) await this.nameChar.writeValueWithResponse(bytes);
         }).catch(() => {});
     }

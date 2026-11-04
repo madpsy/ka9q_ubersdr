@@ -230,6 +230,42 @@ export function dialAvailable(link = 'bluetooth') {
     return link === 'usb' ? 'serial' in navigator : !!navigator.bluetooth;
 }
 
+// The desktop app's stand-in for getDevices(), which Electron never implemented
+// (it is always empty there). The host remembers the dial last picked in it and,
+// asked, has this page request a device with a user gesture while it answers
+// that request itself with the remembered dial, no picker shown — see
+// clients/electron/bluetooth.js. Resolves the device, or null: not the desktop
+// app, nothing remembered, or the dial not seen in time.
+const DESKTOP_HOOK = '__ubersdrDialAutoConnect';
+
+export function desktopRememberedDial() {
+    const host = typeof window !== 'undefined' ? window.ubersdrDesktop : null;
+    if (!host || typeof host.bluetoothAutoConnect !== 'function') return Promise.resolve(null);
+    return new Promise((resolve) => {
+        let device = null;
+        // One shot, called by the host inside its gesture: the request has to
+        // start there, synchronously, or the gesture is not this call's. Returns
+        // the request's outcome so the host knows when it is over.
+        const hook = () => {
+            if (window[DESKTOP_HOOK] === hook) delete window[DESKTOP_HOOK];
+            return navigator.bluetooth.requestDevice({ filters: [{ services: [DIAL_SERVICE] }] })
+                .then((d) => { device = d; return true; }, (err) => {
+                    console.debug('[Dial] auto-connect: remembered dial not found —', err && err.name, err && err.message);
+                    return false;
+                });
+        };
+        window[DESKTOP_HOOK] = hook;
+        const finish = () => {
+            if (window[DESKTOP_HOOK] === hook) delete window[DESKTOP_HOOK];
+            resolve(device);
+        };
+        host.bluetoothAutoConnect().then((asked) => {
+            if (!asked && !device) console.debug('[Dial] auto-connect: no dial remembered by the desktop app');
+            finish();
+        }, finish);
+    });
+}
+
 // --- USB framing -------------------------------------------------------------
 
 export const FRAME = { HELLO: 1, INPUT: 2, STATE: 3, NAME: 4, SPEC: 5, BYE: 6 };
@@ -383,6 +419,7 @@ export class DialControl extends Emitter {
         this._timer = null;
         this._specSeq = 0;
         this._specBusy = false;
+        this._autoBusy = false;    // an autoConnect() under way
         this._specChunk = SPEC_POINTS;
         // How often the dial wants a waterfall line; it says so on connect.
         this.spectrumIntervalMs = 200;
@@ -455,16 +492,29 @@ export class DialControl extends Emitter {
             });
             return port ? this._startUsb(port, true) : false;
         }
-        if (!dialAvailable('bluetooth') || !navigator.bluetooth.getDevices) return false;
-        let devices;
+        if (!dialAvailable('bluetooth')) return false;
+        // One attempt at a time: the desktop app retries, and two requests at
+        // once would have the second refused by the browser.
+        if (this._autoBusy) return false;
+        this._autoBusy = true;
         try {
-            devices = await navigator.bluetooth.getDevices();
-        } catch (err) {
-            return false;
+            let device = null;
+            if (navigator.bluetooth.getDevices) {
+                try {
+                    device = ((await navigator.bluetooth.getDevices()) || [])[0] || null;
+                } catch (err) { /* as if there were none */ }
+            }
+            // A device the browser remembers can still fail to connect (out of
+            // range just now); the desktop app's own memory is then worth a try.
+            if (device && !this.connected && await this._start(device, true)) return true;
+            if (this.connected) return false;
+            device = await desktopRememberedDial();
+            // Connect may have been pressed while that was looking.
+            if (!device || this.connected) return false;
+            return await this._start(device, true);
+        } finally {
+            this._autoBusy = false;
         }
-        const device = (devices || [])[0];
-        if (!device) return false;
-        return this._start(device, true);
     }
 
     // The dial's own preference for the waterfall rate rides in the input
@@ -503,6 +553,7 @@ export class DialControl extends Emitter {
             await input.startNotifications();
         } catch (err) {
             if (!quiet) this.emit('message', { text: `Could not connect to the dial: ${err.message}`, tone: 'error' });
+            else console.debug('[Dial] auto-connect: could not connect —', err && err.message);
             try { device.gatt.disconnect(); } catch (e) { /* not connected */ }
             return false;
         }

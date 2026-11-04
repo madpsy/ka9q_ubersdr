@@ -28,9 +28,18 @@ const deeplink = require('./deeplink');
 const updates = require('./updates');
 const { browserUserAgent } = require('./useragent');
 const { installHidHandlers, patchRows, pickerTitle } = require('./hid');
-const { installBluetoothHandlers } = require('./bluetooth');
+const { createBluetoothMemory, installBluetoothHandlers } = require('./bluetooth');
 const { SttService, registerSttIpc, sttPaths, readJson } = require('./stt');
 const { ModelManager } = require('./sttmodels');
+
+// The dial last picked for Web Bluetooth, for reconnecting without a picker —
+// see bluetooth.js. Read at the moment it is needed, so app.getPath is only
+// called once the app is up.
+const bluetoothFile = () => path.join(app.getPath('userData'), 'bluetooth.json');
+const bluetoothMemory = createBluetoothMemory({
+    load: () => JSON.parse(fs.readFileSync(bluetoothFile(), 'utf8')).dial,
+    save: (dial) => fs.writeFileSync(bluetoothFile(), JSON.stringify({ dial }, null, 2)),
+});
 
 // The v2 start overlay already gates audio behind a click; this just keeps
 // Chromium's autoplay heuristics from ever muting a reconnect.
@@ -633,6 +642,7 @@ function setupSession() {
         changed: pickerDevicesChanged,
         windowOf: (wc) => BrowserWindow.fromWebContents(wc),
         originOf: serialRequestOrigin,
+        memory: bluetoothMemory,
     });
 
     // Anything not listed is refused. A browser prompts; there is nobody to
@@ -1152,6 +1162,33 @@ function setupIpc() {
     // makes it safe to reach from a receiver window — see receiver-preload.js,
     // where the rest of that reasoning lives.
     ipcMain.handle('app:load', () => appLoad());
+
+    // The Dial's "connect automatically" over Bluetooth, which getDevices()
+    // cannot do here — see bluetooth.js. Arms this window's next device request
+    // to take the remembered dial without a picker, then has the page make that
+    // request. requestDevice() needs a user gesture, and executeJavaScript's
+    // `userGesture` is how the main process provides one; the page side is
+    // static/v2/src/controls/dial.js (desktopRememberedDial), which defines the
+    // hook. The hook returns the request's own promise, so this waits for the
+    // request to end and disarms exactly then.
+    //
+    // Takes nothing from the page and can do one thing: reconnect the dial its
+    // operator already picked in this app. With nothing remembered it does
+    // nothing at all.
+    ipcMain.handle('bluetooth:auto-connect', async (event) => {
+        const wc = event.sender;
+        if (!bluetoothMemory.arm(wc)) return false;
+        try {
+            return await wc.executeJavaScript(
+                "typeof window.__ubersdrDialAutoConnect === 'function' ? window.__ubersdrDialAutoConnect() : false",
+                true,
+            ) === true;
+        } catch (e) {
+            return false;   // the page went away
+        } finally {
+            bluetoothMemory.forget(wc);
+        }
+    });
 
     ipcMain.handle('app:info', () => ({
         builtinAvailable,

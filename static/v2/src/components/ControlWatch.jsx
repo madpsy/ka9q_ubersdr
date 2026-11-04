@@ -48,6 +48,9 @@ const DIAL_POLL_MS = 100;
 // battery, and every line is a full-screen redraw there. Each is ~170 bytes,
 // so five a second is under 1 KB/s next to the state record.
 const DIAL_SPECTRUM_MS = 200;
+// The desktop app's extra Bluetooth reconnect tries after a receiver opens — see
+// the auto-connect effect below.
+const DIAL_DESKTOP_RETRY_MS = [3_000, 10_000, 30_000];
 
 // How long after a control on the pad the receiver's own state is read back
 // for a toggle's rumble. Long enough for the render the action caused.
@@ -161,10 +164,19 @@ export default function ControlWatch() {
             return s.on('devices', attempt);
         }
         // Web Bluetooth has no hotplug event for a device this page has not
-        // connected to; the one attempt above (where the browser can remember
-        // devices at all) is all there is. Over USB the Dial is a serial port,
-        // with Web Serial's hotplug event below.
-        if (surface === 'dial' && dialLink !== 'usb') return undefined;
+        // connected to; in a browser the one attempt above (where it can
+        // remember devices at all) is all there is. The desktop app reconnects
+        // without a picker (controls/dial.js, desktopRememberedDial), so there a
+        // few more tries stand in for the event: a receiver opened just as the
+        // last one let go of the dial, or before the dial was switched on, still
+        // finds it. Each is quiet and does nothing once connected. Over USB the
+        // Dial is a serial port, with Web Serial's hotplug event below.
+        if (surface === 'dial' && dialLink !== 'usb') {
+            const host = typeof window !== 'undefined' ? window.ubersdrDesktop : null;
+            if (!host || typeof host.bluetoothAutoConnect !== 'function') return undefined;
+            const timers = DIAL_DESKTOP_RETRY_MS.map((ms) => setTimeout(attempt, ms));
+            return () => timers.forEach(clearTimeout);
+        }
         // WebHID's own hotplug event, for the same reason as Web Serial's below.
         if (surface === 'rc28') {
             if (!rc28Available()) return undefined;

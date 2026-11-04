@@ -370,6 +370,83 @@ at('switching between Bluetooth and USB lets go of the other', async () => {
     assert.strictEqual(dial.link, 'bluetooth');
 });
 
+// --- connect automatically in the desktop app ---------------------------------
+//
+// Electron's getDevices() is always empty, so there the host remembers the dial
+// and has the page request it inside a gesture (clients/electron/bluetooth.js).
+// What is pinned: the hook is called by the host, not by the page; it is one
+// shot and gone afterwards; and every way of not finding the dial is quiet.
+
+function desktopHost(behaviour) {
+    globalThis.window = globalThis.window || globalThis;
+    const calls = [];
+    window.ubersdrDesktop = {
+        bluetoothAutoConnect: async () => {
+            calls.push('asked');
+            if (behaviour === 'nothing-remembered') return false;
+            const hook = window.__ubersdrDialAutoConnect;
+            if (typeof hook !== 'function') return false;
+            // As main.js does: the hook returns the request, and the answer is
+            // whether it found the dial.
+            return (await hook()) === true;
+        },
+    };
+    return calls;
+}
+
+at('desktop app: an empty getDevices() falls back to the remembered dial', async () => {
+    fakeBluetooth();
+    navigator.bluetooth.getDevices = async () => [];
+    const calls = desktopHost('remembered');
+    const dial = new d.DialControl();
+    const messages = [];
+    dial.on('message', (m) => messages.push(m));
+    assert.strictEqual(await dial.autoConnect(), true);
+    assert.strictEqual(dial.connected, true);
+    assert.deepStrictEqual(calls, ['asked']);
+    assert.strictEqual(window.__ubersdrDialAutoConnect, undefined, 'the hook is one shot');
+    assert.deepStrictEqual(messages.map((m) => m.tone), ['good']);
+    delete window.ubersdrDesktop;
+});
+
+at('desktop app: nothing remembered, or the dial not found, stays quiet', async () => {
+    fakeBluetooth();
+    navigator.bluetooth.getDevices = async () => [];
+    desktopHost('nothing-remembered');
+    let dial = new d.DialControl();
+    const messages = [];
+    dial.on('message', (m) => messages.push(m));
+    assert.strictEqual(await dial.autoConnect(), false);
+    assert.strictEqual(window.__ubersdrDialAutoConnect, undefined);
+
+    // Remembered but not in range: the host cancels the request after its wait.
+    fakeBluetooth();
+    navigator.bluetooth.getDevices = async () => [];
+    navigator.bluetooth.requestDevice = async () => { const e = new Error('User cancelled'); e.name = 'NotFoundError'; throw e; };
+    desktopHost('remembered');
+    dial = new d.DialControl();
+    dial.on('message', (m) => messages.push(m));
+    assert.strictEqual(await dial.autoConnect(), false);
+    assert.strictEqual(dial.connected, false);
+    assert.deepStrictEqual(messages, []);
+    delete window.ubersdrDesktop;
+});
+
+at('a browser: getDevices() is used and the desktop path is not', async () => {
+    fakeBluetooth();
+    const device = await navigator.bluetooth.requestDevice({ filters: [{ services: [d.DIAL_SERVICE] }] });
+    navigator.bluetooth.getDevices = async () => [device];
+    navigator.bluetooth.requestDevice = async () => { throw new Error('no picker on auto-connect'); };
+    delete (globalThis.window || {}).ubersdrDesktop;
+    const dial = new d.DialControl();
+    assert.strictEqual(await dial.autoConnect(), true);
+
+    // And with nothing granted and no desktop host, it simply does nothing.
+    fakeBluetooth();
+    navigator.bluetooth.getDevices = async () => [];
+    assert.strictEqual(await new d.DialControl().autoConnect(), false);
+});
+
 (async () => {
     for (const [name, fn] of async_t) {
         try { await fn(); console.log('ok    ' + name); pass++; }

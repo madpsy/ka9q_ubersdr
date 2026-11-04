@@ -854,6 +854,17 @@ if (location.pathname.startsWith('/v2')) {
                 padListeners.add(fn);
                 try { fn(padActive); } catch { /* the page's own fault */ }
             },
+            // The UberSDR Dial's "connect automatically" over Bluetooth.
+            // Electron's getDevices() is always empty (bluetooth.js says why),
+            // so the page asks here instead: the main process arms this window
+            // to take the dial last picked in this app without a picker, then
+            // calls the page's window.__ubersdrDialAutoConnect with a user
+            // gesture so that it can make the request. Resolves true when that
+            // request was made, false when there is no remembered dial or the
+            // page had no hook. Takes nothing, so it is as narrow as the rest.
+            bluetoothAutoConnect() {
+                return ipcRenderer.invoke('bluetooth:auto-connect').then((r) => r === true, () => false);
+            },
         });
     } catch { /* nothing here is worth failing the whole preload for */ }
 

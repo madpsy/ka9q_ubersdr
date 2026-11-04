@@ -142,3 +142,78 @@ export function noticeLinksAllowedByHost() {
         return false;
     }
 }
+
+// ── Controllers a host can drive ─────────────────────────────────────────────
+//
+// The SDR control panel offers every controller a desktop browser might reach:
+// serial (FlexControl), HID (RC-28), MIDI, gamepads and the Dial over Bluetooth
+// or USB. Inside a phone's WebView most of those APIs do not exist, so the
+// panel was hidden outright — and with it the one controller an app can offer
+// on its own, the Dial over Bluetooth (clients/capacitor/src/hostbluetooth.js).
+//
+//     window.ubersdrDesktop.controlSurfaces = ['dial'];
+//     window.ubersdrDesktop.dialLinks = ['bluetooth'];
+//     window.ubersdrDesktop.bridgeSwitch = false;
+//
+// `controlSurfaces` lists the ones this page opens itself that the host can
+// carry. 'off' is always offered, and so is any surface something else
+// registers over the page API (controls/surfaces.js): the host registering one
+// is its own statement that it can. `dialLinks` does the same for the Dial's
+// two ways in. `bridgeSwitch: false` drops the "Browser bridge" switch: inside
+// an app there is no extension to allow, and the app's own scripts ride the
+// same bridge, so switching it off would only break the app.
+//
+// Absent or malformed, everything is offered — the same safe reading as
+// hidePanels: a mistake shows the interface rather than losing parts of it.
+
+function hostList(host, key) {
+    if (!host) return null;
+    const list = host[key];
+    if (!Array.isArray(list)) return null;
+    return list.filter((s) => typeof s === 'string').map((s) => s.toLowerCase());
+}
+
+/** May the panel offer surface `id` (one of controls/mappings.js SURFACES)? */
+export function surfaceOfferedByHost(host, id) {
+    if (!id || id === 'off') return true;
+    const list = hostList(host, 'controlSurfaces');
+    return !list || list.includes(String(id).toLowerCase());
+}
+
+/** The Dial's links the host offers, in the panel's order. */
+export function dialLinksOfferedByHost(host) {
+    const all = ['bluetooth', 'usb'];
+    const list = hostList(host, 'dialLinks');
+    if (!list) return all;
+    const offered = all.filter((l) => list.includes(l));
+    return offered.length ? offered : all;
+}
+
+/**
+ * The link the Dial is reached by: the saved choice, unless the host does not
+ * offer it — a USB choice made in a browser and carried into an app by shared
+ * settings would otherwise leave the Dial on a link that cannot work, with no
+ * picker to change it.
+ */
+export function dialLinkForHost(host, saved) {
+    const want = saved === 'usb' ? 'usb' : 'bluetooth';
+    const offered = dialLinksOfferedByHost(host);
+    return offered.includes(want) ? want : offered[0];
+}
+
+export function bridgeSwitchHiddenByHost(host) {
+    return !!host && host.bridgeSwitch === false;
+}
+
+function realHost() {
+    try {
+        return typeof window !== 'undefined' ? window.ubersdrDesktop : null;
+    } catch (e) {
+        return null;
+    }
+}
+
+export const surfaceOffered = (id) => surfaceOfferedByHost(realHost(), id);
+export const dialLinksOffered = () => dialLinksOfferedByHost(realHost());
+export const dialLinkFor = (saved) => dialLinkForHost(realHost(), saved);
+export const bridgeSwitchHidden = () => bridgeSwitchHiddenByHost(realHost());

@@ -28,6 +28,7 @@ import { squelchEnabled, squelchThreshold } from '../radio/constants.js';
 import { getRecorder } from '../lib/recorder.js';
 import { pushNotification } from '../lib/notifications.js';
 import { serialAvailable } from '../controls/radiosync.js';
+import { dialLinkFor } from '../lib/hostPanels.js';
 import {
     getDial, getGamepad, getRc28, getSurface, getSync, releaseSurfaceExcept, surfaceKeyLabel,
 } from '../controls/sources.js';
@@ -147,7 +148,7 @@ export default function ControlWatch() {
 
     // How the Dial is reached. Applied here as well as in the panel, so a
     // receiver nobody has opened the panel on still connects the chosen way.
-    const dialLink = (cfg.dial && cfg.dial.link) === 'usb' ? 'usb' : 'bluetooth';
+    const dialLink = dialLinkFor(cfg.dial && cfg.dial.link);
     useEffect(() => { getDial().setLink(dialLink); }, [dialLink]);
 
     useEffect(() => {

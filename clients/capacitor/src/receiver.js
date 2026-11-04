@@ -22,6 +22,7 @@
 import { createClient } from '../../../static/v2/src/bridge/client.js';
 import { INSTANCE_SECRETS } from '../../../static/v2/src/lib/backup.js';
 import { installHostSpeech } from './hostspeech.js';
+import { installHostBluetooth } from './hostbluetooth.js';
 
 // The channel ReceiverActivity opens with addWebMessageListener. Absent on a
 // system WebView too old for it, in which case the receiver simply stays open
@@ -499,9 +500,12 @@ function onAppStats(json) {
 // the reasons are in ./hostspeech.js; set up further down, with the rest of
 // what has to exist before the page's first script.
 let hostSpeech = null;
+// The UberSDR Dial's Bluetooth link, the same way: see ./hostbluetooth.js.
+let hostBluetooth = null;
 
 function onHostMessage(data) {
     if (hostSpeech && hostSpeech.onHostMessage(data)) return;
+    if (hostBluetooth && hostBluetooth.onHostMessage(data)) return;
     if (data.startsWith('action:')) {
         runAction(data.slice(7));
         return;
@@ -675,6 +679,9 @@ declareSpeech();
 // before the page's: v2 looks for `stt` once, synchronously, while deciding
 // whether to offer on-device transcription at all.
 hostSpeech = installHostSpeech({ win: window, tellHost });
+// Likewise before the page's: the SDR control panel asks whether there is a
+// navigator.bluetooth while it draws.
+hostBluetooth = installHostBluetooth({ win: window, tellHost });
 installAppStats();
 installSaveFile();
 watchShared();

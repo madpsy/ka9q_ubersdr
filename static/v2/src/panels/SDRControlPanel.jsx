@@ -42,6 +42,9 @@ import {
 import { flexAvailable } from '../controls/flexcontrol.js';
 import { rc28Available } from '../controls/rc28.js';
 import { dialAvailable } from '../controls/dial.js';
+import {
+    bridgeSwitchHidden, dialLinkFor, dialLinksOffered, surfaceOffered,
+} from '../lib/hostPanels.js';
 import { TX_LED_SOURCES, ledSettings } from '../controls/rc28leds.js';
 import { isCCKey, midiAvailable } from '../controls/webmidi.js';
 import {
@@ -119,8 +122,11 @@ export default function SDRControlPanel({ minimal }) {
     // mappings, a learn mode and a hardware connection behind it.
     const mapped = isMappedSurface(surface);
 
+    // Only what the host can carry (lib/hostPanels.js) — but never hiding the
+    // surface already chosen, which would leave it running with no way to
+    // switch it off.
     const options = [
-        ...SURFACE_OPTIONS,
+        ...SURFACE_OPTIONS.filter((o) => o.value === surface || surfaceOffered(o.value)),
         ...external.map((e) => ({ value: e.id, label: e.label, title: e.description || undefined })),
     ];
 
@@ -137,7 +143,7 @@ export default function SDRControlPanel({ minimal }) {
                 below are mutually exclusive and hold hardware, and this holds
                 nothing and runs alongside any of them. It is also the one most
                 people here are looking for. */}
-            <BridgeSwitch minimal={minimal} />
+            {!bridgeSwitchHidden() && <BridgeSwitch minimal={minimal} />}
 
             {!minimal && (
                 <Field label="Surface">
@@ -324,7 +330,8 @@ function SurfaceControl({ id, cfg, update, dspSchemas, hw, onMessage, minimal })
     const [connected, setConnected] = useState(() => surface.connected);
     // The Dial over USB: its port is open, but it has not answered yet.
     const [waiting, setWaiting] = useState(() => !!surface.waiting);
-    const dialLink = isDial && conf.link === 'usb' ? 'usb' : 'bluetooth';
+    const dialLink = isDial ? dialLinkFor(conf.link) : 'bluetooth';
+    const dialLinks = dialLinksOffered();
     const [devices, setDevices] = useState(() => (listed ? surface.devices() : []));
     const [deviceId, setDeviceId] = useState(() => (listed && surface.deviceId) || '');
     // Learn: null when idle, otherwise { fn, mapBoth, pressKey }.
@@ -539,7 +546,8 @@ function SurfaceControl({ id, cfg, update, dspSchemas, hw, onMessage, minimal })
 
     // Bluetooth or a USB cable. Ahead of the availability check, so a browser
     // with only one of the two can still be switched to the other.
-    const linkPicker = isDial && !minimal && (
+    // Not drawn at all where the host offers only one of them.
+    const linkPicker = isDial && !minimal && dialLinks.length > 1 && (
         <Field label="Connect over">
             <Segmented
                 size="sm"

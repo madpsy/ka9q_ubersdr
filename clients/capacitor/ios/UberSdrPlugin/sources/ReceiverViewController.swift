@@ -200,6 +200,7 @@ final class ReceiverViewController: UIViewController, WKNavigationDelegate, WKUI
 
         host = HostChannel(webView: webView, instanceId: instanceId, label: label,
                            prefsScope: prefsScope)
+        host?.presenter = self
         host?.onTransport = { [weak self] action in
             DispatchQueue.main.async { self?.transport(action) }
         }
@@ -860,6 +861,22 @@ final class ReceiverViewController: UIViewController, WKNavigationDelegate, WKUI
         // Android client has the same list for the same reason.
         js += "hidePanels:\(Self.hiddenPanels)"
         js += "};}catch(e){}"
+        // The controllers the SDR control panel can offer here, decided at document
+        // start: the Dial where the app can carry its Bluetooth link, and a
+        // gamepad where the WebView has the Gamepad API. With either, the panel
+        // comes back and offers those alone — no Web Serial, WebHID or Web MIDI
+        // in a WebView, and no extensions for the bridge switch to allow (the
+        // app's own scripts use that bridge). See
+        // static/v2/src/lib/hostPanels.js and src/hostbluetooth.js and DialBluetooth.
+        // ReceiverActivity builds the same script.
+        js += "try{var h=window.ubersdrDesktop,s=[];"
+        if DialBluetooth.offered() {
+            js += "s.push('dial');h.bluetoothHost=true;h.dialLinks=['bluetooth'];"
+        }
+        js += "if(typeof navigator.getGamepads==='function')s.push('gamepad');"
+        js += "if(s.length){h.controlSurfaces=s;h.bridgeSwitch=false;"
+        js += "h.hidePanels=h.hidePanels.filter(function(p){return p!=='sdrcontrol';});}"
+        js += "}catch(e){}"
         if let password = password, !password.isEmpty {
             js += "try{sessionStorage.setItem('ubersdr.v2.password',\(quote(password)));}catch(e){}"
         }
@@ -1014,6 +1031,8 @@ final class ReceiverViewController: UIViewController, WKNavigationDelegate, WKUI
     /// Chat is not in the list: it is switched off by its own flag above,
     /// because "this client has no chat" is a statement about what the client
     /// *can do*, where this list is what it would rather not show.
+    /// SDR control comes back where there is a controller the device can drive
+    /// by itself — the Dial over Bluetooth, or a gamepad — see the seed script.
     private static let hiddenPanels = #"["shortcuts","radiocontrol","sdrcontrol"]"#
 
     private static let vibrateShim = """

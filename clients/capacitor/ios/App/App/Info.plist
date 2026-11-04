@@ -153,5 +153,13 @@
 	     iOS terminates the app the moment it asks. -->
 	<key>NSSpeechRecognitionUsageDescription</key>
 	<string>UberSDR can turn what the receiver is playing into text, on this device. It listens to the receiver's audio, not the microphone, and nothing is sent anywhere.</string>
+
+	<!-- The UberSDR Dial, a Bluetooth knob for the receiver. Asked for the
+	     first time Connect is pressed in the SDR control panel, never at
+	     launch; the scan looks for the Dial's own service and nothing else.
+	     See DialBluetooth.swift. Without this key iOS terminates the app the
+	     moment it touches Bluetooth. -->
+	<key>NSBluetoothAlwaysUsageDescription</key>
+	<string>UberSDR uses Bluetooth to connect to an UberSDR Dial, so you can tune the receiver with its knob.</string>
 </dict>
 </plist>

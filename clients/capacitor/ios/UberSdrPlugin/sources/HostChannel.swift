@@ -99,6 +99,12 @@ final class HostChannel: NSObject, UNUserNotificationCenterDelegate {
     /// neither of these should cost them anything.
     private var speechToText: OnDeviceSpeech?
     private var translator: OnDeviceTranslation?
+    /// The UberSDR Dial over Bluetooth (src/hostbluetooth.js), made on the
+    /// page's first Bluetooth message: making it is not what prompts —
+    /// DialBluetooth only creates its manager when there is reason to.
+    private var dial: DialBluetooth?
+    /// What the Dial's chooser is shown over.
+    weak var presenter: UIViewController?
 
     init(webView: WKWebView, instanceId: String, label: String, prefsScope: String?) {
         self.prefsScope = prefsScope
@@ -167,6 +173,8 @@ final class HostChannel: NSObject, UNUserNotificationCenterDelegate {
             transcribe(type, message)
         case "translate-availability", "translate":
             translate(type, message)
+        case "ble-request", "ble-devices", "ble-connect", "ble-notify", "ble-write", "ble-disconnect":
+            bluetooth(type, message)
         default:              break
         }
     }
@@ -289,6 +297,9 @@ final class HostChannel: NSObject, UNUserNotificationCenterDelegate {
     /// Translation keeps nothing per page, and its sessions are worth keeping.
     func pageChanged() {
         speechToText?.stopAll()
+        // The page that held the dial has gone; the next one connects again
+        // itself if it is set to.
+        dial?.close()
     }
 
     /// The receiver is gone: take its card and its buttons off the lock screen.
@@ -307,6 +318,8 @@ final class HostChannel: NSObject, UNUserNotificationCenterDelegate {
         // runs until it is told otherwise.
         speechToText?.stopAll()
         translator?.close()
+        dial?.close()
+        dial = nil
         let centre = MPRemoteCommandCenter.shared()
         for command in [centre.playCommand, centre.pauseCommand, centre.togglePlayPauseCommand,
                         centre.stopCommand, centre.nextTrackCommand, centre.previousTrackCommand] {
@@ -534,6 +547,21 @@ final class HostChannel: NSObject, UNUserNotificationCenterDelegate {
         default:
             break
         }
+    }
+
+    /// The Dial over Bluetooth — see DialBluetooth. Not answered at all where
+    /// it was not offered, which the page reads as a host with no Bluetooth.
+    private func bluetooth(_ type: String, _ message: [String: Any]) {
+        guard DialBluetooth.offered() else { return }
+        let engine: DialBluetooth
+        if let existing = dial {
+            engine = existing
+        } else {
+            engine = DialBluetooth { [weak self] text in self?.deliver(text) }
+            dial = engine
+        }
+        engine.presenter = presenter
+        engine.handle(type, message)
     }
 
     /// Translating the transcript's lines — see OnDeviceTranslation. A line is

@@ -5,7 +5,10 @@
 // working interface until somebody goes to find a panel.
 
 const assert = require('assert');
-const { panelHiddenByHost } = require('./.build/hostpanels.cjs');
+const {
+    panelHiddenByHost, surfaceOfferedByHost, dialLinksOfferedByHost, dialLinkForHost,
+    bridgeSwitchHiddenByHost,
+} = require('./.build/hostpanels.cjs');
 
 let pass = 0;
 const t = (name, fn) => {
@@ -43,6 +46,48 @@ t('rubbish inside the list is ignored, the rest still counts', () => {
     const host = { hidePanels: [null, 42, undefined, 'games'] };
     assert.strictEqual(panelHiddenByHost(host, 'games'), true);
     assert.strictEqual(panelHiddenByHost(host, 'chat'), false);
+});
+
+// --- controllers the host can drive ------------------------------------------
+
+t('no list offers every surface', () => {
+    for (const host of [null, {}, { controlSurfaces: 'dial' }, { controlSurfaces: true }]) {
+        for (const id of ['flexcontrol', 'rc28', 'midi', 'gamepad', 'dial']) {
+            assert.strictEqual(surfaceOfferedByHost(host, id), true, JSON.stringify(host) + ' ' + id);
+        }
+    }
+});
+
+t('a list offers what it names, and off always', () => {
+    const host = { controlSurfaces: ['Dial', 7] };
+    assert.strictEqual(surfaceOfferedByHost(host, 'dial'), true);
+    assert.strictEqual(surfaceOfferedByHost(host, 'off'), true);
+    for (const id of ['flexcontrol', 'rc28', 'midi', 'gamepad']) {
+        assert.strictEqual(surfaceOfferedByHost(host, id), false, id);
+    }
+});
+
+t('dial links: both unless the host narrows them', () => {
+    assert.deepStrictEqual(dialLinksOfferedByHost(null), ['bluetooth', 'usb']);
+    assert.deepStrictEqual(dialLinksOfferedByHost({ dialLinks: ['bluetooth'] }), ['bluetooth']);
+    assert.deepStrictEqual(dialLinksOfferedByHost({ dialLinks: ['usb', 'bluetooth'] }), ['bluetooth', 'usb']);
+    // A list naming nothing real is a mistake, read as no list.
+    assert.deepStrictEqual(dialLinksOfferedByHost({ dialLinks: ['carrier pigeon'] }), ['bluetooth', 'usb']);
+});
+
+t('a saved USB link is overridden where the host has no USB', () => {
+    const app = { dialLinks: ['bluetooth'] };
+    assert.strictEqual(dialLinkForHost(app, 'usb'), 'bluetooth');
+    assert.strictEqual(dialLinkForHost(app, undefined), 'bluetooth');
+    assert.strictEqual(dialLinkForHost(null, 'usb'), 'usb');
+    assert.strictEqual(dialLinkForHost(null, 'nonsense'), 'bluetooth');
+});
+
+t('the bridge switch hides only on an explicit false', () => {
+    assert.strictEqual(bridgeSwitchHiddenByHost(null), false);
+    assert.strictEqual(bridgeSwitchHiddenByHost({}), false);
+    assert.strictEqual(bridgeSwitchHiddenByHost({ bridgeSwitch: 0 }), false);
+    assert.strictEqual(bridgeSwitchHiddenByHost({ bridgeSwitch: false }), true);
 });
 
 console.log(`\n${pass} ok`);

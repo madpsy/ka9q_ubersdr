@@ -128,6 +128,18 @@
          there is no runtime request to make. -->
     <uses-permission android:name="android.permission.VIBRATE" />
 
+    <!-- The UberSDR Dial over Bluetooth (DialBluetooth.java), Android 12 and
+         later: the "Nearby devices" runtime permission, asked for the first
+         time the operator presses Connect in the SDR control panel. The scan
+         is filtered to the Dial's own service and is never used for location,
+         which is what neverForLocation promises. Below 12 the Dial is not
+         offered, so the older BLUETOOTH and location permissions are not
+         declared. -->
+    <uses-permission android:name="android.permission.BLUETOOTH_SCAN"
+        android:usesPermissionFlags="neverForLocation" />
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+    <uses-feature android:name="android.hardware.bluetooth_le" android:required="false" />
+
     <!-- Only for saving an export — a recording, a decoder log — into the
          Downloads folder, and only on Android 9 and earlier, where that meant
          writing a real file. From Android 10 a download is a MediaStore row

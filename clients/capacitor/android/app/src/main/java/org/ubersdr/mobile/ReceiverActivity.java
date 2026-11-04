@@ -94,6 +94,10 @@ public class ReceiverActivity extends Activity {
      * Shown here they would be panels that can only fail.
      *
      * <p>The iOS client carries the same list, for the same reasons.
+     *
+     * <p>Except that SDR control comes back where there is a controller the
+     * phone can drive by itself — the UberSDR Dial over Bluetooth, or a gamepad
+     * — and is told to offer those alone. See seedScript.
      */
     private static final String HIDDEN_PANELS = "[\"shortcuts\",\"radiocontrol\",\"sdrcontrol\"]";
 
@@ -112,6 +116,9 @@ public class ReceiverActivity extends Activity {
     private Translation translation;
     private boolean sttHost;
     private boolean translateHost;
+    // The UberSDR Dial over Bluetooth: offered, and its native half once used.
+    private boolean dialHost;
+    private DialBluetooth dial;
     // Whether the receiver is on screen, for the recogniser: it carries on
     // behind the lock screen, but does not retry a failure there. See
     // Recognition.ended.
@@ -203,13 +210,14 @@ public class ReceiverActivity extends Activity {
         boolean channel = WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_LISTENER);
         sttHost = channel && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && Recognition.offered(this);
         translateHost = channel && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && Translation.offered(this);
+        dialHost = channel && DialBluetooth.offered(this);
 
         // The preload's jobs, before the page's first script runs.
         Set<String> rules = Collections.singleton(origin);
         if (WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) {
             WebViewCompat.addDocumentStartJavaScript(
                     web, seedScript(upstream, new Secrets(this).get(instanceId), notificationState(),
-                            prefs.snapshot(), sttHost, translateHost),
+                            prefs.snapshot(), sttHost, translateHost, dialHost),
                     rules);
 
             // The page API client (src/receiver.js, bundled by build.sh), and
@@ -269,6 +277,9 @@ public class ReceiverActivity extends Activity {
             public void onPageStarted(WebView view, String url, android.graphics.Bitmap favicon) {
                 super.onPageStarted(view, url, favicon);
                 if (recognition != null) recognition.stopAll();
+                // The page that held the dial has gone; the next one connects
+                // again itself if it is set to.
+                if (dial != null) dial.close();
             }
         });
 
@@ -483,6 +494,10 @@ public class ReceiverActivity extends Activity {
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == DialBluetooth.REQUEST_ENABLE) {
+            if (dial != null) dial.onEnableResult(resultCode == RESULT_OK);
+            return;
+        }
         if (requestCode != REQUEST_FILE) return;
         ValueCallback<android.net.Uri[]> callback = filePick;
         filePick = null;
@@ -670,6 +685,22 @@ public class ReceiverActivity extends Activity {
             case "translate":
             case "translate-settings":
                 translate(type, message);
+                break;
+            case "ble-request":
+            case "ble-devices":
+            case "ble-connect":
+            case "ble-notify":
+            case "ble-write":
+            case "ble-disconnect":
+                // Not answered at all where it was not offered, which the page
+                // reads as a host with no Bluetooth.
+                if (!dialHost) break;
+                if (dial == null) {
+                    dial = new DialBluetooth(this, (out) -> runOnUiThread(() -> {
+                        if (reply != null) reply.postMessage(out);
+                    }));
+                }
+                dial.onMessage(type, message);
                 break;
             case "stats":
                 // Measured on the way past rather than on a timer: the page
@@ -950,7 +981,8 @@ public class ReceiverActivity extends Activity {
     }
 
     private static String seedScript(String upstreamOrigin, String password, String notifications,
-                                     String sharedPrefs, boolean sttHost, boolean translateHost) {
+                                     String sharedPrefs, boolean sttHost, boolean translateHost,
+                                     boolean dialHost) {
         StringBuilder sb = new StringBuilder();
         sb.append("(function(){try{window.ubersdrDesktop={upstreamOrigin:")
           .append(JSONObject.quote(upstreamOrigin == null ? "" : upstreamOrigin))
@@ -967,6 +999,14 @@ public class ReceiverActivity extends Activity {
         // can show its page for adding one: translate.openSettings().
         if (translateHost) sb.append(",translateHost:true,translateSettings:true");
         sb.append("};}catch(e){}");
+        // The controllers the SDR control panel can offer here, decided at document
+        // start: the Dial where the app can carry its Bluetooth link, and a
+        // gamepad where the WebView has the Gamepad API. With either, the panel
+        // comes back and offers those alone — no Web Serial, WebHID or Web MIDI
+        // in a WebView, and no extensions for the bridge switch to allow (the
+        // app's own scripts use that bridge). See
+        // static/v2/src/lib/hostPanels.js and src/hostbluetooth.js.
+        sb.append(controlSurfacesScript(dialHost));
         if (password != null && !password.isEmpty()) {
             sb.append("try{sessionStorage.setItem('ubersdr.v2.password',")
               .append(JSONObject.quote(password))
@@ -986,6 +1026,16 @@ public class ReceiverActivity extends Activity {
           .append("}catch(e){}");
         sb.append("})();");
         return sb.toString();
+    }
+
+    /** iOS's ReceiverViewController builds the same script. */
+    private static String controlSurfacesScript(boolean dialHost) {
+        return "try{var h=window.ubersdrDesktop,s=[];"
+                + (dialHost ? "s.push('dial');h.bluetoothHost=true;h.dialLinks=['bluetooth'];" : "")
+                + "if(typeof navigator.getGamepads==='function')s.push('gamepad');"
+                + "if(s.length){h.controlSurfaces=s;h.bridgeSwitch=false;"
+                + "h.hidePanels=h.hidePanels.filter(function(p){return p!=='sdrcontrol';});}"
+                + "}catch(e){}";
     }
 
     /**
@@ -1045,6 +1095,12 @@ public class ReceiverActivity extends Activity {
     @Override
     public void onRequestPermissionsResult(int code, String[] permissions, int[] results) {
         super.onRequestPermissionsResult(code, permissions, results);
+        if (code == DialBluetooth.REQUEST_PERMISSIONS) {
+            boolean all = results.length > 0;
+            for (int r : results) all &= r == android.content.pm.PackageManager.PERMISSION_GRANTED;
+            if (dial != null) dial.onPermissionsResult(all);
+            return;
+        }
         if (code != 1 || reply == null) return;
         boolean granted = results.length > 0
                 && results[0] == android.content.pm.PackageManager.PERMISSION_GRANTED;
@@ -1091,6 +1147,12 @@ public class ReceiverActivity extends Activity {
         if (translation != null) {
             translation.close();
             translation = null;
+        }
+        // A dial left connected to a page that has gone would show a receiver
+        // nobody is listening to.
+        if (dial != null) {
+            dial.close();
+            dial = null;
         }
         if (web != null) {
             web.loadUrl("about:blank");

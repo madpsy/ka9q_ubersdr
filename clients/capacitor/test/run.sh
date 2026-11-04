@@ -19,5 +19,12 @@ esbuild ../src/hostspeech.js --bundle --format=cjs --platform=node \
 # rather than against this file's reading of the contract.
 esbuild ../../../static/v2/test/whisperengines.entry.js --bundle --format=cjs --platform=node \
     --outfile=.build/whisperengines.cjs --log-level=warning
+esbuild ../src/hostbluetooth.js --bundle --format=cjs --platform=node \
+    --outfile=.build/hostbluetooth.cjs --log-level=warning
+# v2's Dial driver, so the Bluetooth shim is tested against the page that will
+# drive it.
+esbuild ../../../static/v2/src/controls/dial.js --bundle --format=cjs --platform=node \
+    --outfile=.build/dial.cjs --log-level=warning
 
 node hostspeech.test.js
+node hostbluetooth.test.js

@@ -30,7 +30,7 @@ Pod::Spec.new do |s|
   # app on anything older — not degrade, refuse. OnDeviceTranslation only
   # touches it behind `#available(iOS 26.0, *)`.
   s.weak_frameworks  = 'Translation'
-  s.frameworks       = 'Speech'
+  s.frameworks       = 'Speech', 'CoreBluetooth'
   s.dependency 'Capacitor'
   s.swift_version    = '5.0'
 end

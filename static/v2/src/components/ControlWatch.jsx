@@ -142,6 +142,11 @@ export default function ControlWatch() {
     const confRef = useRef(null);
     confRef.current = cfg[surface];
 
+    // How the Dial is reached. Applied here as well as in the panel, so a
+    // receiver nobody has opened the panel on still connects the chosen way.
+    const dialLink = (cfg.dial && cfg.dial.link) === 'usb' ? 'usb' : 'bluetooth';
+    useEffect(() => { getDial().setLink(dialLink); }, [dialLink]);
+
     useEffect(() => {
         if (!surface || surface === 'off') return undefined;
         const attempt = () => tryAutoConnect(surface, confRef.current);
@@ -157,8 +162,9 @@ export default function ControlWatch() {
         }
         // Web Bluetooth has no hotplug event for a device this page has not
         // connected to; the one attempt above (where the browser can remember
-        // devices at all) is all there is.
-        if (surface === 'dial') return undefined;
+        // devices at all) is all there is. Over USB the Dial is a serial port,
+        // with Web Serial's hotplug event below.
+        if (surface === 'dial' && dialLink !== 'usb') return undefined;
         // WebHID's own hotplug event, for the same reason as Web Serial's below.
         if (surface === 'rc28') {
             if (!rc28Available()) return undefined;
@@ -170,7 +176,7 @@ export default function ControlWatch() {
         if (!flexAvailable()) return undefined;
         navigator.serial.addEventListener('connect', attempt);
         return () => navigator.serial.removeEventListener('connect', attempt);
-    }, [surface]);
+    }, [surface, dialLink]);
 
     // The RC-28's lamps. Read through a ref because the poll is set up once per
     // surface and must see the current render's receiver and settings.

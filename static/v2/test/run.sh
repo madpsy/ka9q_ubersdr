@@ -11,6 +11,14 @@ cd "$(dirname "$0")"
 command -v esbuild >/dev/null || { echo "esbuild not found" >&2; exit 1; }
 command -v node >/dev/null || { echo "node not found" >&2; exit 1; }
 
+# Node 21+ has a navigator of its own, a read-only getter, so a test's
+# `globalThis.navigator = { serial, hid, ... }` was silently ignored and the
+# FlexControl and RC-28 tests found no Web Serial or WebHID. Turn it off where
+# the flag exists; older Node has no navigator to turn off.
+if node --no-experimental-global-navigator -e '' 2>/dev/null; then
+    export NODE_OPTIONS="${NODE_OPTIONS:+$NODE_OPTIONS }--no-experimental-global-navigator"
+fi
+
 mkdir -p .build
 esbuild ../src/radio/spectrum-connection.js --bundle --format=cjs --platform=node \
     --outfile=.build/spectrum.cjs --log-level=warning

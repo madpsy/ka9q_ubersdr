@@ -69,7 +69,8 @@ export const DEFAULT_STATE = {
     midi: { mappings: {}, device: '', autoConnect: false },
     // The UberSDR Dial (Bluetooth). Arrives mapped: each knob page does what
     // the dial's chip says it does. See controls/dial.js.
-    dial: { mappings: DIAL_DEFAULT_MAPPINGS, autoConnect: false },
+    // `link`: how it is reached, 'bluetooth' or 'usb' (a cable, Web Serial).
+    dial: { mappings: DIAL_DEFAULT_MAPPINGS, autoConnect: false, link: 'bluetooth' },
     // Arrives mapped, like the RC-28: a pad's layout is known in advance.
     // `device` is the pad's id string, remembered the way MIDI remembers a
     // name. `rumble` is the feedback — see controls/gamepad.js.

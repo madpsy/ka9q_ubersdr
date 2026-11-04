@@ -61,7 +61,7 @@ const SURFACE_OPTIONS = [
     { value: 'rc28', label: 'RC-28' },
     { value: 'midi', label: 'MIDI' },
     { value: 'gamepad', label: 'Gamepad', title: 'A game controller — Xbox, PlayStation, Switch Pro, 8BitDo — over USB or Bluetooth' },
-    { value: 'dial', label: 'Dial', title: 'The UberSDR Dial, over Bluetooth — shows this receiver’s frequency, mode, SNR and squelch on its own screen' },
+    { value: 'dial', label: 'Dial', title: 'The UberSDR Dial, over Bluetooth or USB — shows this receiver’s frequency, mode, SNR and squelch on its own screen' },
 ];
 
 // A pad's id string carries its vendor and product in brackets — "Xbox
@@ -322,6 +322,9 @@ function SurfaceControl({ id, cfg, update, dspSchemas, hw, onMessage, minimal })
     const surface = getSurface(id);
 
     const [connected, setConnected] = useState(() => surface.connected);
+    // The Dial over USB: its port is open, but it has not answered yet.
+    const [waiting, setWaiting] = useState(() => !!surface.waiting);
+    const dialLink = isDial && conf.link === 'usb' ? 'usb' : 'bluetooth';
     const [devices, setDevices] = useState(() => (listed ? surface.devices() : []));
     const [deviceId, setDeviceId] = useState(() => (listed && surface.deviceId) || '');
     // Learn: null when idle, otherwise { fn, mapBoth, pressKey }.
@@ -465,6 +468,7 @@ function SurfaceControl({ id, cfg, update, dspSchemas, hw, onMessage, minimal })
             surface.on('message', ({ text, tone }) => onMessage(text, tone)),
             surface.on('state', (s) => {
                 setConnected(s.connected);
+                setWaiting(!!s.waiting);
                 // Whoever connected it — this panel, or ControlWatch on load or
                 // on a hotplug — the picker shows what is actually open.
                 setDeviceId(surface.deviceId || '');
@@ -531,42 +535,69 @@ function SurfaceControl({ id, cfg, update, dspSchemas, hw, onMessage, minimal })
     }, [isPad, connected, devices, deviceId, conf.device]);
 
     const available = isMidi ? midiAvailable()
-        : (isRc28 ? rc28Available() : (isPad ? gamepadAvailable() : (isDial ? dialAvailable() : flexAvailable())));
+        : (isRc28 ? rc28Available() : (isPad ? gamepadAvailable() : (isDial ? dialAvailable(dialLink) : flexAvailable())));
+
+    // Bluetooth or a USB cable. Ahead of the availability check, so a browser
+    // with only one of the two can still be switched to the other.
+    const linkPicker = isDial && !minimal && (
+        <Field label="Connect over">
+            <Segmented
+                size="sm"
+                value={dialLink}
+                options={[
+                    { value: 'bluetooth', label: 'Bluetooth', disabled: connected || waiting },
+                    { value: 'usb', label: 'USB', title: 'A USB cable, over Web Serial', disabled: connected || waiting },
+                ]}
+                onChange={(v) => {
+                    surface.setLink(v);
+                    update((prev) => ({ ...prev, dial: { ...prev.dial, link: v } }));
+                }}
+            />
+        </Field>
+    );
+
     if (!available) {
         // Chrome hides WebHID, Web Serial and Web MIDI from plain-http pages,
         // so there the browser is right and the address is what is wrong.
         if (typeof window !== 'undefined' && window.isSecureContext === false) {
             return (
+                <>
+                {linkPicker}
                 <div className="note note--warn">
-                    {isMidi ? 'MIDI devices' : (isRc28 ? 'The RC-28' : (isPad ? 'Game controllers' : (isDial ? 'Bluetooth devices' : 'Serial ports')))} need this receiver to be opened over https — browsers only offer them to secure pages.
+                    {isMidi ? 'MIDI devices' : (isRc28 ? 'The RC-28' : (isPad ? 'Game controllers' : (isDial && dialLink === 'bluetooth' ? 'Bluetooth devices' : 'Serial ports')))} need this receiver to be opened over https — browsers only offer them to secure pages.
                 </div>
+                </>
             );
         }
         return (
+            <>
+            {linkPicker}
             <div className="note note--warn">
                 {isMidi && 'This browser has no Web MIDI API. Chrome or Edge is needed — Firefox has never shipped it.'}
                 {isRc28 && 'This browser has no WebHID API. Chrome or Edge is needed — Firefox and Safari have not shipped it.'}
                 {isPad && 'This browser has no Gamepad API.'}
-                {isDial && 'This browser has no Web Bluetooth. Chrome or Edge on Windows, macOS, ChromeOS or Android is needed — not Firefox, Safari or any iOS browser. On Linux, Chrome keeps it behind a flag: enable chrome://flags/#enable-experimental-web-platform-features and restart Chrome.'}
+                {isDial && dialLink === 'usb' && 'This browser has no Web Serial API. Chrome or Edge is needed, or the UberSDR desktop app.'}
+                {isDial && dialLink === 'bluetooth' && 'This browser has no Web Bluetooth. Chrome or Edge on Windows, macOS, ChromeOS or Android is needed — not Firefox, Safari or any iOS browser. On Linux, Chrome keeps it behind a flag: enable chrome://flags/#enable-experimental-web-platform-features and restart Chrome.'}
                 {!isMidi && !isRc28 && !isPad && !isDial && 'This browser has no Web Serial API. Chrome or Edge is needed.'}
             </div>
+            </>
         );
     }
 
     const conn = (
         <div className="rc-conn">
-            <span className={`dot dot--${connected ? 'good' : 'bad'}`} />
+            <span className={`dot dot--${connected ? 'good' : (waiting ? 'warn' : 'bad')}`} />
             <span className="rc-conn__state">
                 {connected
                     ? (isMidi ? surface.deviceName
                         : (isPad ? padName(surface.deviceName)
-                            : (isDial ? `${surface.deviceName} connected` : `${isRc28 ? 'RC-28' : 'FlexControl'} connected`)))
-                    : 'Not connected'}
+                            : (isDial ? `${surface.deviceName} connected${dialLink === 'usb' ? ' over USB' : ''}` : `${isRc28 ? 'RC-28' : 'FlexControl'} connected`)))
+                    : (waiting ? 'Port open — on the dial, choose Controller · USB' : 'Not connected')}
             </span>
         </div>
     );
 
-    const button = connected ? (
+    const button = connected || waiting ? (
         <Button
             variant="ghost"
             size="sm"
@@ -602,7 +633,7 @@ function SurfaceControl({ id, cfg, update, dspSchemas, hw, onMessage, minimal })
         ? (conf.device ? `Reconnects to ${isPad ? padName(conf.device) : conf.device}` : 'Connect once first, so there is a device to remember')
         : (isRc28
             ? 'Reopens the dial once you have picked it here'
-            : (isDial
+            : (isDial && dialLink === 'bluetooth'
                 ? 'Reopens the dial once you have picked it here, where the browser supports remembering Bluetooth devices'
                 : 'Reopens the dial once you have picked its port here'));
 
@@ -637,6 +668,8 @@ function SurfaceControl({ id, cfg, update, dspSchemas, hw, onMessage, minimal })
     return (
         <>
             {conn}
+
+            {linkPicker}
 
             {listed && (
                 <Field label={isPad ? 'Controller' : 'Device'}>
@@ -723,12 +756,12 @@ function SurfaceControl({ id, cfg, update, dspSchemas, hw, onMessage, minimal })
                 <>
                     <div className="divider" />
                     <div className="note">
-                        The UberSDR Dial is firmware for the Guition JC3636K518C (also sold as JC3636K718) round knob display.
+                        The UberSDR Dial is firmware for the Guition JC3636K518C (also sold as JC3636K718) circular knob display.
                         Install it from your browser with the{' '}
                         <a href="https://madpsy.github.io/ubersdr_dial/flash/" target="_blank" rel="noopener noreferrer">
                             UberSDR Dial web flasher
                         </a>
-                        . When the dial starts, choose <b>Controller</b> mode, then connect to it here.
+                        . When the dial starts, choose <b>Controller</b> with <b>{dialLink === 'usb' ? 'USB' : 'Bluetooth'}</b> to match the choice above, then connect to it here.{dialLink === 'usb' && ' Over USB it needs no pairing, and it charges while you use it.'}
                     </div>
                 </>
             ) : (

@@ -134,6 +134,8 @@ export function tryAutoConnect(id, conf) {
     if (!id || id === 'off' || !conf || !conf.autoConnect || manualOff.has(id)) return;
     const surface = getSurface(id);
     if (!surface || surface.connected) return;
+    // The Dial reopens whichever way it was last chosen to connect.
+    if (id === 'dial') surface.setLink(conf.link);
     // MIDI and a game controller list their devices and are matched to the one
     // remembered by name; the serial and HID ones reopen what was granted.
     if (id !== 'midi' && id !== 'gamepad') { surface.autoConnect(); return; }

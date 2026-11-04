@@ -217,10 +217,10 @@ at('the knob tunes by the Receiver panel step, and the STEP page changes it', as
     d.setSurfaceMappings('dial', d.DEFAULT_STATE.dial.mappings);
     const off = d.watchSurface('dial');
     try {
-        bt.press([1, 0xfe]);  // tune, two detents anticlockwise
-        assert.deepStrictEqual(steps, [[500, -1, 1], [500, -1, 1]], 'the Receiver panel step, via stepBy');
-        bt.press([6, 1]);     // step page, one click clockwise: 500 -> next in the list
-        assert.deepStrictEqual(stepSet, [[1000, 'usb']]);
+            bt.press([1, 0xfe]);  // tune, two detents anticlockwise
+            assert.deepStrictEqual(steps, [[500, -1, 1], [500, -1, 1]], 'the Receiver panel step, via stepBy');
+            bt.press([6, 1]);     // step page, one click clockwise: 500 -> next in the list
+            assert.deepStrictEqual(stepSet, [[1000, 'usb']]);
     } finally {
         off();
         d._resetDispatch();
@@ -236,6 +236,128 @@ at('the dial is a mapped surface, and choosing another lets go of it', async () 
     d.releaseSurfaceExcept('rc28');
     await Promise.resolve();
     assert.strictEqual(dial.connected, false);
+});
+
+// --- USB: the same records, framed over Web Serial ---------------------------
+
+t('a frame survives the trip through COBS, zeros and all, among log text', () => {
+    const payload = Uint8Array.of(0, 1, 0, 0, 255, 0);
+    const f = d.encodeFrame(d.FRAME.STATE, payload);
+    assert.strictEqual(f[0], 0);
+    assert.strictEqual(f[f.length - 1], 0);
+    assert.ok(!f.subarray(1, -1).includes(0), 'no zero inside a frame');
+    const r = new d.FrameReader();
+    const log = new TextEncoder().encode('[render] avg 135 us\n');
+    const got = r.push(Uint8Array.from([...log, ...f, ...log, ...log]));
+    assert.strictEqual(got.length, 1, 'the log text is not a frame');
+    assert.strictEqual(got[0].type, d.FRAME.STATE);
+    assert.deepStrictEqual([...got[0].payload], [...payload]);
+});
+
+t('a frame split across reads is put back together; a damaged one is dropped', () => {
+    const f = d.encodeFrame(d.FRAME.INPUT, Uint8Array.of(1, 0xff));
+    const r = new d.FrameReader();
+    assert.deepStrictEqual(r.push(f.subarray(0, 3)), []);
+    const [one] = r.push(f.subarray(3));
+    assert.deepStrictEqual([...one.payload], [1, 0xff]);
+    const bad = Uint8Array.from(f);
+    bad[2] ^= 0x40;
+    assert.deepStrictEqual(r.push(bad), []);
+});
+
+t('a 255-byte run without zeros (COBS block boundary) round-trips', () => {
+    const payload = new Uint8Array(300).map((_, i) => (i % 250) + 1);
+    const [got] = new d.FrameReader().push(d.encodeFrame(d.FRAME.SPEC, payload));
+    assert.deepStrictEqual([...got.payload], [...payload]);
+});
+
+t('the CRC is CRC-16/CCITT-FALSE, as the firmware computes it', () => {
+    assert.strictEqual(d.crc16(new TextEncoder().encode('123456789')), 0x29b1);
+});
+
+function fakeSerial() {
+    const written = [];
+    let push = null;
+    const opened = [];
+    const port = {
+        getInfo: () => ({ ...d.DIAL_USB_FILTER }),
+        open: async (opts) => { opened.push(opts); },
+        close: async () => {},
+        writable: { getWriter: () => ({ write: async (b) => { written.push(b); }, releaseLock() {} }) },
+        readable: {
+            getReader: () => ({
+                read: () => new Promise((res) => { push = res; }),
+                cancel: async () => { if (push) push({ done: true }); },
+                releaseLock() {},
+            }),
+        },
+    };
+    Object.defineProperty(globalThis, 'navigator', { configurable: true, writable: true, value: {
+        serial: { requestPort: async () => port, getPorts: async () => [port] },
+    } });
+    const frames = () => written.flatMap((b) => new d.FrameReader().push(b));
+    return {
+        opened,
+        frames,
+        send: (type, payload) => { const p = push; push = null; p({ value: d.encodeFrame(type, payload), done: false }); },
+    };
+}
+
+const tick = async (n = 10) => { for (let i = 0; i < n; i++) await Promise.resolve(); };
+
+at('over USB the port opens, says hello, and connects when the dial answers', async () => {
+    const sp = fakeSerial();
+    const dial = new d.DialControl();
+    dial.setLink('usb');
+    const states = [];
+    dial.on('state', (s) => states.push(s));
+    try {
+    assert.strictEqual(await dial.connect(), true);
+    await tick();
+    assert.strictEqual(sp.opened.length, 1);
+    assert.strictEqual(dial.connected, false, 'not until the dial answers');
+    assert.strictEqual(dial.waiting, true);
+    assert.strictEqual(sp.frames()[0].type, d.FRAME.HELLO);
+    dial.setState({ frequency: 7074000 });
+    assert.strictEqual(sp.frames().length, 1, 'nothing sent to a dial that has not answered');
+    sp.send(d.FRAME.HELLO, Uint8Array.from([1, ...new TextEncoder().encode('UberSDR Dial 40E8')]));
+    await tick();
+    assert.strictEqual(dial.connected, true);
+    assert.strictEqual(dial.deviceName, 'UberSDR Dial 40E8');
+    dial.setState({ frequency: 7074000 });
+    dial.setSpectrum(new Array(1024).fill(-100), 7074000, 200000);
+    await tick(30);
+    const sent = sp.frames();
+    const st = sent.find((f) => f.type === d.FRAME.STATE);
+    assert.strictEqual(new DataView(st.payload.buffer).getUint32(1, true), 7074000);
+    const spec = sent.find((f) => f.type === d.FRAME.SPEC);
+    assert.strictEqual(spec.payload.length, 12 + d.SPEC_POINTS, 'a whole line in one frame');
+    const inputs = [];
+    dial.on('input', (e) => inputs.push(e.key));
+    sp.send(d.FRAME.INPUT, Uint8Array.of(1, 1, 20, 1));
+    await tick();
+    assert.deepStrictEqual(inputs, ['tune_up', 'mute_tap']);
+    await dial.disconnect();
+    assert.strictEqual(sp.frames().pop().type, d.FRAME.BYE, 'tells the dial it is going');
+    assert.strictEqual(dial.connected, false);
+    assert.strictEqual(dial.waiting, false);
+    assert.ok(states.some((s) => s.waiting), 'said it was waiting');
+    } finally {
+        await dial.disconnect();  // its hello timer would hold the process open
+    }
+});
+
+at('switching between Bluetooth and USB lets go of the other', async () => {
+    fakeSerial();
+    const dial = new d.DialControl();
+    dial.setLink('usb');
+    await dial.connect();
+    await tick();
+    assert.ok(dial.port);
+    dial.setLink('bluetooth');
+    await tick();
+    assert.strictEqual(dial.port, null);
+    assert.strictEqual(dial.link, 'bluetooth');
 });
 
 (async () => {

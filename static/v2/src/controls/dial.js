@@ -1,5 +1,7 @@
-// UberSDR Dial — the round ESP32-S3 knob display (github: ubersdr_controller),
-// in its Bluetooth controller mode, read over Web Bluetooth.
+// UberSDR Dial — the round ESP32-S3 knob display (github: madpsy/ubersdr_dial),
+// in its controller mode: over Web Bluetooth, or over a USB cable with Web
+// Serial. The records below are the same either way; only how they travel
+// differs (see "USB" after the GATT table).
 //
 // Unlike the other surfaces this one is two-way. The dial sends knob turns and
 // taps like any controller; the page sends back what the receiver is doing —
@@ -40,7 +42,21 @@
 //          dB = byte / 2 - 160. SPEC_POINTS points per line, sent whole, or in
 //          8-point pieces where the link won't carry a long write.
 //
-// The same table lives in the dial's firmware (docs/BLE_PROTOCOL.md there);
+// USB: the dial's USB serial port also carries its log text, so each record
+// travels in a frame — [type u8][payload][crc16 LE], CRC-16/CCITT-FALSE over
+// type + payload, COBS-encoded, with a zero byte either side. Text never has a
+// zero byte in it, so the reader splits on zeros and drops whatever fails the
+// CRC. Types:
+//   1 hello  page -> dial [1], on open and once a second; dial -> page
+//            [1][its name, UTF-8], the answer to each
+//   2 input  dial -> page, as the input notification
+//   3 state  4 name  5 spec   page -> dial, as the characteristics above
+//            (spec always whole: USB has no write-length limit to work round)
+//   6 bye    page -> dial, closing
+// A hello connects; after that any frame keeps the link up, both ways, and
+// three seconds of silence (the dial) or four (here) counts as gone.
+//
+// The same table lives in the dial's firmware (docs/PROTOCOL.md there);
 // change both together.
 
 import { Emitter } from '../radio/emitter.js';
@@ -204,8 +220,91 @@ export function upgradeDialTune(mappings) {
     return out;
 }
 
-export function dialAvailable() {
-    return typeof navigator !== 'undefined' && !!navigator.bluetooth;
+export const DIAL_LINKS = ['bluetooth', 'usb'];
+
+// The dial's USB serial port: Espressif's own USB-Serial/JTAG (ESP32-S3).
+export const DIAL_USB_FILTER = { usbVendorId: 0x303a, usbProductId: 0x1001 };
+
+export function dialAvailable(link = 'bluetooth') {
+    if (typeof navigator === 'undefined') return false;
+    return link === 'usb' ? 'serial' in navigator : !!navigator.bluetooth;
+}
+
+// --- USB framing -------------------------------------------------------------
+
+export const FRAME = { HELLO: 1, INPUT: 2, STATE: 3, NAME: 4, SPEC: 5, BYE: 6 };
+
+export function crc16(bytes) {
+    let c = 0xffff;
+    for (const b of bytes) {
+        c ^= b << 8;
+        for (let i = 0; i < 8; i += 1) c = (c & 0x8000 ? (c << 1) ^ 0x1021 : c << 1) & 0xffff;
+    }
+    return c;
+}
+
+function cobsEncode(raw) {
+    const out = [0];
+    let codeAt = 0;
+    let code = 1;
+    for (const b of raw) {
+        if (b) { out.push(b); code += 1; }
+        if (!b || code === 0xff) { out[codeAt] = code; codeAt = out.length; out.push(0); code = 1; }
+    }
+    out[codeAt] = code;
+    return out;
+}
+
+function cobsDecode(buf) {
+    const out = [];
+    let i = 0;
+    while (i < buf.length) {
+        const code = buf[i++];
+        if (!code || i + code - 1 > buf.length) return null;
+        for (let k = 1; k < code; k += 1) out.push(buf[i++]);
+        if (code < 0xff && i < buf.length) out.push(0);
+    }
+    return out;
+}
+
+/** One frame, ready to write: zero, COBS(type + payload + crc), zero. */
+export function encodeFrame(type, payload = new Uint8Array(0)) {
+    const raw = new Uint8Array(payload.length + 3);
+    raw[0] = type;
+    raw.set(payload, 1);
+    const c = crc16(raw.subarray(0, payload.length + 1));
+    raw[payload.length + 1] = c & 0xff;
+    raw[payload.length + 2] = c >> 8;
+    return Uint8Array.from([0, ...cobsEncode(raw), 0]);
+}
+
+/**
+ * Splits what the port has sent so far into frames. Feed it bytes; it returns
+ * `[{ type, payload }]` for every good frame completed, and keeps the
+ * unfinished tail. Log text between frames fails the CRC and is dropped.
+ */
+export class FrameReader {
+    constructor() { this.buf = []; }
+
+    push(bytes) {
+        const out = [];
+        for (const b of bytes) {
+            if (b !== 0) {
+                // Nothing a frame needs is this long: it is a run of log text.
+                if (this.buf.length < 1024) this.buf.push(b);
+                continue;
+            }
+            const chunk = this.buf;
+            this.buf = [];
+            if (!chunk.length || chunk.length >= 1024) continue;
+            const f = cobsDecode(chunk);
+            if (!f || f.length < 3) continue;
+            const n = f.length;
+            if (crc16(f.slice(0, n - 2)) !== (f[n - 2] | (f[n - 1] << 8))) continue;
+            out.push({ type: f[0], payload: Uint8Array.from(f.slice(1, n - 2)) });
+        }
+        return out;
+    }
 }
 
 /** One notification as `[{ key, event }]` — one entry per detent or press. */
@@ -260,13 +359,28 @@ export function encodeState(s) {
     return new Uint8Array(buf);
 }
 
+// How often the page says hello over USB, and how long the dial may stay quiet.
+const HELLO_MS = 1000;
+const SILENT_MS = 4000;
+
 export class DialControl extends Emitter {
     constructor() {
         super();
+        // 'bluetooth' or 'usb': which way connect() and autoConnect() reach.
+        this.link = 'bluetooth';
         this.device = null;
         this.stateChar = null;
         this.nameChar = null;
         this.specChar = null;
+        // USB: the open port, and whether it is open but the dial has not
+        // answered yet (still on its start screen, say).
+        this.port = null;
+        this.waiting = false;
+        this._reader = null;
+        this._writer = null;
+        this._lastHello = 0;
+        this._lastHeard = 0;
+        this._timer = null;
         this._specSeq = 0;
         this._specBusy = false;
         this._specChunk = SPEC_POINTS;
@@ -284,15 +398,27 @@ export class DialControl extends Emitter {
         // so on a slow link the queue grew without limit and the dial fell ten
         // seconds behind. Acknowledged writes can't pile up: a slow link skips
         // waterfall lines instead, and state is always the latest.
+        //
+        // USB keeps the same chain: a port write resolves once the bytes are
+        // handed over, so the same rule (newest state, skip a busy line) holds.
         this._chain = Promise.resolve();
         this._stateQueued = false;
         this._pending = null;
         this._onDisconnect = () => this._lost();
     }
 
+    /** Bluetooth or USB. Changing it lets go of whatever the other one holds. */
+    setLink(link) {
+        const next = link === 'usb' ? 'usb' : 'bluetooth';
+        if (next === this.link) return;
+        if (this.connected || this.port || this.device) this.disconnect();
+        this.link = next;
+    }
+
     // Must be called from a user gesture — the device chooser is gated on one.
     async connect() {
-        if (!dialAvailable()) {
+        if (this.link === 'usb') return this._connectUsb();
+        if (!dialAvailable('bluetooth')) {
             this.emit('message', { text: 'This browser has no Web Bluetooth — Chrome or Edge is needed.', tone: 'error' });
             return false;
         }
@@ -308,11 +434,28 @@ export class DialControl extends Emitter {
         return this._start(device, false);
     }
 
-    // Reopens a dial this origin was already allowed to use. getDevices() is
-    // only there with Chrome's persistent-permissions support; without it this
-    // quietly does nothing and Connect is a click away.
+    // Reopens a dial this origin was already allowed to use. For Bluetooth,
+    // getDevices() is only there with Chrome's persistent-permissions support;
+    // without it this quietly does nothing and Connect is a click away. For
+    // USB, it is a port already picked here once.
     async autoConnect() {
-        if (!dialAvailable() || this.connected || !navigator.bluetooth.getDevices) return false;
+        if (this.connected || this.port) return false;
+        if (this.link === 'usb') {
+            if (!dialAvailable('usb')) return false;
+            let ports;
+            try {
+                ports = await navigator.serial.getPorts();
+            } catch (err) {
+                return false;
+            }
+            const port = (ports || []).find((p) => {
+                const info = (p.getInfo && p.getInfo()) || {};
+                return info.usbVendorId === DIAL_USB_FILTER.usbVendorId
+                    && info.usbProductId === DIAL_USB_FILTER.usbProductId;
+            });
+            return port ? this._startUsb(port, true) : false;
+        }
+        if (!dialAvailable('bluetooth') || !navigator.bluetooth.getDevices) return false;
         let devices;
         try {
             devices = await navigator.bluetooth.getDevices();
@@ -322,6 +465,25 @@ export class DialControl extends Emitter {
         const device = (devices || [])[0];
         if (!device) return false;
         return this._start(device, true);
+    }
+
+    // The dial's own preference for the waterfall rate rides in the input
+    // stream; it is a setting, not a control to map.
+    _input(bytes) {
+        for (let i = 0; i + 1 < bytes.length; i += 2) {
+            if (bytes[i] === 96 && bytes[i + 1] >= 1 && bytes[i + 1] <= 20) {
+                this.spectrumIntervalMs = Math.round(1000 / bytes[i + 1]);
+            }
+        }
+        for (const ev of parseInput(bytes)) this.emit('input', ev);
+    }
+
+    _resetLink() {
+        this._lastState = '';
+        this._chain = Promise.resolve();
+        this._stateQueued = false;
+        this._pending = null;
+        this._specBusy = false;
     }
 
     async _start(device, quiet) {
@@ -334,15 +496,7 @@ export class DialControl extends Emitter {
             // Older dial firmware has no waterfall: then there's simply nothing to send.
             this.specChar = await service.getCharacteristic(DIAL_SPEC).catch(() => null);
             input.addEventListener('characteristicvaluechanged', (e) => {
-                const bytes = new Uint8Array(e.target.value.buffer);
-                // The dial's own preference for the waterfall rate rides in the
-                // same stream; it is a setting, not a control to map.
-                for (let i = 0; i + 1 < bytes.length; i += 2) {
-                    if (bytes[i] === 96 && bytes[i + 1] >= 1 && bytes[i + 1] <= 20) {
-                        this.spectrumIntervalMs = Math.round(1000 / bytes[i + 1]);
-                    }
-                }
-                for (const ev of parseInput(bytes)) this.emit('input', ev);
+                this._input(new Uint8Array(e.target.value.buffer));
             });
             await input.startNotifications();
         } catch (err) {
@@ -354,12 +508,114 @@ export class DialControl extends Emitter {
         this.deviceName = device.name || 'UberSDR Dial';
         device.addEventListener('gattserverdisconnected', this._onDisconnect);
         this.connected = true;
-        this._lastState = '';
-        this._chain = Promise.resolve();
-        this._stateQueued = false;
+        this._resetLink();
         this.emit('state', { connected: true });
         this.emit('message', { text: `${this.deviceName} connected`, tone: 'good' });
         return true;
+    }
+
+    // --- USB -----------------------------------------------------------------
+
+    async _connectUsb() {
+        if (!dialAvailable('usb')) {
+            this.emit('message', { text: 'This browser has no Web Serial API — Chrome or Edge is needed.', tone: 'error' });
+            return false;
+        }
+        let port;
+        try {
+            port = await navigator.serial.requestPort({ filters: [DIAL_USB_FILTER] });
+        } catch (err) {
+            if (err && err.name !== 'NotFoundError') {
+                this.emit('message', { text: `Could not open the port: ${err.message}`, tone: 'error' });
+            }
+            return false;
+        }
+        return this._startUsb(port, false);
+    }
+
+    // Opens the port and waits there for the dial to answer. The port being
+    // open isn't the dial being connected: it may be on its start screen, or
+    // in another mode, and it answers once Controller · USB is chosen on it.
+    //
+    // Opening touches neither DTR nor RTS on purpose — the board's USB port
+    // resets the chip into its bootloader when those are toggled.
+    async _startUsb(port, quiet) {
+        try {
+            await port.open({ baudRate: 115200, bufferSize: 4096 });
+        } catch (err) {
+            if (!quiet) this.emit('message', { text: `Could not open the port: ${err.message}`, tone: 'error' });
+            return false;
+        }
+        this.port = port;
+        this._writer = port.writable.getWriter();
+        this._resetLink();
+        this.waiting = true;
+        this._lastHello = -Infinity;  // the first goes now
+        this._lastHeard = 0;
+        this.emit('state', { connected: false, waiting: true });
+        if (!quiet) this.emit('message', { text: 'Port open — waiting for the dial to answer', tone: 'info' });
+        this._timer = setInterval(() => this._usbTick(), 250);
+        this._usbTick();
+        this._readUsb(port).catch(() => {}).finally(() => { if (this.port === port) this._lost(); });
+        return true;
+    }
+
+    async _readUsb(port) {
+        const frames = new FrameReader();
+        while (this.port === port && port.readable) {
+            this._reader = port.readable.getReader();
+            try {
+                for (;;) {
+                    const { value, done } = await this._reader.read();
+                    if (done) return;
+                    for (const f of frames.push(value)) this._usbFrame(f);
+                }
+            } finally {
+                try { this._reader.releaseLock(); } catch (e) { /* gone */ }
+                this._reader = null;
+            }
+        }
+    }
+
+    _usbFrame({ type, payload }) {
+        this._lastHeard = performance.now();
+        if (type === FRAME.HELLO) {
+            const name = new TextDecoder().decode(payload.subarray(1)) || 'UberSDR Dial';
+            if (!this.connected) {
+                this.deviceName = name;
+                this.connected = true;
+                this.waiting = false;
+                this._resetLink();
+                this.emit('state', { connected: true });
+                this.emit('message', { text: `${this.deviceName} connected over USB`, tone: 'good' });
+            }
+        } else if (type === FRAME.INPUT && this.connected) {
+            this._input(payload);
+        }
+    }
+
+    // Hello once a second; and a dial that has gone quiet (switched off, or
+    // restarted into another mode) is waited for again, the port left open.
+    // Called from setState and setSpectrum too: a tab in the background has
+    // its timers slowed to once a second or less, its spectrum frames not.
+    _usbTick() {
+        if (!this.port) return;
+        const now = performance.now();
+        if (this.connected && now - this._lastHeard > SILENT_MS) {
+            this.connected = false;
+            this.waiting = true;
+            this.emit('state', { connected: false, waiting: true });
+            this.emit('message', { text: 'The dial stopped answering — waiting for it', tone: 'warn' });
+        }
+        if (now - this._lastHello >= HELLO_MS) {
+            this._lastHello = now;
+            this._usbWrite(FRAME.HELLO, Uint8Array.of(1)).catch(() => {});
+        }
+    }
+
+    _usbWrite(type, payload) {
+        const w = this._writer;
+        return w ? w.write(encodeFrame(type, payload)) : Promise.resolve();
     }
 
     async disconnect() {
@@ -371,8 +627,27 @@ export class DialControl extends Emitter {
         this.stateChar = null;
         this.nameChar = null;
         this.specChar = null;
-        if (this.connected) {
-            this.connected = false;
+        const port = this.port;
+        if (port) {
+            this.port = null;
+            clearInterval(this._timer);
+            this._timer = null;
+            const w = this._writer;
+            this._writer = null;
+            if (w) {
+                // Tells the dial straight away rather than after its timeout.
+                try { await w.write(encodeFrame(FRAME.BYE)); } catch (e) { /* gone */ }
+                try { w.releaseLock(); } catch (e) { /* gone */ }
+            }
+            // The reader must let go before the port can close, or the next
+            // open finds it still locked.
+            if (this._reader) { try { await this._reader.cancel(); } catch (e) { /* gone */ } }
+            try { await port.close(); } catch (e) { /* already gone */ }
+        }
+        const was = this.connected || this.waiting;
+        this.connected = false;
+        this.waiting = false;
+        if (was) {
             this.emit('state', { connected: false });
             this.emit('message', { text: 'Disconnected', tone: 'info' });
         }
@@ -383,10 +658,22 @@ export class DialControl extends Emitter {
         this.stateChar = null;
         this.nameChar = null;
         this.specChar = null;
-        if (!this.connected) return;
+        if (this.port) {
+            const port = this.port;
+            this.port = null;
+            clearInterval(this._timer);
+            this._timer = null;
+            try { if (this._writer) this._writer.releaseLock(); } catch (e) { /* gone */ }
+            this._writer = null;
+            port.close().catch(() => {});
+        }
+        const was = this.connected || this.waiting;
+        const wasConnected = this.connected;
         this.connected = false;
+        this.waiting = false;
+        if (!was) return;
         this.emit('state', { connected: false });
-        this.emit('message', { text: 'Dial disconnected', tone: 'warn' });
+        this.emit('message', { text: wasConnected ? 'Dial disconnected' : 'The port closed', tone: 'warn' });
     }
 
     /**
@@ -395,7 +682,8 @@ export class DialControl extends Emitter {
      * newest state back rather than queueing every intermediate one.
      */
     setState(s) {
-        if (!this.connected || !this.stateChar) return;
+        if (this.port) this._usbTick();
+        if (!this.connected || !(this.stateChar || this.port)) return;
         const bytes = encodeState(s);
         const sig = bytes.join(',');
         if (sig === this._lastState) return;
@@ -407,7 +695,9 @@ export class DialControl extends Emitter {
             this._stateQueued = false;
             const b = this._pending;
             this._pending = null;
-            if (b && this.stateChar) await this.stateChar.writeValueWithResponse(b);
+            if (!b) return;
+            if (this.port) await this._usbWrite(FRAME.STATE, b);
+            else if (this.stateChar) await this.stateChar.writeValueWithResponse(b);
         });
     }
 
@@ -425,24 +715,30 @@ export class DialControl extends Emitter {
      * newer anyway, and the state record must never wait behind a backlog.
      */
     setSpectrum(bins, centerHz, spanHz) {
-        if (!this.connected || !this.specChar || this._specBusy || !bins || !bins.length) return;
+        if (this.port) this._usbTick();
+        if (!this.connected || !(this.specChar || this.port) || this._specBusy || !bins || !bins.length) return;
         this._specBusy = true;
-        const packets = encodeSpectrum(bins, centerHz, spanHz, this._specSeq++, this._specChunk);
+        const usb = !!this.port;
+        const packets = encodeSpectrum(bins, centerHz, spanHz, this._specSeq++, usb ? SPEC_POINTS : this._specChunk);
         this._enqueue(async () => {
-            for (const p of packets) if (this.specChar) await this.specChar.writeValueWithResponse(p);
+            for (const p of packets) {
+                if (usb) await this._usbWrite(FRAME.SPEC, p);
+                else if (this.specChar) await this.specChar.writeValueWithResponse(p);
+            }
         }).catch(() => {
             // A link that won't take a 172-byte write: fall back to pieces that
             // fit the smallest one, from the next line on.
-            if (this._specChunk !== 8) this._specChunk = 8;
+            if (!usb && this._specChunk !== 8) this._specChunk = 8;
         }).finally(() => { this._specBusy = false; });
     }
 
     /** The receiver's name, shown on the dial. */
     setName(name) {
-        if (!this.connected || !this.nameChar) return;
+        if (!this.connected || !(this.nameChar || this.port)) return;
         const bytes = new TextEncoder().encode(String(name || '')).slice(0, 32);
-        this._enqueue(async () => { if (this.nameChar) await this.nameChar.writeValueWithResponse(bytes); })
-            .catch(() => {});
+        this._enqueue(async () => {
+            if (this.port) await this._usbWrite(FRAME.NAME, bytes);
+            else if (this.nameChar) await this.nameChar.writeValueWithResponse(bytes);
+        }).catch(() => {});
     }
-
 }

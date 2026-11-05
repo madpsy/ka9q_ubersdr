@@ -261,6 +261,7 @@ export default function ControlWatch() {
                 frequency: d.tuning.frequency,
                 mode: d.tuning.mode,
                 snr: m.snr,
+                dbfs: m.basebandPower,
                 audioUp: d.audioUp,
                 squelchOn: sqOn,
                 // Open with no threshold means nothing is gating, not a signal.

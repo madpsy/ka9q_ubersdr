@@ -1,4 +1,22 @@
-# Latest Stable - 0.1.67
+# Latest Stable - 0.1.68
+
+## Version 0.1.68 - 5th November 2026
+
+### New Features
+- Added **Additional VFO Audio** so the 4 VFOs can be used to output demodulated audio rather than just frequency/mode memories
+- Added **UberSDR Dial** support - a physical controller with tuning dial and screen - more details to follow on https://ubersdr.org
+- Added **Additional hostnames for TLS** which allows the Caddy container to generate certificates for multiple FQDNs
+
+### Bug Fixes
+- Fixed **CW Filter** which was not filtering well due to lack of steep enough filters - now a lot tighter
+
+### Other Announcements
+
+It appears websdr.org no longer lists UberSDR emulated websdr instances - I'm not fighting this as entirely reasonable to not want emulated SDRs to be listed and clearly an intentional change on their end.
+
+UberSDR Dial uses a really neat generic hardware control surface availble from AliExpress (thanks K1RA for pointing that out). Search for JC3636K518C or 'ESP32-S3 rotary knob touchscreen'. Photos, futher info and firmware with web-base flasher are available at https://github.com/madpsy/ubersdr_dial
+
+The dial can work as a standard alone receiver (via WiFi) using its built in speaker/output jack or as a controller via Bluetooth or USB (serial) with the Web UI or Desktop Client. These have a surprisingly high quality anodised aluminium detented dial and an easy to read capacitive touchscreen along with an optional built in battery. The one I tested with is model JC3636K718C-I-Y1(RD) (https://www.aliexpress.com/item/1005011771382178.html)
 
 ## Version 0.1.67 - 15th Oct 2026
 

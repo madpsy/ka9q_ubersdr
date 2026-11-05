@@ -111,6 +111,17 @@ t('missing readings use the sentinels, and LSB edges stay negative', () => {
     assert.strictEqual(new DataView(d.encodeState({ mode: 'nonsense' }).buffer).getUint8(5), 255);
 });
 
+t('the signal level rides in bytes 18-19 as dBFS x 100, flagged by b5', () => {
+    const v = new DataView(d.encodeState({ mode: 'usb', dbfs: -97.456 }).buffer);
+    assert.strictEqual(v.getUint8(7) & 32, 32, 'b5 set');
+    assert.strictEqual(v.getInt16(18, true), -9746);
+    for (const none of [null, undefined, -999, NaN]) {
+        const w = new DataView(d.encodeState({ mode: 'usb', dbfs: none }).buffer);
+        assert.strictEqual(w.getUint8(7) & 32, 0, `no level (${none}): b5 clear`);
+        assert.strictEqual(w.getInt16(18, true), 0, `no level (${none}): bytes left zero`);
+    }
+});
+
 t('a spectrum line keeps narrow peaks, carries centre and span, and splits on request', () => {
     const bins = new Float32Array(2048).fill(-130);
     bins[1000] = -60;  // one bin wide: must survive the 2048 -> 160 resample

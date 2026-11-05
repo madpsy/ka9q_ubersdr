@@ -31,10 +31,12 @@
 //          [1..4]  frequency Hz u32       [5] mode index (DIAL_MODES), 255 = ?
 //          [6] snr dB i8, -128 = none     [7] flags: b0 audio up, b1 squelch on,
 //                                                    b2 squelch open, b3 muted,
-//                                                    b4 tuning locked
+//                                                    b4 tuning locked,
+//                                                    b5 [18..19] valid
 //          [8] volume 0..100              [9] squelch threshold dB i8, -128 off
 //          [10..11] passband low Hz i16   [12..13] passband high Hz i16
-//          [14..17] tuning step Hz u32    [18..19] reserved
+//          [14..17] tuning step Hz u32    [18..19] signal dBFS x 100 i16
+//                                                   (baseband power; b5)
 //   name   89540004-…  write   page -> dial: receiver name, UTF-8, <= 32 bytes
 //   spec   89540005-…  write   page -> dial: a spectrum line for its waterfall,
 //          [0] version = 1  [1] line seq u8  [2] first point  [3] point count
@@ -375,7 +377,8 @@ const clampInt = (v, lo, hi) => Math.max(lo, Math.min(hi, Math.round(v)));
 /**
  * The receiver as the dial's state record. `s` is plain values so this stays
  * testable without a radio: { frequency, mode, snr, audioUp, squelchOn,
- * squelchOpen, muted, locked, volume (0..1), squelchDb, bwLow, bwHigh, stepHz }.
+ * squelchOpen, muted, locked, volume (0..1), squelchDb, bwLow, bwHigh, stepHz,
+ * dbfs (baseband power, as the S-meter reads it; null = none) }.
  */
 export function encodeState(s) {
     const buf = new ArrayBuffer(STATE_BYTES);
@@ -385,13 +388,16 @@ export function encodeState(s) {
     const mi = DIAL_MODES.indexOf(s.mode);
     v.setUint8(5, mi < 0 ? 255 : mi);
     v.setInt8(6, s.snr == null || !Number.isFinite(s.snr) ? -128 : clampInt(s.snr, -127, 127));
+    const haveDbfs = s.dbfs != null && Number.isFinite(s.dbfs) && s.dbfs > -998;
     v.setUint8(7, (s.audioUp ? 1 : 0) | (s.squelchOn ? 2 : 0) | (s.squelchOpen ? 4 : 0)
-        | (s.muted ? 8 : 0) | (s.locked ? 16 : 0));
+        | (s.muted ? 8 : 0) | (s.locked ? 16 : 0) | (haveDbfs ? 32 : 0));
     v.setUint8(8, clampInt((s.volume || 0) * 100, 0, 100));
     v.setInt8(9, s.squelchDb == null ? -128 : clampInt(s.squelchDb, -127, 127));
     v.setInt16(10, clampInt(s.bwLow || 0, -32768, 32767), true);
     v.setInt16(12, clampInt(s.bwHigh || 0, -32768, 32767), true);
     v.setUint32(14, clampInt(s.stepHz || 0, 0, 0xffffffff), true);
+    // Hundredths of a dB, so the dial's S-meter rounds exactly as sUnitLabel does.
+    if (haveDbfs) v.setInt16(18, clampInt(s.dbfs * 100, -32767, 32767), true);
     return new Uint8Array(buf);
 }
 

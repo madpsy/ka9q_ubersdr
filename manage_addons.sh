@@ -71,6 +71,7 @@ install_addon() {
         echo "Error: no install_script_url defined for addon '$name'" >&2
         return 1
     fi
+    remove_stale_containers "$name"
     echo ""
     echo "Installing addon '$name' from:"
     echo "  $url"
@@ -213,6 +214,35 @@ is_known_addon() {
 is_addon_installed() {
     local name="$1"
     [[ -f "$HOME/ubersdr/${name}/docker-compose.yml" ]]
+}
+
+# List containers left behind by an interrupted "docker compose up".
+# To recreate a container, compose creates the replacement as <old-id>_<name>,
+# removes the old container, then renames the replacement to <name>. If that is
+# interrupted the addon has no running container and only the <old-id>_<name>
+# one, which never started. Only those are listed: anything running is kept.
+# Usage: find_stale_containers <name>  → prints one container name per line
+find_stale_containers() {
+    local name="$1"
+    local containers
+    containers=$(docker ps -a \
+        --filter "label=com.docker.compose.project.working_dir=$HOME/ubersdr/${name}" \
+        --format '{{.Names}} {{.State}}' 2>/dev/null) || return 0
+    awk '$1 ~ /^[0-9a-f]{12}_/ && $2 != "running" && $2 != "restarting" && $2 != "paused" { print $1 }' <<<"$containers"
+}
+
+# Remove leftovers from an interrupted update so the addon can be recreated.
+# Best-effort: a failure here is reported but never stops the install.
+# Usage: remove_stale_containers <name>
+remove_stale_containers() {
+    local name="$1"
+    local container
+    while IFS= read -r container; do
+        [[ -n "$container" ]] || continue
+        echo "Removing leftover container '$container' from an interrupted update of '$name'..."
+        docker rm "$container" >/dev/null || \
+            echo "Warning: could not remove leftover container '$container'." >&2
+    done < <(find_stale_containers "$name")
 }
 
 # Check whether an addon currently has any running container.
@@ -1116,8 +1146,10 @@ update_all_addons() {
     for name in "${ADDON_NAMES[@]}"; do
         # An addon that was stopped before the update must be left stopped
         # afterwards, even though its install script starts the container.
+        # A leftover from an interrupted update also counts as running: that addon
+        # was brought down by the failed update, not by the operator.
         local was_running="no"
-        if is_addon_running "$name"; then
+        if is_addon_running "$name" || [[ -n "$(find_stale_containers "$name")" ]]; then
             was_running="yes"
         fi
 

@@ -31,6 +31,29 @@ export ACTUAL_USER
 export ACTUAL_HOME
 export ACTUAL_HOSTNAME
 
+# Only one update may run at a time. The auto-update cron job fires every minute
+# and starts a new run whenever updater/latest exists, and that file can reappear
+# while a run is in progress: "apt upgrade" below can restart the Docker daemon,
+# which brings the old UberSDR container back up, and its startup version check
+# writes the file again. Two overlapping runs recreate the same containers at
+# once and leave addons broken. The lock is released automatically when this
+# process exits, however it exits.
+UPDATE_LOCK_FILE="$ACTUAL_HOME/.ubersdr-update.lock"
+if command -v flock >/dev/null 2>&1 && { exec 9>>"$UPDATE_LOCK_FILE"; } 2>/dev/null; then
+    if ! flock -n 9; then
+        echo "Another UberSDR update is already running - exiting without doing anything."
+        exit 0
+    fi
+else
+    echo "Warning: could not take the update lock ($UPDATE_LOCK_FILE). Continuing without it." >&2
+fi
+
+# Delete the update trigger. Called once the old UberSDR container is down, so
+# anything it wrote while this run was in progress cannot start another update.
+clear_update_trigger() {
+    sudo rm -f "$ACTUAL_HOME/ubersdr/updater/latest" || true
+}
+
 # Detect system architecture
 ARCH=$(uname -m)
 case "$ARCH" in
@@ -827,6 +850,7 @@ if [ -f "$INSTALLED_MARKER" ]; then
         if [ $DOWN_SUCCESS -eq 0 ]; then
             echo "Warning: docker compose down failed after 3 attempts. Proceeding with up anyway..."
         fi
+        clear_update_trigger
 
         echo "Pruning dangling Docker images..."
         sudo docker image prune -f || true
@@ -956,7 +980,9 @@ else
     echo "Auto-update cron job installed. Updates will be checked every minute."
 fi
 
-# Update any installed addons. This is best-effort: an addon that fails to
+# Update any installed addons. The update lock is closed for the child scripts
+# (9>&-) so that nothing they leave running can keep holding it.
+# This is best-effort: an addon that fails to
 # update must never fail the hub installation itself. Skipped on a fresh
 # install - nothing can be installed yet, so there is nothing to update.
 ADDON_MANAGER="$ACTUAL_HOME/ubersdr/manage_addons.sh"
@@ -966,7 +992,7 @@ if [ "$FRESH_INSTALL" -eq 1 ]; then
 elif [ -f "$ADDON_MANAGER" ]; then
     echo
     echo "Updating installed addons..."
-    if HOME="$ACTUAL_HOME" bash "$ADDON_MANAGER" --update-all; then
+    if HOME="$ACTUAL_HOME" bash "$ADDON_MANAGER" --update-all 9>&-; then
         echo "Addon update finished."
     else
         echo "Warning: one or more addons failed to update. Continuing anyway."
@@ -998,7 +1024,7 @@ elif [ -f "$CWSKIMMER_UPDATER" ] && [ -f "$CWSKIMMER_DIR/docker-compose.yml" ]; 
     if [ -n "$CWSKIMMER_RUNNING" ]; then
         echo
         echo "Updating CW Skimmer..."
-        if HOME="$ACTUAL_HOME" bash "$CWSKIMMER_UPDATER"; then
+        if HOME="$ACTUAL_HOME" bash "$CWSKIMMER_UPDATER" 9>&-; then
             echo "CW Skimmer update finished."
         else
             echo "Warning: CW Skimmer failed to update. Continuing anyway."

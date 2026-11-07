@@ -26,7 +26,7 @@
 //                      across the view (left..right edge); tune there
 //          code 96     waterfall lines per second the dial wants (value 1..20;
 //                      its battery/smooth setting) — handled here, not mapped
-//   state  89540003-…  write   page -> dial, 20 bytes:
+//   state  89540003-…  write   page -> dial, 28 bytes:
 //          [0] version = 1
 //          [1..4]  frequency Hz u32       [5] mode index (DIAL_MODES), 255 = ?
 //          [6] snr dB i8, -128 = none     [7] flags: b0 audio up, b1 squelch on,
@@ -37,6 +37,9 @@
 //          [10..11] passband low Hz i16   [12..13] passband high Hz i16
 //          [14..17] tuning step Hz u32    [18..19] signal dBFS x 100 i16
 //                                                   (baseband power; b5)
+//          [20..23] lowest Hz the receiver tunes u32, [24..27] highest u32
+//                   (tuning_range); 10 kHz..30 MHz, UberSDR's default, when
+//                   not given or not a range. Older dials read 20.
 //   name   89540004-…  write   page -> dial: receiver name, UTF-8, <= 32 bytes
 //   spec   89540005-…  write   page -> dial: a spectrum line for its waterfall,
 //          [0] version = 1  [1] line seq u8  [2] first point  [3] point count
@@ -102,7 +105,10 @@ export function encodeSpectrum(bins, centerHz, spanHz, seq, chunk = SPEC_POINTS)
     }
     return out;
 }
-export const STATE_BYTES = 20;
+export const STATE_BYTES = 28;
+// UberSDR's own fallback coverage, sent when the receiver's range isn't known.
+export const DEFAULT_MIN_HZ = 10000;
+export const DEFAULT_MAX_HZ = 30000000;
 
 // Mode index sent in the state. The v2 mode table's order, IQ included, so the
 // dial can name whatever mode the receiver is in.
@@ -378,7 +384,9 @@ const clampInt = (v, lo, hi) => Math.max(lo, Math.min(hi, Math.round(v)));
  * The receiver as the dial's state record. `s` is plain values so this stays
  * testable without a radio: { frequency, mode, snr, audioUp, squelchOn,
  * squelchOpen, muted, locked, volume (0..1), squelchDb, bwLow, bwHigh, stepHz,
- * dbfs (baseband power, as the S-meter reads it; null = none) }.
+ * dbfs (baseband power, as the S-meter reads it; null = none), minHz, maxHz
+ * (the receiver's tuning range; 10 kHz..30 MHz unless both are finite and
+ * max > min) }.
  */
 export function encodeState(s) {
     const buf = new ArrayBuffer(STATE_BYTES);
@@ -398,6 +406,10 @@ export function encodeState(s) {
     v.setUint32(14, clampInt(s.stepHz || 0, 0, 0xffffffff), true);
     // Hundredths of a dB, so the dial's S-meter rounds exactly as sUnitLabel does.
     if (haveDbfs) v.setInt16(18, clampInt(s.dbfs * 100, -32767, 32767), true);
+    const lo = s.minHz, hi = s.maxHz;
+    const ok = Number.isFinite(lo) && Number.isFinite(hi) && lo >= 0 && hi > lo && hi <= 0xffffffff;
+    v.setUint32(20, ok ? Math.round(lo) : DEFAULT_MIN_HZ, true);
+    v.setUint32(24, ok ? Math.round(hi) : DEFAULT_MAX_HZ, true);
     return new Uint8Array(buf);
 }
 

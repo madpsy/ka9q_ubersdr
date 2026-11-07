@@ -24,7 +24,7 @@ import { isCCKey } from '../controls/webmidi.js';
 import { flexAvailable } from '../controls/flexcontrol.js';
 import { rc28Available } from '../controls/rc28.js';
 import { indicatorLeds, ledSettings } from '../controls/rc28leds.js';
-import { squelchEnabled, squelchThreshold } from '../radio/constants.js';
+import { MAX_FREQ, MIN_FREQ, squelchEnabled, squelchThreshold } from '../radio/constants.js';
 import { getRecorder } from '../lib/recorder.js';
 import { pushNotification } from '../lib/notifications.js';
 import { serialAvailable } from '../controls/radiosync.js';
@@ -273,6 +273,9 @@ export default function ControlWatch() {
                 bwLow: d.tuning.bandwidthLow,
                 bwHigh: d.tuning.bandwidthHigh,
                 stepHz: d.stepHz,
+                // Live bindings: the description's tuning_range once it lands.
+                minHz: MIN_FREQ,
+                maxHz: MAX_FREQ,
             });
             if (d.name !== sentName) { sentName = d.name; dial.setName(d.name); }
         };

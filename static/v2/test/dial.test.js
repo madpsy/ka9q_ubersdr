@@ -83,7 +83,7 @@ t('every key has a label and every default maps to a real function', () => {
 
 // --- state: page -> dial ------------------------------------------------------
 
-t('the state record is 20 bytes, little-endian, at the documented offsets', () => {
+t('the state record is 28 bytes, little-endian, at the documented offsets', () => {
     const b = d.encodeState({
         frequency: 14074000, mode: 'usb', snr: 12.4, audioUp: true, squelchOn: true, squelchOpen: false,
         muted: true, locked: false, volume: 0.55, squelchDb: 6, bwLow: 50, bwHigh: 2700, stepHz: 500,
@@ -119,6 +119,17 @@ t('the signal level rides in bytes 18-19 as dBFS x 100, flagged by b5', () => {
         const w = new DataView(d.encodeState({ mode: 'usb', dbfs: none }).buffer);
         assert.strictEqual(w.getUint8(7) & 32, 0, `no level (${none}): b5 clear`);
         assert.strictEqual(w.getInt16(18, true), 0, `no level (${none}): bytes left zero`);
+    }
+});
+
+t('the tuning range rides in bytes 20-27, 10 kHz..30 MHz when missing or not a range', () => {
+    const v = new DataView(d.encodeState({ mode: 'usb', minHz: 10000, maxHz: 60000000 }).buffer);
+    assert.strictEqual(v.getUint32(20, true), 10000);
+    assert.strictEqual(v.getUint32(24, true), 60000000);
+    for (const [lo, hi] of [[undefined, undefined], [null, 30e6], [10000, NaN], [30e6, 10000], [-5, 30e6], [0, 0]]) {
+        const w = new DataView(d.encodeState({ mode: 'usb', minHz: lo, maxHz: hi }).buffer);
+        assert.strictEqual(w.getUint32(20, true), 10000, `${lo}..${hi}: default min`);
+        assert.strictEqual(w.getUint32(24, true), 30000000, `${lo}..${hi}: default max`);
     }
 });
 

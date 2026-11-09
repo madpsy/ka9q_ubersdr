@@ -475,8 +475,11 @@ func generateHTTPSCaddyfile(host string, extraHosts []string, extraProxies []Cad
     
     # Security headers
     header {
-        # Enable HSTS
-        Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+        # HSTS off. max-age=0 (rather than no header) clears the one-year
+        # subdomain-wide pin earlier versions sent: HSTS ignores ports, so
+        # that pin forced HTTPS onto the plain-HTTP KiwiSDR (:8073) and
+        # WebSDR (:8901) listeners and onto other services under the domain.
+        Strict-Transport-Security "max-age=0"
         # Prevent clickjacking
         X-Frame-Options "SAMEORIGIN"
         # Prevent MIME type sniffing

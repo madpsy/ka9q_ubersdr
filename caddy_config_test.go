@@ -134,3 +134,19 @@ func TestGenerateHTTPCaddyfileProxies(t *testing.T) {
 		t.Fatalf("HTTP-only Caddyfile must not reference https")
 	}
 }
+
+// HSTS must stay at max-age=0: it ignores ports, so any real max-age forces
+// HTTPS onto the plain-HTTP KiwiSDR (:8073) and WebSDR (:8901) listeners.
+func TestGenerateHTTPSCaddyfileHSTSCleared(t *testing.T) {
+	for _, redirect := range []bool{true, false} {
+		out := generateHTTPSCaddyfile("ubersdr.example.com", []string{"example.com"}, nil, "op@example.org", redirect)
+		if !strings.Contains(out, `Strict-Transport-Security "max-age=0"`) {
+			t.Errorf("redirect=%v: HSTS header is not max-age=0", redirect)
+		}
+		for _, bad := range []string{"includeSubDomains", "preload", "max-age=31536000"} {
+			if strings.Contains(out, bad) {
+				t.Errorf("redirect=%v: Caddyfile still contains %q", redirect, bad)
+			}
+		}
+	}
+}

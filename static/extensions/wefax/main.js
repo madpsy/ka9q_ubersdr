@@ -483,7 +483,7 @@ class WEFAXExtension extends DecoderExtension {
             if (event.data instanceof ArrayBuffer) {
                 // Binary message - process as WEFAX data
                 this.handleBinaryMessage(event.data);
-                // DO NOT pass binary messages to original handler (chat.js can't handle them)
+                // DO NOT pass binary messages to the original handler (it only expects JSON)
             } else if (event.data instanceof Blob) {
                 // Binary message as Blob - convert to ArrayBuffer first
                 event.data.arrayBuffer().then(arrayBuffer => {
@@ -491,7 +491,7 @@ class WEFAXExtension extends DecoderExtension {
                 }).catch(err => {
                     console.error('WEFAX: Failed to convert Blob to ArrayBuffer:', err);
                 });
-                // DO NOT pass binary messages to original handler (chat.js can't handle them)
+                // DO NOT pass binary messages to the original handler (it only expects JSON)
             } else {
                 // Text message - pass to original handler
                 // IMPORTANT: Check that originalDXHandler exists and is not our own handler

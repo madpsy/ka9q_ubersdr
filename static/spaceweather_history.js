@@ -367,7 +367,8 @@ class SpaceWeatherHistory {
             title.textContent = `Space Weather Data - ${timestamp.toLocaleString('en-GB', {
                 dateStyle: 'medium',
                 timeStyle: 'short',
-                hour12: false
+                hour12: false,
+                timeZone: 'UTC'
             })} UTC`;
         } else {
             title.textContent = `Space Weather Data - ${data.length} Records`;
@@ -595,7 +596,8 @@ class SpaceWeatherHistory {
                                 return date.toLocaleString('en-GB', {
                                     dateStyle: 'medium',
                                     timeStyle: 'short',
-                                    hour12: false
+                                    hour12: false,
+                                    timeZone: 'UTC'
                                 });
                             }
                         }
@@ -615,7 +617,17 @@ class SpaceWeatherHistory {
                             text: 'Time (UTC)',
                             color: '#fff'
                         },
-                        ticks: { color: '#fff' },
+                        ticks: {
+                            color: '#fff',
+                            callback: function(value) {
+                                return new Date(value).toLocaleTimeString('en-GB', {
+                                    hour12: false,
+                                    timeZone: 'UTC',
+                                    hour: '2-digit',
+                                    minute: '2-digit'
+                                });
+                            }
+                        },
                         grid: { color: 'rgba(255, 255, 255, 0.1)' }
                     },
                     y: {
@@ -761,7 +773,8 @@ class SpaceWeatherHistory {
                                 return date.toLocaleString('en-GB', {
                                     dateStyle: 'medium',
                                     timeStyle: 'short',
-                                    hour12: false
+                                    hour12: false,
+                                    timeZone: 'UTC'
                                 });
                             },
                             beforeBody: (items) => {
@@ -820,7 +833,17 @@ class SpaceWeatherHistory {
                             text: 'Time (UTC)',
                             color: '#fff'
                         },
-                        ticks: { color: '#fff' },
+                        ticks: {
+                            color: '#fff',
+                            callback: function(value) {
+                                return new Date(value).toLocaleTimeString('en-GB', {
+                                    hour12: false,
+                                    timeZone: 'UTC',
+                                    hour: '2-digit',
+                                    minute: '2-digit'
+                                });
+                            }
+                        },
                         grid: { color: 'rgba(255, 255, 255, 0.1)' }
                     },
                     y: {

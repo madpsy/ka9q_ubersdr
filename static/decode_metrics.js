@@ -1291,7 +1291,8 @@ class DecodeMetricsDashboard {
                                 return date.toLocaleString('en-GB', {
                                     dateStyle: 'medium',
                                     timeStyle: 'short',
-                                    hour12: false
+                                    hour12: false,
+                                    timeZone: 'UTC'
                                 });
                             },
                             label: (context) => {
@@ -1320,6 +1321,7 @@ class DecodeMetricsDashboard {
                                 const date = new Date(value);
                                 return date.toLocaleTimeString('en-GB', {
                                     hour12: false,
+                                    timeZone: 'UTC',
                                     hour: '2-digit',
                                     minute: '2-digit'
                                 });
@@ -1482,7 +1484,8 @@ class DecodeMetricsDashboard {
                                 return date.toLocaleString('en-GB', {
                                     dateStyle: 'medium',
                                     timeStyle: 'short',
-                                    hour12: false
+                                    hour12: false,
+                                    timeZone: 'UTC'
                                 });
                             },
                             label: (context) => {
@@ -1514,6 +1517,7 @@ class DecodeMetricsDashboard {
                                 const date = new Date(value);
                                 return date.toLocaleTimeString('en-GB', {
                                     hour12: false,
+                                    timeZone: 'UTC',
                                     hour: '2-digit',
                                     minute: '2-digit'
                                 });

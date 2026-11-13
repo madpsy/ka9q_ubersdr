@@ -1146,6 +1146,7 @@
             
             const time = new Date(spot.timestamp).toLocaleTimeString('en-US', {
                 hour12: false,
+                timeZone: 'UTC',
                 hour: '2-digit',
                 minute: '2-digit',
                 second: '2-digit'
@@ -1992,7 +1993,7 @@
             if (typeof s.snr === 'number' && (bestSNR === null || s.snr > bestSNR)) bestSNR = s.snr;
         });
 
-        const timeFmt = { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' };
+        const timeFmt = { hour12: false, timeZone: 'UTC', hour: '2-digit', minute: '2-digit', second: '2-digit' };
         const last = new Date(spots[0].timestamp).toLocaleTimeString('en-US', timeFmt);
         const first = new Date(spots[spots.length - 1].timestamp).toLocaleTimeString('en-US', timeFmt);
 
@@ -2049,6 +2050,7 @@
 
             const time = new Date(spot.timestamp).toLocaleTimeString('en-US', {
                 hour12: false,
+                timeZone: 'UTC',
                 hour: '2-digit',
                 minute: '2-digit',
                 second: '2-digit'

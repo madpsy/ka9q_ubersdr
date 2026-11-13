@@ -10,14 +10,19 @@
 // section with the notifications switched off costs exactly what it always did — nothing.
 // See lib/lightning.js for why it is the compact stream.
 //
+// The four are the addon's own headline, cut to a dock column: the rate, the last strike,
+// the storm trend (from the addon's /api/status, so it is the addon's verdict and not one
+// worked out again here) with the hour's count under it, and the hardest of the hour.
+//
 // `minimal` keeps the figures and the strip and drops the list and the link — the two
 // things that answer "is it striking, and how hard" from across the room.
 
 import React, { useEffect, useRef, useState } from '../react.js';
 import { Empty, Icon } from '../components/ui.jsx';
 import {
-    LIST_MAX, WINDOW_S, activityBuckets, addonUrl, flashStrength, hourStats,
-    lightningAvailable, shortClock, snrBand, strikeRate, stripTone,
+    LIST_MAX, SNR_FULL_DB, WINDOW_S, activityBuckets, addonUrl, flashStrength, hourStats,
+    lightningAvailable, pulseLabel, shortClock, snrBand, strikeRate, stripTone,
+    trendDetail, trendLabel, trendTone,
 } from '../lib/lightning.js';
 import { lightningState, subscribeLightning } from '../lib/lightningStream.js';
 import { sinceLabel } from '../lib/format.js';
@@ -79,11 +84,11 @@ function ActivityStrip({ buckets }) {
     return <canvas ref={canvas} className="lx__strip" style={{ height: STRIP_H }} />;
 }
 
-function Stat({ label, value, sub, tone }) {
+function Stat({ label, value, sub, tone, word, title }) {
     return (
-        <div className="lx__stat">
+        <div className="lx__stat" title={title}>
             <span className="lx__stat-k">{label}</span>
-            <span className={`lx__stat-v${tone ? ` is-${tone}` : ''}`}>{value}</span>
+            <span className={`lx__stat-v${word ? ' lx__stat-v--word' : ''}${tone ? ` is-${tone}` : ''}`}>{value}</span>
             {sub && <span className="lx__stat-s">{sub}</span>}
         </div>
     );
@@ -92,7 +97,7 @@ function Stat({ label, value, sub, tone }) {
 export default function LightningPanel({ minimal }) {
     // The stream, the hour of backfill and the list all belong to the store now; the panel
     // subscribes, which is what opens it. See lib/lightningStream.js.
-    const [{ strikes, live, state, lastLive }, setSnap] = useState(lightningState);
+    const [{ strikes, live, state, lastLive, status }, setSnap] = useState(lightningState);
     useEffect(() => subscribeLightning(setSnap), []);
 
     // Redrawn on the clock as well as on strikes — see TICK_MS. Every figure here is "in
@@ -159,7 +164,14 @@ export default function LightningPanel({ minimal }) {
                     value={last ? sinceLabel(last.at, now) : '—'}
                     tone={last ? snrBand(last.snr) : undefined}
                 />
-                <Stat label="Hour" value={count} />
+                <Stat
+                    label="Storm"
+                    value={trendLabel(status)}
+                    sub={`${count}/h`}
+                    tone={trendTone(status)}
+                    word={!!status && status.trend !== 'none'}
+                    title={status ? trendDetail(status) : `${count} strikes in the last hour`}
+                />
                 <Stat
                     label="Peak"
                     value={best == null ? '—' : Math.round(best)}
@@ -168,6 +180,15 @@ export default function LightningPanel({ minimal }) {
                 />
             </div>
 
+            {/* The addon's mains filter at work. Said, because a site where a dimmer or
+                a charger is throwing a 100 / 120 Hz impulse train is a site whose count
+                means less than it looks, and the addon's own page says so too. */}
+            {status && status.mains && (
+                <div className="lx__note">
+                    Mains interference: 100 / 120 Hz impulses are being left out of the count.
+                </div>
+            )}
+
             {/* A minute of it. Always drawn, empty or not: a flat strip is the answer
                 "nothing is striking", and a panel that hid it would look broken on the
                 quiet nights that are most of them. */}
@@ -175,7 +196,8 @@ export default function LightningPanel({ minimal }) {
             <div className="lx__axis">
                 <span>{WINDOW_S}s ago</span>
                 <span className={`lx__live${live ? ' is-on' : ''}`}>
-                    {live ? 'live' : 'reconnecting…'}
+                    {!live ? 'reconnecting…'
+                        : status && status.state === 'measuring' ? 'measuring floor…' : 'live'}
                 </span>
                 <span>now</span>
             </div>
@@ -199,11 +221,19 @@ export default function LightningPanel({ minimal }) {
                                     a column of numbers has to be read, whereas the
                                     lengths can be compared without being read. */}
                                 <span className="lx__bar">
-                                    <i style={{ width: `${Math.max(2, Math.min(100, (s.snr / 40) * 100))}%` }} />
+                                    <i style={{ width: `${Math.max(2, Math.min(100, (s.snr / SNR_FULL_DB) * 100))}%` }} />
                                 </span>
                                 <span className="lx__db">{Math.round(s.snr)}</span>
-                                <span className="lx__ms" title={`${s.ms.toFixed(1)} ms`}>
-                                    {s.saturated ? '⚠' : `${s.ms.toFixed(1)}m`}
+                                {/* The pulse width at half its peak, as the addon's page
+                                    now shows; ⚠ where the ADC clipped and the width is
+                                    the clipping's rather than the strike's. */}
+                                <span
+                                    className="lx__ms"
+                                    title={s.saturated ? 'Saturated: the ADC clipped'
+                                        : s.widthUs != null ? `Pulse width ${s.widthUs.toFixed(1)} µs${s.flash ? ` · flash ${s.flash}` : ''}`
+                                        : `${s.ms.toFixed(1)} ms`}
+                                >
+                                    {s.saturated ? '⚠' : pulseLabel(s)}
                                 </span>
                             </li>
                         ))}

@@ -244,6 +244,7 @@ func (m *DBManager) pruneAll(cfg RetentionConfig) {
 		{"spots", cfg.SpotsDays, "ts"},
 		{"cw_spots", cfg.CWSpotsDays, "ts"},
 		{"chat_messages", cfg.ChatDays, "ts"},
+		{"chat_mod_actions", cfg.ChatDays, "ts"},
 		{"noise_floor", cfg.NoiseFloorDays, "ts"},
 		{"space_weather", cfg.SpaceWeatherDays, "ts"},
 		// Stats tables all carry ts, so each prunes independently.
@@ -338,6 +339,12 @@ func (m *DBManager) migrateColumns() error {
 		// protocol: "native" | "kiwi" | "websdr" — which front-end the listener
 		// connected through. Backfilled below from the user_session_id prefix.
 		{"sessions", "protocol", `ALTER TABLE sessions ADD COLUMN protocol TEXT`},
+		// Chat moderation: what the filter did, the original text when it was
+		// changed, and soft deletion so removed messages stay in the admin logs.
+		{"chat_messages", "status", `ALTER TABLE chat_messages ADD COLUMN status TEXT DEFAULT 'ok'`},
+		{"chat_messages", "message_raw", `ALTER TABLE chat_messages ADD COLUMN message_raw TEXT`},
+		{"chat_messages", "deleted_at", `ALTER TABLE chat_messages ADD COLUMN deleted_at INTEGER`},
+		{"chat_messages", "deleted_by", `ALTER TABLE chat_messages ADD COLUMN deleted_by TEXT`},
 	}
 
 	for _, mig := range migrations {
@@ -508,12 +515,39 @@ func (m *DBManager) initSchema() error {
 				username     TEXT,
 				message      TEXT,
 				country      TEXT,
-				country_code TEXT               -- ISO 3166-1 alpha-2
+				country_code TEXT,              -- ISO 3166-1 alpha-2
+				status       TEXT DEFAULT 'ok', -- ok | censored | blocked
+				message_raw  TEXT,              -- original text when status != ok
+				deleted_at   INTEGER,           -- Unix seconds UTC, NULL = visible
+				deleted_by   TEXT
 			)`,
 		},
 		{"chat_idx_ts", `CREATE INDEX IF NOT EXISTS chat_idx_ts       ON chat_messages(ts)`},
 		{"chat_idx_ip", `CREATE INDEX IF NOT EXISTS chat_idx_ip       ON chat_messages(source_ip)`},
 		{"chat_idx_username", `CREATE INDEX IF NOT EXISTS chat_idx_username ON chat_messages(username)`},
+
+		// ----------------------------------------------------------------
+		// chat_mod_actions — chat moderation history and active chat bans.
+		// action: warn | auto_warn | delete | chat_ban | auto_chat_ban |
+		//         lift | sdr_ban | auto_sdr_ban
+		// ----------------------------------------------------------------
+		{
+			"chat_mod_actions",
+			`CREATE TABLE IF NOT EXISTS chat_mod_actions (
+				id         INTEGER PRIMARY KEY AUTOINCREMENT,
+				ts         INTEGER NOT NULL,  -- Unix seconds UTC
+				action     TEXT    NOT NULL,
+				ip         TEXT,
+				username   TEXT,
+				by_who     TEXT,
+				reason     TEXT,
+				expires_at INTEGER,           -- chat bans: Unix seconds UTC
+				lifted_at  INTEGER,
+				count      INTEGER            -- e.g. messages deleted
+			)`,
+		},
+		{"chat_mod_actions_idx_ts", `CREATE INDEX IF NOT EXISTS chat_mod_actions_idx_ts ON chat_mod_actions(ts)`},
+		{"chat_mod_actions_idx_ip", `CREATE INDEX IF NOT EXISTS chat_mod_actions_idx_ip ON chat_mod_actions(ip)`},
 
 		// ----------------------------------------------------------------
 		// spots

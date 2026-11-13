@@ -325,7 +325,8 @@ class DecodeRatesDashboard {
                                 return date.toLocaleString('en-GB', {
                                     dateStyle: 'medium',
                                     timeStyle: 'short',
-                                    hour12: false
+                                    hour12: false,
+                                    timeZone: 'UTC'
                                 });
                             },
                             label: (context) => {
@@ -356,7 +357,15 @@ class DecodeRatesDashboard {
                         ticks: {
                             color: '#fff',
                             maxRotation: 0,
-                            autoSkip: true
+                            autoSkip: true,
+                            callback: function(value) {
+                                return new Date(value).toLocaleTimeString('en-GB', {
+                                    hour12: false,
+                                    timeZone: 'UTC',
+                                    hour: '2-digit',
+                                    minute: '2-digit'
+                                });
+                            }
                         },
                         grid: { color: 'rgba(255, 255, 255, 0.1)' }
                     },

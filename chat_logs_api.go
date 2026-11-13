@@ -13,12 +13,17 @@ import (
 
 // ChatLogEntry represents a single chat message from logs
 type ChatLogEntry struct {
-	Timestamp   time.Time `json:"timestamp"`
-	SourceIP    string    `json:"source_ip"`
-	Username    string    `json:"username"`
-	Message     string    `json:"message"`
-	Country     string    `json:"country,omitempty"`
-	CountryCode string    `json:"country_code,omitempty"`
+	ID          int64      `json:"id"`
+	Timestamp   time.Time  `json:"timestamp"`
+	SourceIP    string     `json:"source_ip"`
+	Username    string     `json:"username"`
+	Message     string     `json:"message"`
+	Country     string     `json:"country,omitempty"`
+	CountryCode string     `json:"country_code,omitempty"`
+	Status      string     `json:"status"`               // ok | censored | blocked
+	MessageRaw  string     `json:"message_raw"`          // original text, empty if unchanged
+	DeletedAt   *time.Time `json:"deleted_at,omitempty"` // set when removed
+	DeletedBy   string     `json:"deleted_by,omitempty"`
 }
 
 // ChatLogFilter contains filter criteria for chat logs
@@ -29,6 +34,7 @@ type ChatLogFilter struct {
 	Nickname  string
 	Message   string
 	Limit     int
+	Show      string // all | visible | removed
 }
 
 // HandleChatLogs returns chat logs with optional filtering from the SQLite database.
@@ -39,6 +45,7 @@ type ChatLogFilter struct {
 //   - nickname: Filter by username (optional, case-insensitive partial match)
 //   - message: Filter by message content (optional, case-insensitive partial match)
 //   - limit: Maximum number of results (optional, default: 1000, max: 10000)
+//   - show: all (default) | visible | removed
 func (ah *AdminHandler) HandleChatLogs(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -83,6 +90,7 @@ func (ah *AdminHandler) HandleChatLogs(w http.ResponseWriter, r *http.Request) {
 	if filter.Message != "" {
 		response["message_filter"] = filter.Message
 	}
+	response["show"] = filter.Show
 
 	w.WriteHeader(http.StatusOK)
 	if err := json.NewEncoder(w).Encode(response); err != nil {
@@ -131,6 +139,15 @@ func parseChatLogFilter(r *http.Request) (*ChatLogFilter, error) {
 	filter.Nickname = strings.TrimSpace(r.URL.Query().Get("nickname"))
 	filter.Message = strings.TrimSpace(r.URL.Query().Get("message"))
 
+	switch show := strings.TrimSpace(r.URL.Query().Get("show")); show {
+	case "", "all":
+		filter.Show = "all"
+	case "visible", "removed":
+		filter.Show = show
+	default:
+		return nil, fmt.Errorf("invalid show value (use all, visible or removed)")
+	}
+
 	// Parse limit
 	if limitStr := r.URL.Query().Get("limit"); limitStr != "" {
 		limit, err := strconv.Atoi(limitStr)
@@ -150,7 +167,9 @@ func readChatLogsFromDB(db *sql.DB, filter *ChatLogFilter) ([]ChatLogEntry, erro
 	// endDate is inclusive — include the full day
 	endTS := filter.EndDate.Add(24 * time.Hour).Unix()
 
-	query := `SELECT ts, source_ip, username, message, country, country_code
+	query := `SELECT id, ts, COALESCE(source_ip, ''), COALESCE(username, ''), COALESCE(message, ''),
+	                 COALESCE(country, ''), COALESCE(country_code, ''), COALESCE(status, 'ok'),
+	                 COALESCE(message_raw, ''), deleted_at, COALESCE(deleted_by, '')
 	          FROM chat_messages
 	          WHERE ts >= ? AND ts < ?`
 	args := []interface{}{startTS, endTS}
@@ -168,7 +187,14 @@ func readChatLogsFromDB(db *sql.DB, filter *ChatLogFilter) ([]ChatLogEntry, erro
 		args = append(args, "%"+strings.ToLower(filter.Message)+"%")
 	}
 
-	query += " ORDER BY ts DESC LIMIT ?"
+	switch filter.Show {
+	case "visible":
+		query += " AND deleted_at IS NULL"
+	case "removed":
+		query += " AND deleted_at IS NOT NULL"
+	}
+
+	query += " ORDER BY ts DESC, id DESC LIMIT ?"
 	args = append(args, filter.Limit)
 
 	rows, err := db.Query(query, args...)
@@ -180,13 +206,19 @@ func readChatLogsFromDB(db *sql.DB, filter *ChatLogFilter) ([]ChatLogEntry, erro
 	var logs []ChatLogEntry
 	for rows.Next() {
 		var ts int64
+		var deletedAt sql.NullInt64
 		var entry ChatLogEntry
-		if err := rows.Scan(&ts, &entry.SourceIP, &entry.Username, &entry.Message,
-			&entry.Country, &entry.CountryCode); err != nil {
+		if err := rows.Scan(&entry.ID, &ts, &entry.SourceIP, &entry.Username, &entry.Message,
+			&entry.Country, &entry.CountryCode, &entry.Status, &entry.MessageRaw,
+			&deletedAt, &entry.DeletedBy); err != nil {
 			log.Printf("Warning: chat_messages scan error: %v", err)
 			continue
 		}
 		entry.Timestamp = time.Unix(ts, 0).UTC()
+		if deletedAt.Valid {
+			t := time.Unix(deletedAt.Int64, 0).UTC()
+			entry.DeletedAt = &t
+		}
 		logs = append(logs, entry)
 	}
 	if err := rows.Err(); err != nil {

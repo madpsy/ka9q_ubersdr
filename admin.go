@@ -803,6 +803,84 @@ func isBrowserRequest(r *http.Request) bool {
 	return strings.Contains(acceptHeader, "text/html")
 }
 
+// adminValidHosts returns the hosts (lowercase, host[:port]) that a same-site
+// request's Origin or Referer may name. It is shared by the admin CSRF check
+// and the chat socket, which keeps an admin session only for its own pages.
+func adminValidHosts(r *http.Request) map[string]bool {
+	// Build the set of valid hosts for CSRF comparison.
+	// A request is legitimate if its Origin/Referer host matches ANY of:
+	//   1. r.Host — the host the request arrived with (direct/local/Caddy access)
+	//   2. X-Forwarded-Host from a trusted proxy — the public hostname set by Caddy
+	//   3. Instance.Host from config — the configured public hostname (tunnel access)
+	// This handles all deployment scenarios: direct IP, mDNS, Caddy, tunnel.
+	validHosts := map[string]bool{
+		strings.ToLower(r.Host): true,
+	}
+
+	// Trust X-Forwarded-Host only from a verified trusted proxy or tunnel server
+	if xfh := r.Header.Get("X-Forwarded-Host"); xfh != "" {
+		sourceIP := r.RemoteAddr
+		if host, _, err := net.SplitHostPort(sourceIP); err == nil {
+			sourceIP = host
+		}
+		isTunnelServer := globalConfig != nil && globalConfig.InstanceReporting.IsTunnelServer(sourceIP)
+		isTrustedProxy := globalConfig != nil && globalConfig.Server.IsTrustedProxy(sourceIP)
+		if isTunnelServer || isTrustedProxy {
+			validHosts[strings.ToLower(xfh)] = true
+		}
+	}
+
+	// Always include the configured public instance hostname (covers tunnel access
+	// where the tunnel client rewrites Host to the internal Docker service name)
+	if globalConfig != nil && globalConfig.InstanceReporting.Instance.Host != "" {
+		validHosts[strings.ToLower(globalConfig.InstanceReporting.Instance.Host)] = true
+	}
+
+	// Always include the support tunnel hostname: support-<short-ID>.<TunnelServerHost>
+	// The short ID is the last segment of the instance UUID (e.g. for UUID
+	// "dfcfaf11-d442-4dec-bd7e-1b7652857267" the short ID is "1b7652857267").
+	// This allows the support tunnel (which uses a dynamically-assigned subdomain)
+	// to access admin endpoints without being blocked by CSRF protection.
+	if globalConfig != nil &&
+		globalConfig.InstanceReporting.InstanceUUID != "" &&
+		globalConfig.InstanceReporting.TunnelServerHost != "" {
+		uuidParts := strings.Split(globalConfig.InstanceReporting.InstanceUUID, "-")
+		shortID := uuidParts[len(uuidParts)-1]
+		supportHost := "support-" + shortID + "." + globalConfig.InstanceReporting.TunnelServerHost
+		validHosts[strings.ToLower(supportHost)] = true
+	}
+
+	return validHosts
+}
+
+// adminOriginMatches reports whether the request carries an Origin header
+// naming one of this server's hosts. A missing or unparsable Origin is false.
+func adminOriginMatches(r *http.Request) bool {
+	origin := r.Header.Get("Origin")
+	if origin == "" {
+		return false
+	}
+	u, err := url.Parse(origin)
+	if err != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") {
+		return false
+	}
+	return adminValidHosts(r)[strings.ToLower(u.Host)]
+}
+
+// ValidateAdminSession reports whether token is a signed-in admin session
+// that has not expired, been logged out or revoked.
+func (ah *AdminHandler) ValidateAdminSession(token string) bool {
+	if token == "" {
+		return false
+	}
+	return ah.adminSessions.ValidateSession(token)
+}
+
+// AdminIPAllowed reports whether ip may use the admin pages (admin.allowed_ips).
+func (ah *AdminHandler) AdminIPAllowed(ip string) bool {
+	return ah.config.Admin.IsIPAllowed(ip)
+}
+
 // AuthMiddleware checks for valid admin session or password header
 func (ah *AdminHandler) AuthMiddleware(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -860,48 +938,8 @@ func (ah *AdminHandler) AuthMiddleware(next http.HandlerFunc) http.HandlerFunc {
 		// X-Forwarded-Host to the original public Host, so we use that when present and
 		// the request comes from a trusted source.
 		if r.Header.Get("X-Admin-Password") == "" {
-			// Build the set of valid hosts for CSRF comparison.
-			// A request is legitimate if its Origin/Referer host matches ANY of:
-			//   1. r.Host — the host the request arrived with (direct/local/Caddy access)
-			//   2. X-Forwarded-Host from a trusted proxy — the public hostname set by Caddy
-			//   3. Instance.Host from config — the configured public hostname (tunnel access)
-			// This handles all deployment scenarios: direct IP, mDNS, Caddy, tunnel.
-			validHosts := map[string]bool{
-				strings.ToLower(r.Host): true,
-			}
-
-			// Trust X-Forwarded-Host only from a verified trusted proxy or tunnel server
-			if xfh := r.Header.Get("X-Forwarded-Host"); xfh != "" {
-				sourceIP := r.RemoteAddr
-				if host, _, err := net.SplitHostPort(sourceIP); err == nil {
-					sourceIP = host
-				}
-				isTunnelServer := globalConfig != nil && globalConfig.InstanceReporting.IsTunnelServer(sourceIP)
-				isTrustedProxy := globalConfig != nil && globalConfig.Server.IsTrustedProxy(sourceIP)
-				if isTunnelServer || isTrustedProxy {
-					validHosts[strings.ToLower(xfh)] = true
-				}
-			}
-
-			// Always include the configured public instance hostname (covers tunnel access
-			// where the tunnel client rewrites Host to the internal Docker service name)
-			if globalConfig != nil && globalConfig.InstanceReporting.Instance.Host != "" {
-				validHosts[strings.ToLower(globalConfig.InstanceReporting.Instance.Host)] = true
-			}
-
-			// Always include the support tunnel hostname: support-<short-ID>.<TunnelServerHost>
-			// The short ID is the last segment of the instance UUID (e.g. for UUID
-			// "dfcfaf11-d442-4dec-bd7e-1b7652857267" the short ID is "1b7652857267").
-			// This allows the support tunnel (which uses a dynamically-assigned subdomain)
-			// to access admin endpoints without being blocked by CSRF protection.
-			if globalConfig != nil &&
-				globalConfig.InstanceReporting.InstanceUUID != "" &&
-				globalConfig.InstanceReporting.TunnelServerHost != "" {
-				uuidParts := strings.Split(globalConfig.InstanceReporting.InstanceUUID, "-")
-				shortID := uuidParts[len(uuidParts)-1]
-				supportHost := "support-" + shortID + "." + globalConfig.InstanceReporting.TunnelServerHost
-				validHosts[strings.ToLower(supportHost)] = true
-			}
+			// See adminValidHosts for the hosts a legitimate Origin/Referer may name.
+			validHosts := adminValidHosts(r)
 
 			if origin := r.Header.Get("Origin"); origin != "" {
 				originURL, err := url.Parse(origin)
@@ -3223,7 +3261,7 @@ func (ah *AdminHandler) HandleKickUser(w http.ResponseWriter, r *http.Request) {
 	// Remove user's chat messages from buffer (if chat is enabled)
 	messagesRemoved := 0
 	if ah.dxClusterWsHandler != nil && ah.dxClusterWsHandler.chatManager != nil {
-		messagesRemoved = ah.dxClusterWsHandler.chatManager.RemoveUserMessages(req.UserSessionID)
+		messagesRemoved = len(ah.dxClusterWsHandler.chatManager.DeleteMessagesForSession(req.UserSessionID, "admin"))
 	}
 
 	// Kick all sessions with this user_session_id
@@ -3279,17 +3317,20 @@ func (ah *AdminHandler) HandleBanUser(w http.ResponseWriter, r *http.Request) {
 		req.Reason = "Banned by admin"
 	}
 
-	// Remove chat messages from this IP (if chat is enabled)
-	messagesRemoved := 0
-	if ah.dxClusterWsHandler != nil && ah.dxClusterWsHandler.chatManager != nil {
-		messagesRemoved = ah.dxClusterWsHandler.chatManager.RemoveUserMessagesByIP(req.IP)
-	}
-
-	// Ban the IP
+	// Ban the IP first: if that fails, nothing else changes
 	if err := ah.ipBanManager.BanIP(req.IP, req.Reason, "admin"); err != nil {
 		http.Error(w, fmt.Sprintf("Failed to ban IP: %v", err), http.StatusInternalServerError)
 		return
 	}
+
+	// Remove chat messages from this IP (if chat is enabled), and record the
+	// Ban from SDR in the chat moderation history
+	chatName := ah.chatNameForIP(req.IP)
+	messagesRemoved := 0
+	if ah.dxClusterWsHandler != nil && ah.dxClusterWsHandler.chatManager != nil {
+		messagesRemoved = len(ah.dxClusterWsHandler.chatManager.DeleteMessagesByIP(req.IP, "admin"))
+	}
+	ah.recordSDRBan(req.IP, chatName, "admin", req.Reason, messagesRemoved)
 
 	// Kick all sessions from this IP
 	count, err := ah.sessions.KickUserByIP(req.IP)
@@ -3321,23 +3362,26 @@ func (ah *AdminHandler) HandleBanUser(w http.ResponseWriter, r *http.Request) {
 }
 
 // BanIPWithKick bans an IP and immediately kicks all active sessions from that IP.
-// It mirrors the full sequence performed by HandleBanIP:
-//  1. Remove chat messages from the IP
-//  2. Add the IP to the ban list
+// It mirrors the full sequence performed by HandleBanUser:
+//  1. Add the IP to the ban list (on failure nothing else happens)
+//  2. Remove chat messages from the IP and record the Ban from SDR in the
+//     chat moderation history (unless chat moderation started it and records it)
 //  3. Kick audio/spectrum sessions
 //  4. Kick DX cluster / chat WebSocket connections
 //
 // Returns the number of sessions kicked, DX connections kicked, and chat messages removed.
 func (ah *AdminHandler) BanIPWithKick(ip, reason, bannedBy string) (sessionsKicked, dxKicked, messagesRemoved int, err error) {
-	// 1. Remove chat messages from this IP
-	if ah.dxClusterWsHandler != nil && ah.dxClusterWsHandler.chatManager != nil {
-		messagesRemoved = ah.dxClusterWsHandler.chatManager.RemoveUserMessagesByIP(ip)
-	}
-
-	// 2. Ban the IP
+	// 1. Ban the IP
 	if err = ah.ipBanManager.BanIP(ip, reason, bannedBy); err != nil {
 		return
 	}
+
+	// 2. Remove chat messages from this IP, and record the ban
+	chatName := ah.chatNameForIP(ip)
+	if ah.dxClusterWsHandler != nil && ah.dxClusterWsHandler.chatManager != nil {
+		messagesRemoved = len(ah.dxClusterWsHandler.chatManager.DeleteMessagesByIP(ip, bannedBy))
+	}
+	ah.recordSDRBan(ip, chatName, bannedBy, reason, messagesRemoved)
 
 	// 3. Kick audio/spectrum sessions
 	sessionsKicked, err = ah.sessions.KickUserByIP(ip)

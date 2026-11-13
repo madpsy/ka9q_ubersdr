@@ -224,6 +224,11 @@ func (h *DXClusterWebSocketHandler) HandleWebSocket(w http.ResponseWriter, r *ht
 		log.Printf("DX Cluster WebSocket: UUID %s IP binding check skipped (enforce_session_ip_match=false)", userSessionID)
 	}
 
+	// An admin signed in on this server's own pages may moderate chat. The
+	// admin session is checked here, at the handshake, and kept server-side
+	// for this connection only (see chat_moderator.go).
+	modToken := h.moderatorToken(r, clientIP)
+
 	// Upgrade HTTP connection to WebSocket
 	conn, err := h.upgrader.Upgrade(w, r, nil)
 	if err != nil {
@@ -241,6 +246,10 @@ func (h *DXClusterWebSocketHandler) HandleWebSocket(w http.ResponseWriter, r *ht
 	h.connToSessionIDMu.Lock()
 	h.connToSessionID[conn] = userSessionID
 	h.connToSessionIDMu.Unlock()
+
+	if modToken != "" && h.chatManager != nil {
+		h.chatManager.mods.attach(conn, modToken, clientIP, userSessionID)
+	}
 
 	// Initialize subscription state (all disabled by default - client must opt-in)
 	h.connSubscriptionsMu.Lock()
@@ -272,9 +281,11 @@ func (h *DXClusterWebSocketHandler) HandleWebSocket(w http.ResponseWriter, r *ht
 // handleClient handles messages from a WebSocket client
 func (h *DXClusterWebSocketHandler) handleClient(conn *websocket.Conn, userSessionID string) {
 	defer func() {
-		// Remove user from chat system
+		// Remove user from chat system, and forget any admin session this
+		// connection held
 		if h.chatManager != nil {
 			h.chatManager.RemoveUser(userSessionID)
+			h.chatManager.mods.detach(conn)
 		}
 
 		// Remove audio extension for this session
@@ -536,7 +547,7 @@ func (h *DXClusterWebSocketHandler) handleClient(conn *websocket.Conn, userSessi
 					})
 					log.Printf("DX Cluster WebSocket: Client %s unsubscribed from chat", userSessionID)
 
-				case "chat_set_username", "chat_message", "chat_set_frequency_mode", "chat_request_users", "chat_leave":
+				case "chat_set_username", "chat_message", "chat_set_frequency_mode", "chat_request_users", "chat_leave", "chat_mod":
 					// Handle chat messages (only if subscribed to chat)
 					h.connSubscriptionsMu.RLock()
 					chatEnabled := false
@@ -559,11 +570,8 @@ func (h *DXClusterWebSocketHandler) handleClient(conn *websocket.Conn, userSessi
 						h.chatManager.UpdateUserActivity(userSessionID)
 
 						if err := h.chatManager.HandleChatMessage(userSessionID, conn, msg); err != nil {
-							// Send error back to client
-							h.sendMessage(conn, map[string]interface{}{
-								"type":  "chat_error",
-								"error": err.Error(),
-							})
+							// Send error back to client (with code/until when it has them)
+							h.sendMessage(conn, chatErrorPayload(err))
 						}
 					} else {
 						// Chat is disabled on server
@@ -1118,11 +1126,14 @@ func (h *DXClusterWebSocketHandler) broadcast(message map[string]interface{}) {
 			shouldSend = subs.DigitalSpots
 		case "cw_spot":
 			shouldSend = subs.CWSpots
-		case "chat_message", "chat_user_joined", "chat_user_left", "chat_users":
-			shouldSend = subs.Chat
 		default:
-			// For other message types (status, etc.), always send
-			shouldSend = true
+			if strings.HasPrefix(messageType, "chat_") {
+				// Every chat_* frame is for chat subscribers only
+				shouldSend = subs.Chat
+			} else {
+				// For other message types (status, etc.), always send
+				shouldSend = true
+			}
 		}
 
 		if !shouldSend {

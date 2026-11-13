@@ -795,7 +795,8 @@ class CWMetricsDashboard {
                                 return date.toLocaleString('en-GB', {
                                     dateStyle: 'medium',
                                     timeStyle: 'short',
-                                    hour12: false
+                                    hour12: false,
+                                    timeZone: 'UTC'
                                 });
                             },
                             label: (context) => `${context.dataset.label}: ${context.parsed.y} spots`
@@ -816,6 +817,7 @@ class CWMetricsDashboard {
                                 const date = new Date(value);
                                 return date.toLocaleTimeString('en-GB', {
                                     hour12: false,
+                                    timeZone: 'UTC',
                                     hour: '2-digit',
                                     minute: '2-digit'
                                 });
@@ -896,7 +898,8 @@ class CWMetricsDashboard {
                                 return date.toLocaleString('en-GB', {
                                     dateStyle: 'medium',
                                     timeStyle: 'short',
-                                    hour12: false
+                                    hour12: false,
+                                    timeZone: 'UTC'
                                 });
                             },
                             label: (context) => `${context.dataset.label}: ${context.parsed.y.toFixed(1)} WPM`
@@ -917,6 +920,7 @@ class CWMetricsDashboard {
                                 const date = new Date(value);
                                 return date.toLocaleTimeString('en-GB', {
                                     hour12: false,
+                                    timeZone: 'UTC',
                                     hour: '2-digit',
                                     minute: '2-digit'
                                 });

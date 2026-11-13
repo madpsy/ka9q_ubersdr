@@ -12,3 +12,4 @@ export {
 // The gate starts closed, because `running` starts false — a test that did not open it
 // would be testing a stopped receiver. See lib/serverFeeds.js.
 export { setFeedsAllowed } from '../src/lib/serverFeeds.js';
+export { STORM_MIN_STRIKES } from '../src/lib/lightning.js';

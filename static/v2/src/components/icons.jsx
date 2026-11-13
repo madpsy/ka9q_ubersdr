@@ -231,6 +231,11 @@ export const Icon = {
     // mean Games and Extensions, and an icon that means two things means
     // neither.
     Custom: (p) => <Svg {...p}><rect x="2.5" y="3.5" width="19" height="17" rx="2.5" /><rect x="7" y="8" width="10" height="8" rx="1.5" /></Svg>,
+
+    // A shield with a tick: chat moderation — the moderator's switch and the
+    // per-person button that opens their actions. A tick rather than a plain
+    // outline so it reads as "looked after" and not as a security setting.
+    Shield: (p) => <Svg {...p}><path d="M12 3 4.5 6v5.5c0 4.6 3.1 8.2 7.5 9.5 4.4-1.3 7.5-4.9 7.5-9.5V6z" /><path d="m8.8 12.2 2.3 2.3 4.2-4.4" /></Svg>,
 };
 
 export default Icon;

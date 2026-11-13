@@ -4179,16 +4179,6 @@ function displayActiveChannels(channels) {
     // Store channels globally for spectrum display markers
     window.activeChannels = channels || [];
     
-    // Invalidate spectrum display marker cache to force redraw with new chat user markers
-    if (window.spectrumDisplay && window.spectrumDisplay.invalidateMarkerCache) {
-        window.spectrumDisplay.invalidateMarkerCache();
-    }
-
-    // Update chat UI total user count if chat UI is available
-    if (window.chatUI && window.chatUI.updateTotalUserCount) {
-        window.chatUI.updateTotalUserCount(channels.length);
-    }
-
     // Update channels map popup if it's open
     if (typeof updateChannelsMapPopup === 'function') {
         updateChannelsMapPopup();
@@ -5248,17 +5238,12 @@ function updateStatus(msg) {
 
         updateBandButtons(msg.frequency);
         // Update spectrum display cursor - use window globals for latest values
-        // Skip bandwidth update if chat is syncing to prevent flickering
         if (spectrumDisplay) {
-            const updateData = {
-                tunedFreq: msg.frequency
-            };
-            // Only update bandwidth if not syncing (prevents old server values from overwriting sync)
-            if (!window.chatUI || !window.chatUI.isSyncing) {
-                updateData.bandwidthLow = window.currentBandwidthLow;
-                updateData.bandwidthHigh = window.currentBandwidthHigh;
-            }
-            spectrumDisplay.updateConfig(updateData);
+            spectrumDisplay.updateConfig({
+                tunedFreq: msg.frequency,
+                bandwidthLow: window.currentBandwidthLow,
+                bandwidthHigh: window.currentBandwidthHigh
+            });
         }
     } else if (msg.mode) {
         // Mode update without frequency - just update mode text (if element exists)
@@ -6958,8 +6943,7 @@ function updateBandwidthDisplay() {
         }
 
         // Update spectrum display bandwidth indicator
-        // Skip if chat is syncing to prevent flickering
-        if (spectrumDisplay && (!window.chatUI || !window.chatUI.isSyncing)) {
+        if (spectrumDisplay) {
             const freqInput = document.getElementById('frequency');
             const currentFreq = freqInput ? parseInt(freqInput.getAttribute('data-hz-value') || freqInput.value) : 0;
             spectrumDisplay.updateConfig({
@@ -7033,8 +7017,7 @@ function updateBandwidth() {
     }
 
     // Update spectrum display bandwidth indicator
-    // Skip if chat is syncing to prevent flickering
-    if (spectrumDisplay && (!window.chatUI || !window.chatUI.isSyncing)) {
+    if (spectrumDisplay) {
         spectrumDisplay.updateConfig({
             bandwidthLow: bandwidthLow,
             bandwidthHigh: bandwidthHigh
@@ -7262,7 +7245,7 @@ function updateCombinedBandwidthDisplay() {
         if (window.radioAPI) {
             window.radioAPI.notifyBandwidthChange(newLow, newHigh);
         }
-        if (spectrumDisplay && (!window.chatUI || !window.chatUI.isSyncing)) {
+        if (spectrumDisplay) {
             const freqInput = document.getElementById('frequency');
             const currentFreq = freqInput ? parseInt(freqInput.getAttribute('data-hz-value') || freqInput.value) : 0;
             spectrumDisplay.updateConfig({
@@ -11240,9 +11223,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Load signal data source setting FIRST
     loadSignalDataSource();
 
-    // Load chat markers setting
-    loadChatMarkersSetting();
-
     // Load amateur radio bands
         loadBands();
 
@@ -14092,28 +14072,6 @@ function loadSignalDataSource() {
     }
 }
 
-// Toggle chat user markers on spectrum
-function toggleChatMarkers() {
-    const checkbox = document.getElementById('show-chat-markers');
-    if (!checkbox) return;
-
-    window.showChatMarkers = checkbox.checked;
-
-    // Save to localStorage
-    try {
-        localStorage.setItem('showChatMarkers', checkbox.checked ? 'true' : 'false');
-    } catch (e) {
-        console.error('Failed to save chat markers setting to localStorage:', e);
-    }
-
-    // Invalidate marker cache to force redraw
-    if (window.spectrumDisplay) {
-        window.spectrumDisplay.invalidateMarkerCache();
-    }
-
-    log(`Chat markers ${checkbox.checked ? 'enabled' : 'disabled'}`);
-}
-
 // Load spectrum sync setting from localStorage
 function loadSpectrumSyncSetting() {
     try {
@@ -14128,29 +14086,6 @@ function loadSpectrumSyncSetting() {
     } catch (e) {
         console.error('Failed to load spectrum sync setting from localStorage:', e);
         window.spectrumSyncEnabled = false; // Default to disabled on error
-    }
-}
-
-// Load chat markers setting from localStorage
-function loadChatMarkersSetting() {
-    try {
-        const saved = localStorage.getItem('showChatMarkers');
-        if (saved !== null) {
-            window.showChatMarkers = saved === 'true';
-            log(`Loaded chat markers setting: ${window.showChatMarkers ? 'enabled' : 'disabled'}`);
-        } else {
-            // Default to enabled
-            window.showChatMarkers = true;
-        }
-        
-        // Update checkbox state if it exists
-        const checkbox = document.getElementById('show-chat-markers');
-        if (checkbox) {
-            checkbox.checked = window.showChatMarkers;
-        }
-    } catch (e) {
-        console.error('Failed to load chat markers setting from localStorage:', e);
-        window.showChatMarkers = true; // Default to enabled on error
     }
 }
 
@@ -14171,7 +14106,6 @@ window.setMarkerNavMode = setMarkerNavMode;
 window.setSignalDataSource = setSignalDataSource;
 window.populateOutputDevices = populateOutputDevices;
 window.setOutputDevice = setOutputDevice;
-window.toggleChatMarkers = toggleChatMarkers;
 
 // ── VibeSDR modal ────────────────────────────────────────────────────────────
 

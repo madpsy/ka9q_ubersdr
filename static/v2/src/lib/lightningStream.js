@@ -18,7 +18,8 @@
 import { retryDelay } from './backoff.js';
 import { logEvent } from './eventLog.js';
 import {
-    addStrike, normaliseStrike, shortClock, snrBand, strikesUrl, streamUrl, trimStrikes,
+    STORM_MIN_STRIKES, STORM_WINDOW_MS, addStrike, normaliseStatus, normaliseStrike,
+    shortClock, snrBand, statusUrl, strikesUrl, streamUrl, trimStrikes,
 } from './lightning.js';
 import { feedsAllowed, onFeedsAllowed } from './serverFeeds.js';
 import { pushNotification, sourceEnabled } from './notifications.js';
@@ -29,21 +30,29 @@ import { pushNotification, sourceEnabled } from './notifications.js';
 // this only has to be faster than anybody would notice against an hour.
 export const TRIM_MS = 10000;
 
+// How often the addon's /api/status is asked for the storm trend and the mains flag. The
+// trend compares two five-minute halves, so it cannot move much faster than this; the
+// addon's own page asks every two seconds because it also shows counters that tick.
+export const STATUS_MS = 10000;
+
 // ── When a strike is worth saying something about ────────────────────────────
 //
 // Not "every strike": a storm overhead is several a second, and one notification each
 // would be a strobe that buries everything else in the panel and on the desktop. Two
 // things are worth being told, and they are the two the panel is read for:
 //
-//   It has started. A strike after a long quiet spell is the news — it is why somebody
+//   It has started. Strikes after a long quiet spell are the news — it is why somebody
 //   would switch this on at all, and on a bad day it is the cue to go and unplug an
-//   antenna. That one goes out immediately.
+//   antenna. "Strikes", plural: it takes STORM_MIN_STRIKES within ten minutes, the
+//   addon's own rule for a storm, because a single impulse over the threshold is what a
+//   noisy site produces now and then and is not worth interrupting anybody for. It goes
+//   out on the strike that makes the count.
 //
 //   It is still going, and how hard. While strikes keep arriving, one line a minute
 //   carrying the count and the hardest of them, replacing its own previous line rather
 //   than stacking. A rate and a peak are what the panel's own headline figures are, and
 //   they are what a glance at a notification can carry.
-export const QUIET_MS = 10 * 60 * 1000;
+export const QUIET_MS = STORM_WINDOW_MS;
 export const NOTICE_EVERY_MS = 60 * 1000;
 
 const subs = new Set();
@@ -69,8 +78,17 @@ let lastStrikeAt = 0;
 let lastNoticeAt = 0;
 let sinceNotice = 0;
 let peakSince = 0;
+// Whether a storm has been declared, and before it has, the strikes counting towards one.
+let storm = false;
+let building = [];
+let stormFrom = '';
 
-export const lightningState = () => ({ strikes, live, state, lastLive });
+// The addon's storm trend and mains flag — see normaliseStatus. null until it answers,
+// and from an addon too old to say.
+let status = null;
+let statusTimer = null;
+
+export const lightningState = () => ({ strikes, live, state, lastLive, status });
 
 function notify() {
     const snap = lightningState();
@@ -85,22 +103,22 @@ function notify() {
  * Pure, and given everything it needs, so the decision can be tested without a stream: the
  * interesting cases are all about time passing, and none of them are about EventSource.
  *
- * `first` is a strike after a quiet spell and is its own line, kept in the history — that
- * a storm began at ten past four is worth still being able to read at five. The running
- * one replaces itself, because "how hard is it now" has exactly one current answer.
+ * `first` is the strike that made a storm of it and is its own line, kept in the history
+ * — that a storm began at ten past four is worth still being able to read at five. The
+ * running one replaces itself, because "how hard is it now" has exactly one current answer.
  *
  * Severity comes from the addon's own SNR bands, so a strike this calls close is the one
  * its page colours as close: at that strength it is near enough to be the reason somebody
  * switched this on.
  */
-export function strikeNotice({ first, strike, since, peak }) {
-    const hard = snrBand(first ? strike.snr : peak) === 'hi';
+export function strikeNotice({ first, strike, since, peak, from }) {
+    const hard = snrBand(peak) === 'hi';
     if (first) {
         return {
             severity: hard ? 'warn' : 'info',
             source: 'lightning',
             title: '⚡ Lightning detected',
-            body: `${Math.round(strike.snr)} dB at ${shortClock(strike.time)}`,
+            body: `${since} strikes since ${shortClock(from || strike.time)} · hardest ${Math.round(peak)} dB`,
             key: 'lightning-began',
         };
     }
@@ -122,14 +140,30 @@ export function strikeNotice({ first, strike, since, peak }) {
  * *it* has seen.
  */
 function noticeStrike(s, now) {
-    const first = !lastStrikeAt || (now - lastStrikeAt) >= QUIET_MS;
-    lastStrikeAt = now;
-    if (first) {
-        sinceNotice = 0;
-        peakSince = 0;
+    // A gap the length of the window ends a storm, and whatever was building towards one.
+    if (lastStrikeAt && (now - lastStrikeAt) >= QUIET_MS) {
+        storm = false;
+        building = [];
     }
-    sinceNotice++;
-    if (s.snr > peakSince) peakSince = s.snr;
+    lastStrikeAt = now;
+
+    let first = false;
+    if (!storm) {
+        building = building.filter((b) => now - b.at < STORM_WINDOW_MS);
+        building.push({ at: now, snr: s.snr, time: s.time });
+        // Not a storm yet, so nothing to say — and nothing to count towards the running
+        // line either, since the line that opens the storm carries these.
+        if (building.length < STORM_MIN_STRIKES) return;
+        storm = true;
+        first = true;
+        sinceNotice = building.length;
+        peakSince = Math.max(...building.map((b) => b.snr));
+        stormFrom = building[0].time;
+        building = [];
+    } else {
+        sinceNotice++;
+        if (s.snr > peakSince) peakSince = s.snr;
+    }
 
     if (!sourceEnabled('lightning')) {
         // Not wanted. The counters still had to move — see above — but nothing is said,
@@ -145,7 +179,9 @@ function noticeStrike(s, now) {
 
     if (!first && (now - lastNoticeAt) < NOTICE_EVERY_MS) return;
 
-    pushNotification(strikeNotice({ first, strike: s, since: sinceNotice, peak: peakSince }));
+    pushNotification(strikeNotice({
+        first, strike: s, since: sinceNotice, peak: peakSince, from: stormFrom,
+    }));
     lastNoticeAt = now;
     sinceNotice = 0;
     peakSince = 0;
@@ -193,6 +229,23 @@ function backfill() {
             state = 'error';
             notify();
         });
+}
+
+// The storm trend and the mains flag. Failures are quiet: an addon that predates
+// /api/status's activity block answers with nothing the panel can use, and the strikes
+// do not depend on it.
+function pollStatus() {
+    const mine = loadId;
+    fetch(statusUrl())
+        .then((r) => (r.ok ? r.json() : null))
+        .then((raw) => {
+            if (mine !== loadId || !started) return;
+            const next = normaliseStatus(raw);
+            if (JSON.stringify(next) === JSON.stringify(status)) return;
+            status = next;
+            notify();
+        })
+        .catch(() => {});
 }
 
 // Whether the current attempt has been reported to the log. One line per
@@ -246,6 +299,8 @@ function start() {
     attempts = 0;
     backfill();
     open();
+    pollStatus();
+    statusTimer = setInterval(pollStatus, STATUS_MS);
     trimTimer = setInterval(() => {
         const kept = trimStrikes(strikes);
         if (kept.length === strikes.length) return;
@@ -263,6 +318,9 @@ function stop() {
     retryTimer = null;
     clearInterval(trimTimer);
     trimTimer = null;
+    clearInterval(statusTimer);
+    statusTimer = null;
+    status = null;
     if (es) { es.close(); es = null; }
     // The last subscriber letting go, or the receiver stopping, is what closes
     // this — and it is as worth a line as the connect was. See the band
@@ -307,4 +365,8 @@ export function _resetLightning() {
     lastNoticeAt = 0;
     sinceNotice = 0;
     peakSince = 0;
+    storm = false;
+    building = [];
+    stormFrom = '';
+    status = null;
 }

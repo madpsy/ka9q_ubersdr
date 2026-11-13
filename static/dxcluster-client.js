@@ -52,13 +52,7 @@ class DXClusterClient {
                 
                 // Send any pending subscriptions
                 this.processPendingSubscriptions();
-                
-                // Initialize chat UI if not already initialized and chat is enabled
-                // Always call this - it will handle queuing if scripts aren't loaded yet
-                if (!window.chatUI) {
-                    this.initializeChatIfEnabled();
-                }
-            };
+                            };
 
             this.ws.onmessage = (event) => {
                 // Handle binary messages (from audio extensions)
@@ -93,42 +87,6 @@ class DXClusterClient {
         } catch (error) {
             console.error('[DX Cluster] Failed to create WebSocket:', error);
             this.scheduleReconnect();
-        }
-    }
-
-    async initializeChatIfEnabled() {
-        try {
-            // Always wait for the description promise to ensure we have the data
-            let data = window.apiDescription;
-            if (!data) {
-                console.log('[DX Cluster] Waiting for description data...');
-                if (window.descriptionPromise) {
-                    data = await window.descriptionPromise;
-                } else {
-                    console.warn('[DX Cluster] No description promise available');
-                    return;
-                }
-            }
-
-            if (data && data.chat_enabled === true) {
-                console.log('[DX Cluster] Chat is enabled, initializing chat UI');
-                // Check if initializeChatUI function exists (scripts may not be loaded yet)
-                if (typeof initializeChatUI === 'function' && !window.chatUI) {
-                    // Pass a getter function that always returns the current websocket
-                    initializeChatUI(() => this.ws);
-                } else if (!window.chatUI) {
-                    // Queue the initialization for when scripts are loaded
-                    console.log('[DX Cluster] Chat UI function not available yet, queuing initialization');
-                    if (window.chatInitQueue) {
-                        // Queue the getter function instead of the websocket object
-                        window.chatInitQueue.push(() => this.ws);
-                    }
-                }
-            } else {
-                console.log('[DX Cluster] Chat is disabled, skipping chat UI initialization');
-            }
-        } catch (error) {
-            console.error('[DX Cluster] Error checking chat_enabled status:', error);
         }
     }
 
@@ -229,18 +187,6 @@ class DXClusterClient {
                 // Subscription status confirmation from server
                 break;
 
-            // Chat message types - handled by chat.js, not by DX Cluster client
-            case 'chat_message':
-            case 'chat_join_confirmed':
-            case 'chat_user_joined':
-            case 'chat_user_left':
-            case 'chat_active_users':
-            case 'chat_user_update':
-            case 'chat_idle_updates':
-            case 'chat_error':
-                // These are handled by the chat system (chat.js), ignore here
-                break;
-
             // Audio extension message types - handled by extension system
             case 'audio_extension_attached':
             case 'audio_extension_detached':
@@ -251,6 +197,8 @@ class DXClusterClient {
                 break;
 
             default:
+                // Chat lives in the new interface only; this page ignores chat traffic.
+                if (typeof message.type === 'string' && message.type.startsWith('chat_')) break;
                 console.warn('[DX Cluster] Unknown message type:', message.type);
         }
     }
@@ -374,16 +322,6 @@ class DXClusterClient {
         }
     }
 
-    subscribeToChat() {
-        if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-            console.log('[DX Cluster] Subscribing to chat');
-            this.ws.send(JSON.stringify({ type: 'subscribe_chat' }));
-        } else {
-            console.log('[DX Cluster] Queueing chat subscription (WebSocket not ready)');
-            this.pendingSubscriptions.add('subscribe_chat');
-        }
-    }
-
     // Send unsubscription message to server
     unsubscribeFromDXSpots() {
         if (this.ws && this.ws.readyState === WebSocket.OPEN) {
@@ -403,13 +341,6 @@ class DXClusterClient {
         if (this.ws && this.ws.readyState === WebSocket.OPEN) {
             console.log('[DX Cluster] Unsubscribing from CW spots');
             this.ws.send(JSON.stringify({ type: 'unsubscribe_cw_spots' }));
-        }
-    }
-
-    unsubscribeFromChat() {
-        if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-            console.log('[DX Cluster] Unsubscribing from chat');
-            this.ws.send(JSON.stringify({ type: 'unsubscribe_chat' }));
         }
     }
 

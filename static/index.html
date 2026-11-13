@@ -1213,10 +1213,6 @@
                         <button onclick="openChannelsMap()" style="background: #3498db; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-size: 12px; font-weight: 500;">
                             Show Map
                         </button>
-                        <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; font-size: 0.9em; margin-right: 10px; color: #fff;">
-                            <input type="checkbox" id="show-chat-markers" checked onchange="toggleChatMarkers()">
-                            <span>Show Chat Markers</span>
-                        </label>
                     </div>
                 </div>
                 <div id="active-channels-list" class="active-channels-list">
@@ -1605,7 +1601,7 @@
          voice-activity-markers, tts-announcements, welcome-tour, pages-menu -->
     <!-- Built by build-js.sh — replaces 22 individual script tags -->
     <script src="dist/body-bundle.min.js"></script>
-    <!-- Fetch description once and store globally for chat and other features -->
+    <!-- Fetch description once and store globally for other features -->
     <script>
         // Fetch /api/description once and cache it globally
         window.descriptionPromise = (async function() {
@@ -1676,48 +1672,6 @@
     </script>
     <!-- Voice command button visibility based on voice_commands -->
     <script>
-    </script>
-    <!-- Chat scripts loaded conditionally based on chat_enabled -->
-    <script>
-        // Queue for pending chat initialization (in case WebSocket connects before scripts load)
-        window.chatInitQueue = [];
-
-        // Load chat scripts only if chat is enabled
-        (async function() {
-            try {
-                const data = await window.descriptionPromise;
-                if (data && data.chat_enabled === true) {
-                    console.log('[Chat] Chat is enabled, loading chat scripts');
-                    // Load chat scripts dynamically
-                    const scripts = ['chat.js', 'chat-ui.js'];
-                    for (const src of scripts) {
-                        const script = document.createElement('script');
-                        script.src = src;
-                        document.body.appendChild(script);
-                        await new Promise((resolve, reject) => {
-                            script.onload = resolve;
-                            script.onerror = reject;
-                        });
-                    }
-                    console.log('[Chat] Chat scripts loaded successfully');
-
-                    // Process any queued chat initializations
-                    if (window.chatInitQueue.length > 0) {
-                        console.log('[Chat] Processing', window.chatInitQueue.length, 'queued initialization(s)');
-                        window.chatInitQueue.forEach(ws => {
-                            if (typeof initializeChatUI === 'function' && !window.chatUI) {
-                                initializeChatUI(ws);
-                            }
-                        });
-                        window.chatInitQueue = [];
-                    }
-                } else {
-                    console.log('[Chat] Chat is disabled, skipping chat scripts');
-                }
-            } catch (error) {
-                console.error('[Chat] Error loading chat scripts:', error);
-            }
-        })();
     </script>
     <!-- time-display, space-weather-display, voice-activity-service,
          voice-activity-markers, tts-announcements now in dist/body-bundle.min.js -->

@@ -13,6 +13,11 @@ import {
 } from '../lib/chatFollow.js';
 import { pushNotification } from '../lib/notifications.js';
 import { MAX_FREQ } from '../radio/constants.js';
+import {
+    EMPTY_MOD_STATE, MOD_ENDED_TEXT, applyDeleted, applySync, banDelay, chatBanFrom,
+    createModRequests, localLine, messageKey, modResultLine, msgKey, noticeLine,
+    normaliseModState,
+} from '../lib/chatModeration.js';
 
 const ChatContext = createContext(null);
 
@@ -34,7 +39,10 @@ const MAX_MESSAGES = 300;
 // Timestamp, who, and what: the server's timestamps carry sub-second precision,
 // so this only collides for the same person saying the same thing inside the
 // same instant, where showing it once is the better answer anyway.
-const msgKey = (timestamp, username, body) => `${timestamp}|${username}|${body}`;
+//
+// Messages now carry a server id, and are keyed by it instead — that is also what
+// a deletion and a sync find them by. msgKey is kept for the lines that have no
+// id: the personalised welcome and the presence lines. See lib/chatModeration.js.
 
 // Was this said before we got here?
 //
@@ -163,21 +171,72 @@ export function ChatProvider({ children }) {
     // into an error loop.
     const autoJoins = useRef(0);
 
+    // ── Moderation ───────────────────────────────────────────────────────────
+    // Whether the server treats us as a moderator. Told after each join, and
+    // false again the moment we are not in the channel — a moderator who leaves,
+    // or whose socket drops, must not be left looking at tools that would be
+    // refused.
+    const [isModerator, setIsModerator] = useState(false);
+    // Whether the server has ever called us a moderator in this page. Not
+    // cleared when the socket drops (that is not the server changing its mind),
+    // only when it says "not a moderator" — which, after it had said yes, means
+    // the admin sign-in behind it has ended and only a reload brings it back.
+    const wasModerator = useRef(false);
+    const [modState, setModState] = useState(EMPTY_MOD_STATE);
+    // null, or {until} while we are banned from chat (until is null for a ban
+    // with no end the server told us). Reading chat still works; joining and
+    // posting do not, so the auto re-join below is held off while it stands.
+    const [chatBan, setChatBan] = useState(null);
+    const chatBanRef = useRef(null);
+    const banTo = (ban) => { chatBanRef.current = ban; setChatBan(ban); };
+    // Moderator requests waiting for their chat_mod_result.
+    // A ref, not a memo: the socket's handlers and the actions must share the one
+    // tracker for the life of the provider.
+    const modTracker = useRef(null);
+    if (!modTracker.current) {
+        modTracker.current = createModRequests({
+            send: (action, name, opts) => chat.mod(action, name, opts),
+        });
+    }
+    const modRequests = modTracker.current;
+    // A ban the server still enforces although its end has passed by our clock:
+    // the two clocks disagree. Held a few seconds more rather than dropped, or
+    // the re-join at its end would be refused straight back.
+    const skewBan = () => ({ until: new Date(Date.now() + 10000).toISOString() });
+    // The ban is over — it expired, or a moderator lifted it. If we were in the
+    // channel when it began, go back in under the same name. Bounded by the same
+    // counter as the error handler's re-join, so a server that keeps refusing
+    // cannot turn this into a loop.
+    const endBan = () => {
+        if (!chatBanRef.current) return;
+        banTo(null);
+        const name = nameRef.current;
+        if (!joinedRef.current || !name || validateUsername(name) || autoJoins.current >= 3) return;
+        autoJoins.current += 1;
+        joinPending.current = true;
+        setAnnounced(false);
+        chat.setUsername(name);
+    };
+    const pushLine = (line) => setMessages((prev) => prev.concat(line).slice(-MAX_MESSAGES));
+
     useEffect(() => {
         const offs = [];
         offs.push(chat.on('state', setState));
         offs.push(chat.on('message', (m) => {
             const mine = m.username === nameRef.current;
             const mentioned = !mine && isMention(m.message, nameRef.current);
-            const key = msgKey(m.timestamp, m.username, m.message);
+            const key = messageKey(m);
             let fresh = true;
             setMessages((prev) => {
                 // Already have it — see msgKey. The server replays its buffer on
                 // every subscribe_chat, so this is the ordinary case, not a
                 // corner one.
                 if (prev.some((x) => x.key === key)) { fresh = false; return prev; }
+                // `id` stays the string key — the panel keys rows by it — and the
+                // server's number is kept as `serverId` for deletes and syncs.
                 const next = prev.concat({
                     ...m, mention: mentioned, key, id: key,
+                    serverId: typeof m.id === 'number' ? m.id : null,
                 });
                 return next.length > MAX_MESSAGES ? next.slice(-MAX_MESSAGES) : next;
             });
@@ -216,6 +275,8 @@ export function ChatProvider({ children }) {
             if (p.kind === 'joined' && p.username === nameRef.current) {
                 joinPending.current = false;
                 setAnnounced(true);
+                // Accepted, so whatever ban we thought we were under is over.
+                if (chatBanRef.current) banTo(null);
             }
             const key = msgKey(p.timestamp, p.username, p.kind);
             // Somebody arriving, once. Three things have to be true, and each of them is a way
@@ -268,8 +329,64 @@ export function ChatProvider({ children }) {
         offs.push(chat.on('users', ({ users: list }) => setUsers(list)));
         offs.push(chat.on('userUpdate', () => chat.requestUsers()));
         offs.push(chat.on('idle', () => chat.requestUsers()));
+        offs.push(chat.on('deleted', (ids) => setMessages((prev) => applyDeleted(prev, ids))));
+        offs.push(chat.on('sync', (sync) => setMessages((prev) => applySync(prev, sync))));
+        offs.push(chat.on('notice', (n) => {
+            pushLine(noticeLine(n));
+            if (n.kind === 'chat_banned') {
+                // The server has taken us out of the channel; it will refuse a
+                // join until this is over. Nothing of ours is announced now.
+                joinPending.current = false;
+                setAnnounced(false);
+                setIsModerator(false);
+                banTo(chatBanFrom(n.until) || skewBan());
+            } else if (n.kind === 'chat_ban_lifted') {
+                endBan();
+            }
+        }));
+        offs.push(chat.on('moderator', (on) => {
+            setIsModerator(!!on);
+            if (on) {
+                wasModerator.current = true;
+            } else {
+                setModState(EMPTY_MOD_STATE);
+                // Said once, not on every later join; no automatic reload, which
+                // would cut off the audio of somebody who is listening.
+                if (wasModerator.current) {
+                    wasModerator.current = false;
+                    pushLine(localLine('mod_ended', MOD_ENDED_TEXT));
+                }
+            }
+        }));
+        offs.push(chat.on('modState', (d) => setModState(normaliseModState(d))));
+        offs.push(chat.on('modResult', (r) => {
+            modRequests.resolve(r);
+            const line = modResultLine(r);
+            if (line) pushLine(line);
+        }));
+        offs.push(chat.on('close', () => {
+            setIsModerator(false);
+            setModState(EMPTY_MOD_STATE);
+            modRequests.rejectAll();
+        }));
         offs.push(chat.on('error', (e) => {
             const message = e.message || 'chat error';
+            // Banned from chat: refused, and refused again on any retry until it
+            // is over, so this must never reach the re-join below — that would be
+            // a loop of joins the server answers with this same error. Kept
+            // joined, so the panel shows the ban instead of the join form and the
+            // name is still there to re-join with when it ends.
+            if (e.code === 'chat_banned') {
+                joinPending.current = false;
+                setAnnounced(false);
+                setIsModerator(false);
+                banTo(chatBanFrom(e.until) || skewBan());
+                setError(null);
+                return;
+            }
+            // The moderator's request already has its answer as a mod result;
+            // the panel shows that where the request was made.
+            if (e.code === 'mod_denied') return;
             // The server forgets our identity when its session goes (a restart,
             // or a socket it had already dropped). Re-join rather than making
             // the user notice and retype — and say nothing while doing it,
@@ -308,7 +425,15 @@ export function ChatProvider({ children }) {
                     setError(null);
                     return;
                 }
-                if (nameRef.current && autoJoins.current < 3) {
+                // Banned from chat: the server has no chat user for us while
+                // the ban stands (a reconnect asks it again and is told this).
+                // Nothing to say and nothing to undo — staying joined is what
+                // keeps the name for the re-join when the ban ends (endBan).
+                if (chatBanRef.current) {
+                    setError(null);
+                    return;
+                }
+                if (nameRef.current && autoJoins.current < 3 && !chatBanRef.current) {
                     autoJoins.current += 1;
                     setError(null);
                     joinPending.current = true;
@@ -333,6 +458,9 @@ export function ChatProvider({ children }) {
             autoJoins.current = 0;
             const saved = nameRef.current;
             if (!saved || joinedRef.current || validateUsername(saved)) return;
+            // Banned: the server would refuse it. The name is kept for when the
+            // ban ends — see endBan.
+            if (chatBanRef.current) { joinedRef.current = true; setJoined(true); return; }
             // The ref is claimed here, before the send, rather than being left
             // to `joinedRef.current = joined` on the next render.
             //
@@ -384,6 +512,14 @@ export function ChatProvider({ children }) {
         chat.refresh();
         return chat.acquire('chat');
     }, [wanted, running, chat]);
+
+    // A chat ban ends on its own at `until`; nothing is sent to say so.
+    useEffect(() => {
+        const delay = banDelay(chatBan);
+        if (delay === null) return undefined;
+        const t = setTimeout(endBan, delay);
+        return () => clearTimeout(t);
+    }, [chatBan]);
 
     // ── Following ────────────────────────────────────────────────────────────
     //
@@ -471,6 +607,9 @@ export function ChatProvider({ children }) {
         },
         leave() {
             chat.leave();
+            setIsModerator(false);
+            setModState(EMPTY_MOD_STATE);
+            modRequests.rejectAll('You left the chat.');
             joinedRef.current = false;
             joinPending.current = false;
             setAnnounced(false);
@@ -510,6 +649,12 @@ export function ChatProvider({ children }) {
             if (!body) return false;
             return chat.sendMessage(body);
         },
+        // A moderator action: info | warn | delete_user | chat_ban | lift | sdr_ban.
+        // Resolves with the server's chat_mod_result ({action, ok, message,
+        // username, info?}) — check `ok` — and rejects only when no answer came.
+        mod(action, name, opts) {
+            return modRequests.request(action, name, opts || {});
+        },
         clearError: () => setError(null),
         markMentionsRead: () => setUnreadMentions(0),
         setChime(on) {
@@ -519,7 +664,7 @@ export function ChatProvider({ children }) {
         // `tuning` is no longer among these: the join stopped publishing a status
         // — see the note in it — and nothing else in here reads the dial, so
         // keeping it would rebuild every action object on every knob movement.
-    }), [chat]);
+    }), [chat, modRequests]);
 
     // Hidden here rather than dropped as they arrive, which is what v1 does.
     //
@@ -539,9 +684,10 @@ export function ChatProvider({ children }) {
     const value = useMemo(() => ({
         enabled, state, messages: visible, users, error, username, joined, actions,
         unreadMentions, chimeOn, following, followZoom, ignored,
+        isModerator, modState, chatBan,
         connected: state === 'open',
     }), [enabled, state, visible, users, error, username, joined, actions, unreadMentions,
-        chimeOn, following, followZoom, ignored]);
+        chimeOn, following, followZoom, ignored, isModerator, modState, chatBan]);
 
     return <ChatContext.Provider value={value}>{children}</ChatContext.Provider>;
 }

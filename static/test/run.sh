@@ -9,3 +9,4 @@ cd "$(dirname "$0")"
 command -v node >/dev/null || { echo "node not found" >&2; exit 1; }
 node receiverspan.test.js
 node adminversion.test.js
+node adminchat.test.js

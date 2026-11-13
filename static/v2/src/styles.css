@@ -8370,6 +8370,245 @@ a.btn { text-decoration: none; }
    are about to insert, not only what it is called. */
 .chat__suggest-emoji { margin-right: 7px; }
 
+/* ── Chat moderation ──────────────────────────────────────────────────────── */
+
+/* Something said to this listener alone: a warning, a chat ban, or the record of a
+   moderator's own action. Full width, muted unless it is a warning. */
+.chat__notice {
+    padding: 3px 7px;
+    border-radius: var(--radius-sm);
+    background: var(--surface-hover);
+    color: var(--text-dim);
+}
+.chat__notice-text { overflow-wrap: anywhere; }
+.chat__notice.is-warn {
+    background: rgba(242, 181, 68, 0.14);
+    box-shadow: inset 3px 0 0 var(--warn);
+    color: var(--text);
+    font-weight: 600;
+}
+
+/* In place of the compose row while banned from chat, at the same height. */
+.chat__banned {
+    display: flex;
+    align-items: center;
+    min-height: 30px;
+    padding: 0 9px;
+    border-radius: var(--radius-sm);
+    background: rgba(242, 181, 68, 0.12);
+    color: var(--text-dim);
+    font-size: calc(11.5px * var(--ui-scale));
+}
+
+/* The one-line banner while moderating. */
+.chat__modbar {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex: none;
+    padding: 3px 5px 3px 7px;
+    border-radius: var(--radius-sm);
+    background: var(--accent-soft);
+    color: var(--accent);
+    font-size: calc(10.5px * var(--ui-scale));
+}
+.chat__modbar-text {
+    flex: 1;
+    min-width: 0;
+    color: var(--text-dim);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.chat__modbar .chat__unfollow { margin-left: 0; }
+
+/* A name on a message line, pressable while moderating. */
+.chat__who--mod {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 3px;
+    padding: 0;
+    border: 0;
+    background: none;
+    font: inherit;
+    font-weight: 650;
+    color: var(--accent);
+    text-decoration: underline dotted;
+    text-underline-offset: 2px;
+    cursor: pointer;
+}
+.chat__row.is-me .chat__who--mod { color: var(--good); }
+.chat__who--mod:hover { color: var(--text); }
+
+/* Same box as Follow and Ignore, which it replaces, so the column keeps its width. */
+.chat__modbtn {
+    display: grid;
+    place-items: center;
+    width: 24px;
+    flex: none;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: none;
+    color: var(--text-faint);
+    cursor: pointer;
+}
+.chat__modbtn:hover { border-color: var(--accent); color: var(--accent); }
+
+/* Warning count, or a lock while removed from chat. Ahead of the name and never shrunk. */
+.chat__modbadge {
+    display: inline-grid;
+    place-items: center;
+    flex: none;
+    min-width: 14px;
+    height: 14px;
+    margin-right: 3px;
+    padding: 0 3px;
+    border-radius: 7px;
+    background: var(--warn);
+    color: #1a1204;
+    font-size: calc(9px * var(--ui-scale));
+    font-weight: 700;
+    line-height: 1;
+    vertical-align: 1px;
+    box-sizing: border-box;
+}
+.chat__modbadge--ban { background: var(--bad); color: #fff; }
+
+.chat__removed { flex-direction: column; align-items: stretch; }
+.chat__removed-row { display: flex; align-items: center; gap: 6px; }
+.chat__removed-name {
+    flex: 1;
+    min-width: 0;
+    padding: 2px 0;
+    border: 0;
+    background: none;
+    color: var(--text-dim);
+    font-size: calc(11px * var(--ui-scale));
+    text-align: left;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    cursor: pointer;
+}
+.chat__removed-name:hover { color: var(--text); }
+.chat__removed .chat__unfollow { margin-left: 0; }
+
+/* The action sheet: one column, the same at any panel size. */
+.chat-mod {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    box-sizing: border-box;
+    width: min(360px, calc(100vw - 32px));
+    padding: 16px 18px;
+    background: var(--surface-2);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    font-size: calc(12px * var(--ui-scale));
+}
+.chat-mod__head { display: flex; flex-direction: column; gap: 4px; padding-right: 28px; }
+.chat-mod__name {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 6px;
+    font-size: calc(15px * var(--ui-scale));
+}
+.chat-mod__name b { overflow-wrap: anywhere; }
+.chat-mod__status {
+    padding: 1px 6px;
+    border-radius: 9px;
+    background: var(--surface-hover);
+    color: var(--text-faint);
+    font-size: calc(10px * var(--ui-scale));
+    font-weight: 600;
+}
+.chat-mod__status.is-in { background: rgba(69, 214, 154, 0.16); color: var(--good); }
+.chat-mod__ip { font-family: var(--mono); font-size: calc(10.5px * var(--ui-scale)); color: var(--text-faint); }
+.chat-mod__shared { color: var(--warn); font-size: calc(11px * var(--ui-scale)); }
+.chat-mod__record {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    color: var(--text-dim);
+    font-size: calc(11px * var(--ui-scale));
+}
+.chat-mod__tag {
+    padding: 1px 6px;
+    border-radius: 9px;
+    background: rgba(242, 100, 106, 0.16);
+    color: var(--bad);
+    font-size: calc(10px * var(--ui-scale));
+    font-weight: 700;
+}
+.chat-mod__section {
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+    padding-top: 10px;
+    border-top: 1px solid var(--border);
+}
+.chat-mod__section--danger { flex-direction: row; flex-wrap: wrap; align-items: center; gap: 8px; }
+.chat-mod__label {
+    margin: 0;
+    font-size: calc(10px * var(--ui-scale));
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: var(--text-faint);
+}
+.chat-mod__chips { display: flex; flex-wrap: wrap; gap: 5px; }
+.chat-mod__durations {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(68px, 1fr));
+    gap: 5px;
+}
+.chat-mod__chip {
+    padding: 4px 9px;
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-sm);
+    background: none;
+    color: var(--text-dim);
+    font: inherit;
+    font-size: calc(11.5px * var(--ui-scale));
+    white-space: nowrap;
+    cursor: pointer;
+}
+.chat-mod__chip:hover { border-color: var(--accent); color: var(--text); }
+.chat-mod__chip.is-on { border-color: var(--accent); background: var(--accent); color: var(--accent-ink); }
+.chat-mod__check { display: flex; align-items: center; gap: 6px; color: var(--text-dim); cursor: pointer; }
+.chat-mod__row { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; }
+.chat-mod__row--start { justify-content: flex-start; }
+.chat-mod__banned {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    color: var(--warn);
+}
+.chat-mod__muted { margin: 0; color: var(--text-faint); font-size: calc(11px * var(--ui-scale)); }
+.chat-mod__note { margin: 0; color: var(--text-dim); line-height: 1.45; }
+.chat-mod__confirm { display: flex; flex-direction: column; gap: 10px; padding-top: 10px; border-top: 1px solid var(--border); }
+.chat-mod__title { margin: 0; font-size: calc(14px * var(--ui-scale)); color: var(--bad); }
+.chat-mod__text { margin: 0; color: var(--text-dim); line-height: 1.45; }
+.chat-mod__error {
+    padding: 5px 8px;
+    border-radius: var(--radius-sm);
+    background: rgba(242, 100, 106, 0.16);
+    color: var(--bad);
+    font-size: calc(11.5px * var(--ui-scale));
+}
+
+/* Fingers: the sheet's chips and buttons get a finger-sized height. The row shield
+   keeps the Follow/Ignore width (the row's height already stretches it). */
+@media (any-pointer: coarse) {
+    .chat-mod__chip { min-height: 36px; }
+    .chat-mod .btn { min-height: 36px; }
+    .chat__modbar .chat__unfollow, .chat__removed .chat__unfollow { min-height: 28px; }
+}
+
 .dock__split {
     flex: 0 0 7px;
     align-self: stretch;
@@ -11283,6 +11522,18 @@ a.btn { text-decoration: none; }
 .lx__stat-v.is-hi { color: var(--bad); }
 .lx__stat-v.is-med { color: var(--warn); }
 .lx__stat-v.is-lo { color: var(--accent); }
+/* The storm figure is a word, not a number — "approaching" in the number's 15px mono
+   would not fit a quarter of a dock column. Same line height, so the row stays level. */
+.lx__stat-v--word {
+    font-family: inherit;
+    font-size: calc(11px * var(--ui-scale));
+    line-height: calc(16.5px * var(--ui-scale));
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.lx__stat-v.is-good { color: var(--good); }
 .lx__stat-s { font-size: calc(9px * var(--ui-scale)); color: var(--text-faint); }
 
 .lx__strip {
@@ -11301,6 +11552,16 @@ a.btn { text-decoration: none; }
 /* Whether the stream is up. Not a red banner when it is not: the addon reconnects on
    its own and a dropped stream is usually a receiver being restarted. */
 .lx__live { color: var(--text-faint); }
+/* A notice, not an alarm: the filter is doing its job, and this says the count is
+   the smaller for it. */
+.lx__note {
+    padding: 4px 6px;
+    border: 1px solid var(--border);
+    border-left: 2px solid var(--warn);
+    border-radius: var(--radius-sm);
+    font-size: calc(10px * var(--ui-scale));
+    color: var(--text-dim);
+}
 .lx__live.is-on { color: var(--good); }
 
 .lx__list { display: flex; flex-direction: column; gap: 2px; margin: 0; padding: 0; list-style: none; }

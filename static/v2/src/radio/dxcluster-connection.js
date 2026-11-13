@@ -27,17 +27,27 @@
 //   chat_message {message}
 //   chat_set_frequency_mode {frequency, mode, bw_low, bw_high}
 //   chat_request_users / chat_leave / ping
+//   chat_mod {action, username, duration_sec?, reason?, delete?}   moderators only;
+//     action info | warn | delete_user | chat_ban | lift | sdr_ban
 //
 // Server -> client
 //   dx_spot / digital_spot / cw_spot   {data:{…}}   — see lib/spots.js
 //   freedv_activity_snapshot {users[]} / freedv_activity_update {event,user|sid}
-//   chat_message        {data:{username, message, timestamp}}
+//   chat_message        {data:{id, username, message, timestamp}}  (the welcome has no id)
+//   chat_messages_deleted {data:{ids[]}}
+//   chat_sync           {data:{min_id, max_id, ids[]}}  after the replay: drop any id in
+//                       [min_id, max_id] that is not listed
+//   chat_notice         {data:{kind, text, until?, strikes?, limit?}}  to one user;
+//                       kind warning | auto_warning | chat_banned | chat_ban_lifted
+//   chat_moderator      {data:{enabled}}   after chat_set_username
+//   chat_mod_state      {data:{bans[], warnings{name: count}}}   moderators only
+//   chat_mod_result     {data:{action, ok, message, username, info?}}   to the requester
 //   chat_user_joined    {data:{username, timestamp, country, country_code}}
 //   chat_user_left      {data:{username, ...}}
 //   chat_active_users   {data:{users[], count}}
 //   chat_user_update    {data:{...}}
 //   chat_idle_updates   {data:{users[]}}
-//   chat_error          {error}
+//   chat_error          {error, code?, until?}  code blocked | chat_banned | mod_denied
 //   subscription_status {stream, enabled}
 //
 // Audio extensions (see extensions/protocol.js for the message shapes)
@@ -551,6 +561,19 @@ export class DXClusterConnection extends Emitter {
         return this.send({ type: 'chat_request_users' });
     }
 
+    // A moderator action. The answer comes back as a `modResult` event — see
+    // lib/chatModeration.js, which pairs the two.
+    mod(action, username, opts = {}) {
+        return this.send({
+            type: 'chat_mod',
+            action,
+            username,
+            duration_sec: opts.duration_sec,
+            reason: opts.reason,
+            delete: opts.delete,
+        });
+    }
+
     leave() {
         this.username = null;
         this.identitySent = false;
@@ -586,6 +609,8 @@ export class DXClusterConnection extends Emitter {
 
             case 'chat_message':
                 this.emit('message', {
+                    // Absent on the personalised welcome; see lib/chatModeration.js.
+                    id: d.id,
                     username: d.username,
                     message: d.message,
                     timestamp: d.timestamp,
@@ -620,8 +645,30 @@ export class DXClusterConnection extends Emitter {
                     sid: msg.sid || null,
                 });
                 break;
+            case 'chat_messages_deleted':
+                this.emit('deleted', Array.isArray(d.ids) ? d.ids : []);
+                break;
+            case 'chat_sync':
+                this.emit('sync', {
+                    min_id: d.min_id || 0,
+                    max_id: d.max_id || 0,
+                    ids: Array.isArray(d.ids) ? d.ids : [],
+                });
+                break;
+            case 'chat_notice':
+                this.emit('notice', d);
+                break;
+            case 'chat_moderator':
+                this.emit('moderator', !!d.enabled);
+                break;
+            case 'chat_mod_state':
+                this.emit('modState', d);
+                break;
+            case 'chat_mod_result':
+                this.emit('modResult', d);
+                break;
             case 'chat_error':
-                this.emit('error', { message: msg.error });
+                this.emit('error', { message: msg.error, code: msg.code || '', until: msg.until || '' });
                 break;
             case 'subscription_status': {
                 const stream = msg.stream;

@@ -313,6 +313,10 @@ esbuild ../src/lib/chatIgnore.js --bundle --format=cjs --platform=node \
     --outfile=.build/chatignore.cjs --log-level=warning
 esbuild ../src/lib/chatName.js --bundle --format=cjs --platform=node \
     --outfile=.build/chatname.cjs --log-level=warning
+esbuild chatmod.entry.js --bundle --format=cjs --platform=node \
+    --outfile=.build/chatmod.cjs --log-level=warning
+esbuild chatpanel.entry.js --bundle --format=cjs --platform=node \
+    --outfile=.build/chatpanel.cjs --log-level=warning
 esbuild ../src/lib/hostPanels.js --bundle --format=cjs --platform=node \
     --outfile=.build/hostpanels.cjs --log-level=warning
 esbuild ../src/lib/barrelMarks.js --bundle --format=cjs --platform=node \
@@ -742,6 +746,8 @@ node paneldrag.test.js
 node svgmarkup.test.js
 node chatname.test.js
 node chatignore.test.js
+node chatmod.test.js
+node chatpanel.test.js
 node hostpanels.test.js
 node opnotice.test.js
 node maxfps.test.js

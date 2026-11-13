@@ -861,6 +861,14 @@ func main() {
 	}
 	ipBanManager := NewIPBanManager(bannedIPsPath)
 
+	// Chat moderation settings (word list, links, automatic moderation).
+	// Written by the program only, like banned_ips.yaml; missing = defaults.
+	chatModerationPath := "chat_moderation.yaml"
+	if *configDir != "." {
+		chatModerationPath = *configDir + "/chat_moderation.yaml"
+	}
+	chatModerationStore := NewChatModerationStore(chatModerationPath)
+
 	// Initialize country ban manager
 	bannedCountriesPath := "banned_countries.yaml"
 	if *configDir != "." {
@@ -1519,6 +1527,9 @@ func main() {
 	dxClusterWsHandler := NewDXClusterWebSocketHandler(dxCluster, sessions, ipBanManager, prometheusMetrics, mqttPublisher, receiverLocator, config.Chat, &config.Admin)
 	dxClusterWsHandler.SetDB(dbManager.DB())
 	dxClusterWsHandler.SetReadDB(dbManager.ReadDB())
+	if dxClusterWsHandler.chatManager != nil {
+		dxClusterWsHandler.chatManager.SetModerationStore(chatModerationStore)
+	}
 
 	// Initialize FreeDV Reporter activity monitor (view-only connection to qso.freedv.org)
 	if config.FreeDVReporter.Enabled {
@@ -2684,6 +2695,16 @@ func main() {
 	// Wire the CW skimmer config so /beacons can gate on it being enabled.
 	notifManager.SetCWSkimmerConfig(cwskimmerConfig)
 	adminHandler := NewAdminHandler(config, configPath, *configDir, sessions, ipBanManager, countryBanManager, asnBanManager, audioReceiver, userSpectrumManager, noiseFloorMonitor, multiDecoder, dxCluster, dxClusterWsHandler, spaceWeatherMonitor, cwskimmerConfig, cwSkimmer, instanceReporter, mqttPublisher, rotctlHandler, rotatorScheduler, geoIPService, frontendHistory, loadHistory, addonsConfig, addonsPath, addonRouter, rbnStore, rbnFetcher, wsprRankFetcher, pskRankFetcher, gpsdoProxy, antSwitchHandler, antSwitchScheduler, freqRefMonitor)
+	if dxClusterWsHandler != nil && dxClusterWsHandler.chatManager != nil {
+		// The optional automatic Ban from SDR after repeated chat bans.
+		dxClusterWsHandler.chatManager.SetSDRBanFunc(func(ip, reason, by string) error {
+			_, _, _, err := adminHandler.BanIPWithKick(ip, reason, by)
+			return err
+		})
+		// Signed-in admins can moderate chat from the receiver page.
+		dxClusterWsHandler.SetModeratorAuth(adminHandler)
+	}
+	chatModAdmin := NewChatModAdminAPI(adminHandler, chatModerationStore)
 	// Wire admin handler into instance reporter so addon proxy names are always read
 	// from the live, authoritative source (avoids pointer-divergence after admin UI edits).
 	if instanceReporter != nil {
@@ -3367,6 +3388,13 @@ func main() {
 	http.HandleFunc("/admin/session-activity/chart-data", adminHandler.AuthMiddleware(adminHandler.HandleSessionActivityChartData))
 	http.HandleFunc("/admin/session-activity/events", adminHandler.AuthMiddleware(adminHandler.HandleSessionActivityEvents))
 	http.HandleFunc("/admin/chat/logs", adminHandler.AuthMiddleware(adminHandler.HandleChatLogs))
+	http.HandleFunc("/admin/chat/delete", adminHandler.AuthMiddleware(adminHandler.HandleChatDelete))
+	http.HandleFunc("/admin/chat/moderation", adminHandler.AuthMiddleware(chatModAdmin.HandleModeration))
+	http.HandleFunc("/admin/chat/moderation/test", adminHandler.AuthMiddleware(chatModAdmin.HandleModerationTest))
+	http.HandleFunc("/admin/chat/bans", adminHandler.AuthMiddleware(chatModAdmin.HandleBans))
+	http.HandleFunc("/admin/chat/ban", adminHandler.AuthMiddleware(chatModAdmin.HandleBan))
+	http.HandleFunc("/admin/chat/lift", adminHandler.AuthMiddleware(chatModAdmin.HandleLift))
+	http.HandleFunc("/admin/chat/actions", adminHandler.AuthMiddleware(chatModAdmin.HandleActions))
 	http.HandleFunc("/admin/force-update", adminHandler.AuthMiddleware(adminHandler.HandleForceUpdate))
 	http.HandleFunc("/admin/logs", adminHandler.AuthMiddleware(handleLogsAPI))
 	http.HandleFunc("/admin/http-logs", adminHandler.AuthMiddleware(handleHTTPLogsAPI))

@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 	"unicode"
 
@@ -15,10 +16,20 @@ import (
 
 // ChatMessage represents a chat message with metadata
 type ChatMessage struct {
+	ID        int64     `json:"id"` // 0 = not a stored message (e.g. the personalised welcome)
 	Username  string    `json:"username"`
 	Message   string    `json:"message"`
 	Timestamp time.Time `json:"timestamp"`
 	SessionID string    `json:"session_id"` // UUID of the sender
+	SourceIP  string    `json:"-"`          // sender IP (relay source for relayed messages)
+}
+
+// chatOutput is how the chat manager talks to WebSocket clients. It is
+// implemented by *DXClusterWebSocketHandler; tests substitute a fake.
+type chatOutput interface {
+	broadcast(message map[string]interface{})
+	sendMessage(conn *websocket.Conn, message map[string]interface{}) error
+	GetConnForSession(userSessionID string) *websocket.Conn
 }
 
 // ChatUser represents a user in the chat system
@@ -40,6 +51,7 @@ type ChatUser struct {
 	IsIdle            bool        // Whether user is currently marked as idle
 	Country           string      // User's country name (optional)
 	CountryCode       string      // User's ISO country code (optional)
+	Moderator         bool        // Signed-in moderator: never takes filter strikes
 }
 
 // ChatManager manages chat functionality for the DX cluster websocket
@@ -63,8 +75,25 @@ type ChatManager struct {
 	// Welcome message appended to every new client's buffer replay (nil = disabled)
 	welcomeMessage *ChatMessage
 
-	// Reference to websocket handler for broadcasting
-	wsHandler *DXClusterWebSocketHandler
+	// Socket output (the DX cluster websocket handler in production)
+	wsHandler chatOutput
+
+	// IP ban list, used to keep banned users' messages out of the replay seed
+	ipBanManager *IPBanManager
+
+	// Clock (injectable for tests)
+	now func() time.Time
+
+	// Last message id handed out; seeded from the database
+	lastID atomic.Int64
+
+	// Ids deleted while their (asynchronous) DB insert may still be pending.
+	// The logger re-applies the deletion after inserting such a row.
+	pendingDeletes   map[int64]pendingChatDelete
+	pendingDeletesMu sync.Mutex
+
+	// logWG tracks in-flight asynchronous DB writes (tests wait on it)
+	logWG sync.WaitGroup
 
 	// Reference to session manager for IP lookups
 	sessionManager *SessionManager
@@ -93,6 +122,19 @@ type ChatManager struct {
 	// notifyFn is called for join, leave, and message events (optional).
 	// Set via OnChatEvent after construction.
 	notifyFn func(ChatEvent)
+
+	// Moderation (see chat_ladder.go). modMu guards the fields below it.
+	modActions *chatModActions // chat_mod_actions history
+	modMu      sync.Mutex
+	modStore   *ChatModerationStore              // settings + filter (nil = defaults)
+	sdrBanFn   func(ip, reason, by string) error // Ban from SDR, for the escalation
+	strikes    map[string][]time.Time            // ip -> recent filter strikes
+	// Bans from SDR started by chat moderation, in progress (see sdrBanFromChat)
+	sdrBanCalls map[string]*chatSDRBanCall
+	chatBans    map[string]*chatBanEntry // ip -> chat ban in force
+
+	// Moderator connections and their admin sessions (see chat_moderator.go)
+	mods *chatModerators
 }
 
 // SetDB wires the SQLite write connection into the chat manager.
@@ -101,6 +143,7 @@ func (cm *ChatManager) SetDB(db *sql.DB) {
 	if cm.chatLogger != nil {
 		cm.chatLogger.SetDB(db)
 	}
+	cm.modActions.db = db
 }
 
 // SetReadDB wires the SQLite read-only pool into the chat manager.
@@ -110,8 +153,11 @@ func (cm *ChatManager) SetReadDB(readDB *sql.DB) {
 	if cm.chatLogger != nil {
 		cm.chatLogger.SetReadDB(readDB)
 	}
+	cm.modActions.readDB = readDB
 	// Seed the message buffer now that readDB is available.
 	cm.seedMessagesFromDB()
+	// Restore the chat bans still in force.
+	cm.loadActiveChatBans()
 }
 
 // seedMessagesFromDB loads recent messages from the DB into the message buffer.
@@ -119,7 +165,8 @@ func (cm *ChatManager) seedMessagesFromDB() {
 	if cm.chatLogger == nil {
 		return
 	}
-	seeded := cm.chatLogger.LoadRecentMessages(cm.maxMessages, 7, nil)
+	cm.seedLastID(cm.chatLogger.MaxMessageID())
+	seeded := cm.chatLogger.loadRecentMessagesAt(cm.now(), cm.maxMessages, chatSeedDays, cm.ipBanManager)
 	// Rows written before URL sanitisation existed may still carry an
 	// attribute-breaking URL, so clean them on the way into the replay buffer.
 	for i := range seeded {
@@ -148,7 +195,7 @@ func (cm *ChatManager) fireChatEvent(evt ChatEvent) {
 }
 
 // NewChatManager creates a new chat manager
-func NewChatManager(wsHandler *DXClusterWebSocketHandler, sessionManager *SessionManager, maxMessages int, maxUsers int, rateLimitPerSecond int, rateLimitPerMinute int, updateRateLimitPerSecond int, chatLogger *ChatLogger, mqttPublisher *MQTTPublisher, adminConfig *AdminConfig, chatConfig ChatConfig, ipBanManager *IPBanManager) *ChatManager {
+func NewChatManager(wsHandler chatOutput, sessionManager *SessionManager, maxMessages int, maxUsers int, rateLimitPerSecond int, rateLimitPerMinute int, updateRateLimitPerSecond int, chatLogger *ChatLogger, mqttPublisher *MQTTPublisher, adminConfig *AdminConfig, chatConfig ChatConfig, ipBanManager *IPBanManager) *ChatManager {
 	cm := &ChatManager{
 		sessionUsernames:             make(map[string]string),
 		usernameIPs:                  make(map[string]string),
@@ -166,7 +213,14 @@ func NewChatManager(wsHandler *DXClusterWebSocketHandler, sessionManager *Sessio
 		adminCallsign:                strings.ToUpper(adminConfig.Callsign),
 		ownerCallsignFromAdminIPOnly: chatConfig.OwnerCallsignFromAdminIPOnly != nil && *chatConfig.OwnerCallsignFromAdminIPOnly,
 		adminConfig:                  adminConfig,
+		ipBanManager:                 ipBanManager,
+		now:                          time.Now,
+		pendingDeletes:               make(map[int64]pendingChatDelete),
+		strikes:                      make(map[string][]time.Time),
+		chatBans:                     make(map[string]*chatBanEntry),
+		mods:                         newChatModerators(),
 	}
+	cm.modActions = &chatModActions{now: func() time.Time { return cm.now() }}
 
 	// Set welcome message if configured (sent last in buffer replay so it appears at the bottom)
 	if chatConfig.WelcomeMessage != "" {
@@ -177,7 +231,7 @@ func NewChatManager(wsHandler *DXClusterWebSocketHandler, sessionManager *Sessio
 		cm.welcomeMessage = &ChatMessage{
 			Username:  username,
 			Message:   chatConfig.WelcomeMessage,
-			Timestamp: time.Now().UTC(),
+			Timestamp: cm.now().UTC(),
 		}
 	}
 
@@ -186,6 +240,12 @@ func NewChatManager(wsHandler *DXClusterWebSocketHandler, sessionManager *Sessio
 
 	// Start idle tracking goroutine
 	go cm.trackIdleStatus()
+
+	// Drop expired chat bans
+	go cm.chatBanCleanup()
+
+	// Turn moderator tools off for admin sessions that have ended
+	go cm.moderatorRecheckLoop()
 
 	return cm
 }
@@ -214,7 +274,7 @@ func (cm *ChatManager) GetIPForUsername(username string) (ip string, fromLiveSes
 	cm.activeUsersMu.RUnlock()
 
 	if matchedSessionID != "" {
-		liveIP := cm.GetSessionIP(matchedSessionID)
+		liveIP := cm.sessionIP(matchedSessionID)
 		if liveIP != "" {
 			return liveIP, true
 		}
@@ -287,6 +347,13 @@ func (cm *ChatManager) GetSessionCountry(sessionID string) (country, countryCode
 
 // SetUsername associates a username with a session UUID
 func (cm *ChatManager) SetUsername(sessionID string, username string) error {
+	return cm.setUsername(sessionID, username, false)
+}
+
+// setUsername joins a session to chat. moderator is true only when the
+// joining connection holds a valid admin session (see joinChat); moderators
+// may use the owner callsign from any address the admin pages accept.
+func (cm *ChatManager) setUsername(sessionID string, username string, moderator bool) error {
 	// Validate username (alphanumeric only, max 15 characters)
 	if len(username) == 0 || len(username) > 15 {
 		return ErrInvalidUsername
@@ -297,14 +364,20 @@ func (cm *ChatManager) SetUsername(sessionID string, username string) error {
 		return ErrInvalidUsername
 	}
 
-	// Check for profanity in username
-	if containsProfanity(username) {
+	// Check the username against the built-in and custom word lists
+	if cm.chatFilter().UsernameBlocked(username) {
 		log.Printf("Chat: Username '%s' rejected for session %s - contains profanity", username, sessionID)
 		return ErrProfaneUsername
 	}
 
+	// Chat-banned addresses can't rejoin until the ban ends
+	if err := cm.chatBanFor(sessionID); err != nil {
+		log.Printf("Chat: Username '%s' refused for session %s - chat-banned", username, sessionID)
+		return err
+	}
+
 	// Check if username matches owner callsign and restriction is enabled
-	if cm.ownerCallsignFromAdminIPOnly && cm.adminCallsign != "" {
+	if !moderator && cm.ownerCallsignFromAdminIPOnly && cm.adminCallsign != "" {
 		// Strip suffix from admin callsign (e.g., "MM3NDH-2" becomes "MM3NDH")
 		// This allows the base callsign to be restricted while ignoring SSID suffixes
 		baseCallsign := cm.adminCallsign
@@ -358,7 +431,7 @@ func (cm *ChatManager) SetUsername(sessionID string, username string) error {
 	cm.sessionUsernamesMu.Unlock()
 
 	// Update active users
-	now := time.Now()
+	now := cm.now()
 
 	// Get country information for this user
 	country, countryCode := cm.GetSessionCountry(sessionID)
@@ -375,6 +448,7 @@ func (cm *ChatManager) SetUsername(sessionID string, username string) error {
 		IsIdle:            false,
 		Country:           country,
 		CountryCode:       countryCode,
+		Moderator:         moderator,
 	}
 	cm.activeUsersMu.Unlock()
 
@@ -382,7 +456,7 @@ func (cm *ChatManager) SetUsername(sessionID string, username string) error {
 
 	// Cache the IP for this username so /chat ban can resolve it even after
 	// the user disconnects without having sent any messages.
-	joinIP := cm.GetSessionIP(sessionID)
+	joinIP := cm.sessionIP(sessionID)
 	if joinIP != "" {
 		cm.usernameIPsMu.Lock()
 		cm.usernameIPs[strings.ToLower(username)] = joinIP
@@ -420,7 +494,7 @@ func (cm *ChatManager) sendPersonalisedWelcome(sessionID string, username string
 	}
 
 	welcome := *cm.welcomeMessage
-	welcome.Timestamp = time.Now().UTC()
+	welcome.Timestamp = cm.now().UTC()
 	welcome.Message = "@" + username + " " + welcome.Message
 
 	data := map[string]interface{}{
@@ -467,7 +541,7 @@ func (cm *ChatManager) UpdateUserStatus(sessionID string, updates map[string]int
 		return ErrUsernameNotSet
 	}
 
-	now := time.Now()
+	now := cm.now()
 
 	// Track if any value actually changed (check BEFORE rate limiting)
 	valueChanged := false
@@ -645,9 +719,12 @@ func (cm *ChatManager) broadcastUserUpdate(user *ChatUser) {
 
 	// Always include idle status (boolean)
 	userData["is_idle"] = user.IsIdle
+	if user.Moderator {
+		userData["moderator"] = true
+	}
 
 	// Calculate and include idle time (informational)
-	idleMinutes := int(time.Now().Sub(user.LastActivityTime).Minutes())
+	idleMinutes := int(cm.now().Sub(user.LastActivityTime).Minutes())
 	if idleMinutes > 0 {
 		userData["idle_minutes"] = idleMinutes
 	}
@@ -709,69 +786,9 @@ func (cm *ChatManager) RemoveUser(sessionID string) {
 			Action:   ChatActionLeft,
 			Username: username,
 			ClientIP: ip,
-			Time:     time.Now(),
+			Time:     cm.now(),
 		})
 	}
-}
-
-// RemoveUserMessages removes all messages from a specific user from the message buffer
-// This is typically called when a user is kicked or banned
-// Returns the number of messages removed
-func (cm *ChatManager) RemoveUserMessages(sessionID string) int {
-	cm.messageBufferMu.Lock()
-	defer cm.messageBufferMu.Unlock()
-
-	// Filter out messages from this user
-	filtered := make([]ChatMessage, 0, len(cm.messageBuffer))
-	removedCount := 0
-
-	for _, msg := range cm.messageBuffer {
-		if msg.SessionID != sessionID {
-			filtered = append(filtered, msg)
-		} else {
-			removedCount++
-		}
-	}
-
-	cm.messageBuffer = filtered
-
-	if removedCount > 0 {
-		log.Printf("Chat: Removed %d message(s) from session %s from message buffer", removedCount, sessionID)
-	}
-
-	return removedCount
-}
-
-// RemoveUserMessagesByIP removes all messages from users with a specific IP address or CIDR range.
-// This is typically called when an IP is banned.
-// Returns the number of messages removed.
-func (cm *ChatManager) RemoveUserMessagesByIP(ipOrCIDR string) int {
-	matchFn := buildIPMatchFunc(ipOrCIDR)
-
-	// Find all session IDs whose bound IP matches the ban target
-	sessionIDs := make([]string, 0)
-
-	cm.sessionUsernamesMu.RLock()
-	for sessionID := range cm.sessionUsernames {
-		sessionIP := cm.GetSessionIP(sessionID)
-		if matchFn(sessionIP) {
-			sessionIDs = append(sessionIDs, sessionID)
-		}
-	}
-	cm.sessionUsernamesMu.RUnlock()
-
-	// Remove messages from all matching sessions
-	totalRemoved := 0
-	for _, sessionID := range sessionIDs {
-		removed := cm.RemoveUserMessages(sessionID)
-		totalRemoved += removed
-	}
-
-	if totalRemoved > 0 {
-		log.Printf("Chat: Removed %d message(s) from IP/CIDR %s from message buffer", totalRemoved, ipOrCIDR)
-	}
-
-	return totalRemoved
 }
 
 // SendMessage processes and broadcasts a chat message from a user
@@ -782,6 +799,11 @@ func (cm *ChatManager) SendMessage(sessionID string, messageText string) error {
 		return ErrUsernameNotSet
 	}
 
+	// A chat ban removes the user, but refuse here too in case a message races it
+	if err := cm.chatBanFor(sessionID); err != nil {
+		return err
+	}
+
 	// Check rate limits
 	cm.activeUsersMu.Lock()
 	user, userExists := cm.activeUsers[sessionID]
@@ -790,7 +812,7 @@ func (cm *ChatManager) SendMessage(sessionID string, messageText string) error {
 		return ErrUsernameNotSet
 	}
 
-	now := time.Now()
+	now := cm.now()
 
 	// Rate limit: messages per second (configurable)
 	if cm.rateLimitPerSecond > 0 {
@@ -820,6 +842,8 @@ func (cm *ChatManager) SendMessage(sessionID string, messageText string) error {
 		}
 	}
 
+	isModerator := user.Moderator
+
 	// Update rate limit tracking
 	user.LastMessageTime = now
 	user.MessageTimestamps = append(user.MessageTimestamps, now)
@@ -848,15 +872,39 @@ func (cm *ChatManager) SendMessage(sessionID string, messageText string) error {
 	// Prevent all-caps messages (convert to sentence case if mostly uppercase)
 	messageText = preventAllCaps(messageText)
 
-	// Censor profanity (replace middle characters with asterisks)
-	messageText = censorProfanity(messageText)
+	// Get source IP now, before the session can be cleaned up, so the message
+	// stays deletable by IP after the user has left.
+	sourceIP := cm.sessionIP(sessionID)
+
+	// Word and link filter: star out, or don't send at all. Moderators (signed-in
+	// admins) are trusted and skip it.
+	rawText := messageText
+	result := ChatFilterResult{Status: chatStatusOK, Output: messageText}
+	if !isModerator {
+		result = cm.chatFilter().Check(messageText)
+	}
+	status, logRaw := chatStatusOK, ""
+	switch result.Status {
+	case chatStatusCensored:
+		messageText = result.Output
+		status, logRaw = chatStatusCensored, rawText
+	case chatStatusBlocked:
+		cm.logBlockedMessage(now, sourceIP, username, rawText, sessionID)
+		log.Printf("Chat: Message from '%s' not sent (%s)", username, result.Reason)
+		if result.Strike && cm.recordStrike(sessionID, username, sourceIP) {
+			return nil // the chat ban notice explains what happened
+		}
+		return ErrMessageBlocked
+	}
 
 	// Create chat message
 	chatMsg := ChatMessage{
+		ID:        cm.nextMessageID(),
 		Username:  username,
 		Message:   messageText,
 		Timestamp: now.UTC(),
 		SessionID: sessionID,
+		SourceIP:  sourceIP,
 	}
 
 	// Add to buffer
@@ -865,9 +913,6 @@ func (cm *ChatManager) SendMessage(sessionID string, messageText string) error {
 	// Update user's last seen time
 	cm.UpdateUserActivity(sessionID)
 
-	// Get source IP and country for logging and MQTT - capture it NOW before spawning goroutines
-	// to avoid race condition where IP might be removed from map during cleanup
-	sourceIP := cm.GetSessionIP(sessionID)
 	if sourceIP == "" {
 		sourceIP = "unknown"
 	}
@@ -895,10 +940,14 @@ func (cm *ChatManager) SendMessage(sessionID string, messageText string) error {
 	// Log to persistent storage (non-blocking)
 	if cm.chatLogger != nil {
 		// Use goroutine to avoid blocking message delivery on disk I/O
+		logID := chatMsg.ID
+		cm.logWG.Add(1)
 		go func() {
-			if err := cm.chatLogger.LogMessage(logTimestamp, logIP, logUsername, logMessage, logCountry, logCountryCode); err != nil {
+			defer cm.logWG.Done()
+			if err := cm.chatLogger.LogMessageFull(logID, logTimestamp, logIP, logUsername, logMessage, logCountry, logCountryCode, status, logRaw); err != nil {
 				log.Printf("Chat: Failed to log message: %v", err)
 			}
+			cm.applyPendingDelete(logID)
 		}()
 	}
 
@@ -920,7 +969,36 @@ func (cm *ChatManager) SendMessage(sessionID string, messageText string) error {
 		Time:     now,
 	})
 
+	// A starred-out message still counts towards the automatic chat ban
+	if result.Strike {
+		cm.recordStrike(sessionID, username, sourceIP)
+	}
+
 	return nil
+}
+
+// logBlockedMessage stores a message the filter refused, for the admin logs.
+// It is never buffered, broadcast, published or relayed. It takes an id from
+// the same counter so ids handed out later can't collide with it.
+func (cm *ChatManager) logBlockedMessage(at time.Time, ip, username, text, sessionID string) {
+	if cm.chatLogger == nil {
+		return
+	}
+	if ip == "" {
+		ip = "unknown"
+	}
+	country, countryCode := "", ""
+	if sessionID != "" {
+		country, countryCode = cm.GetSessionCountry(sessionID)
+	}
+	id := cm.nextMessageID()
+	cm.logWG.Add(1)
+	go func() {
+		defer cm.logWG.Done()
+		if err := cm.chatLogger.LogMessageFull(id, at, ip, username, text, country, countryCode, chatStatusBlocked, ""); err != nil {
+			log.Printf("Chat: Failed to log blocked message: %v", err)
+		}
+	}()
 }
 
 // addMessageToBuffer adds a message to the buffer, maintaining max size
@@ -957,28 +1035,20 @@ func (cm *ChatManager) SendBufferedMessages(conn *websocket.Conn) {
 	// in sendPersonalisedWelcome() once the user sets their username, so it is
 	// NOT appended here.  This keeps the buffer replay clean for admin tools.
 
-	if len(messages) == 0 {
-		log.Printf("Chat: No buffered messages to send to new client")
-		return
+	if len(messages) > 0 {
+		log.Printf("Chat: Sending %d buffered messages to new client", len(messages))
 	}
 
-	log.Printf("Chat: Sending %d buffered messages to new client", len(messages))
-
 	for _, msg := range messages {
-		data := map[string]interface{}{
-			"username":  msg.Username,
-			"message":   msg.Message,
-			"timestamp": msg.Timestamp.Format(time.RFC3339),
-		}
-
-		message := map[string]interface{}{
-			"type": "chat_message",
-			"data": data,
-		}
-
-		if err := cm.wsHandler.sendMessage(conn, message); err != nil {
+		if err := cm.wsHandler.sendMessage(conn, chatMessagePayload(msg)); err != nil {
 			log.Printf("Chat: Failed to send buffered message: %v", err)
 		}
+	}
+
+	// Tell the client which ids are still live so it can drop any it kept
+	// from before a reconnect that have since been deleted.
+	if err := cm.wsHandler.sendMessage(conn, chatSyncPayload(messages)); err != nil {
+		log.Printf("Chat: Failed to send chat_sync: %v", err)
 	}
 }
 
@@ -987,7 +1057,7 @@ func (cm *ChatManager) SendBufferedMessages(conn *websocket.Conn) {
 // stable for the relay user (e.g. "telegram:my-channel:12345678").
 // Safe to call multiple times — a second call for the same sessionID is a no-op.
 func (cm *ChatManager) InjectJoin(username, sessionID string) {
-	now := time.Now().UTC()
+	now := cm.now().UTC()
 
 	cm.activeUsersMu.Lock()
 	if _, exists := cm.activeUsers[sessionID]; exists {
@@ -1047,7 +1117,7 @@ func (cm *ChatManager) InjectLeave(username, sessionID string) {
 	cm.fireChatEvent(ChatEvent{
 		Action:   ChatActionLeft,
 		Username: username,
-		Time:     time.Now().UTC(),
+		Time:     cm.now().UTC(),
 	})
 }
 
@@ -1057,7 +1127,7 @@ func (cm *ChatManager) InjectLeave(username, sessionID string) {
 func (cm *ChatManager) InjectKeepAlive(sessionID string) {
 	cm.activeUsersMu.Lock()
 	if user, exists := cm.activeUsers[sessionID]; exists {
-		user.LastSeen = time.Now()
+		user.LastSeen = cm.now()
 	}
 	cm.activeUsersMu.Unlock()
 }
@@ -1077,12 +1147,28 @@ func (cm *ChatManager) InjectMessage(username, text, source, sessionID string) {
 		return
 	}
 
-	now := time.Now().UTC()
+	now := cm.now().UTC()
+
+	// Same word and link filter as web users; blocked text is dropped.
+	rawText := text
+	status, logRaw := chatStatusOK, ""
+	switch result := cm.chatFilter().Check(text); result.Status {
+	case chatStatusCensored:
+		text = result.Output
+		status, logRaw = chatStatusCensored, rawText
+	case chatStatusBlocked:
+		cm.logBlockedMessage(now, source, username, rawText, "")
+		log.Printf("Chat: Relayed message from '%s' (%s) not sent (%s)", username, source, result.Reason)
+		return
+	}
+
 	chatMsg := ChatMessage{
+		ID:        cm.nextMessageID(),
 		Username:  username,
 		Message:   text,
 		Timestamp: now,
 		SessionID: sessionID,
+		SourceIP:  source,
 	}
 
 	// Refresh presence so the user is not evicted or marked idle while chatting.
@@ -1102,10 +1188,14 @@ func (cm *ChatManager) InjectMessage(username, text, source, sessionID string) {
 
 	// Log to persistent storage (non-blocking). IP is set to source for traceability.
 	if cm.chatLogger != nil {
+		logID := chatMsg.ID
+		cm.logWG.Add(1)
 		go func() {
-			if err := cm.chatLogger.LogMessage(now, source, username, text, "", ""); err != nil {
+			defer cm.logWG.Done()
+			if err := cm.chatLogger.LogMessageFull(logID, now, source, username, text, "", "", status, logRaw); err != nil {
 				log.Printf("Chat: Failed to log injected message from %s: %v", source, err)
 			}
+			cm.applyPendingDelete(logID)
 		}()
 	}
 
@@ -1130,25 +1220,14 @@ func (cm *ChatManager) InjectMessage(username, text, source, sessionID string) {
 
 // broadcastChatMessage broadcasts a chat message to all connected clients
 func (cm *ChatManager) broadcastChatMessage(msg ChatMessage) {
-	data := map[string]interface{}{
-		"username":  msg.Username,
-		"message":   msg.Message,
-		"timestamp": msg.Timestamp.Format(time.RFC3339),
-	}
-
-	message := map[string]interface{}{
-		"type": "chat_message",
-		"data": data,
-	}
-
-	cm.wsHandler.broadcast(message)
+	cm.wsHandler.broadcast(chatMessagePayload(msg))
 }
 
 // broadcastUserJoined broadcasts a user joined notification
 func (cm *ChatManager) broadcastUserJoined(username string, country string, countryCode string) {
 	data := map[string]interface{}{
 		"username":  username,
-		"timestamp": time.Now().UTC().Format(time.RFC3339),
+		"timestamp": cm.now().UTC().Format(time.RFC3339),
 	}
 
 	// Include country information if available
@@ -1171,7 +1250,7 @@ func (cm *ChatManager) broadcastUserJoined(username string, country string, coun
 func (cm *ChatManager) broadcastUserLeft(username string) {
 	data := map[string]interface{}{
 		"username":  username,
-		"timestamp": time.Now().UTC().Format(time.RFC3339),
+		"timestamp": cm.now().UTC().Format(time.RFC3339),
 	}
 
 	message := map[string]interface{}{
@@ -1250,8 +1329,11 @@ func (cm *ChatManager) SendActiveUsers(conn *websocket.Conn) {
 		}
 		// Always include idle status (boolean)
 		userData["is_idle"] = user.IsIdle
+		if user.Moderator {
+			userData["moderator"] = true
+		}
 		// Calculate and include idle time (informational)
-		idleMinutes := int(time.Now().Sub(user.LastActivityTime).Minutes())
+		idleMinutes := int(cm.now().Sub(user.LastActivityTime).Minutes())
 		if idleMinutes > 0 {
 			userData["idle_minutes"] = idleMinutes
 		}
@@ -1318,8 +1400,11 @@ func (cm *ChatManager) BroadcastActiveUsers() {
 		}
 		// Always include idle status (boolean)
 		userData["is_idle"] = user.IsIdle
+		if user.Moderator {
+			userData["moderator"] = true
+		}
 		// Calculate and include idle time (informational)
-		idleMinutes := int(time.Now().Sub(user.LastActivityTime).Minutes())
+		idleMinutes := int(cm.now().Sub(user.LastActivityTime).Minutes())
 		if idleMinutes > 0 {
 			userData["idle_minutes"] = idleMinutes
 		}
@@ -1379,7 +1464,7 @@ func (cm *ChatManager) UpdateUserActivity(sessionID string) {
 	defer cm.activeUsersMu.Unlock()
 
 	if user, exists := cm.activeUsers[sessionID]; exists {
-		user.LastSeen = time.Now()
+		user.LastSeen = cm.now()
 	}
 }
 
@@ -1390,7 +1475,7 @@ func (cm *ChatManager) cleanupInactiveUsers() {
 
 	for range ticker.C {
 		cm.activeUsersMu.Lock()
-		now := time.Now()
+		now := cm.now()
 		for sessionID, user := range cm.activeUsers {
 			// Remove users inactive for more than 30 minutes
 			if now.Sub(user.LastSeen) > 30*time.Minute {
@@ -1418,7 +1503,7 @@ func (cm *ChatManager) trackIdleStatus() {
 
 	for range ticker.C {
 		cm.activeUsersMu.Lock()
-		now := time.Now()
+		now := cm.now()
 
 		// Collect all idle users for bulk update
 		idleUpdates := make([]map[string]interface{}, 0)
@@ -1485,7 +1570,11 @@ func (cm *ChatManager) HandleChatMessage(sessionID string, conn *websocket.Conn,
 		if !ok {
 			return ErrInvalidUsername
 		}
-		return cm.SetUsername(sessionID, username)
+		return cm.joinChat(sessionID, conn, username)
+
+	case "chat_mod":
+		// A moderator action; authority comes from this connection's admin session
+		return cm.handleModAction(sessionID, conn, msg)
 
 	case "chat_message":
 		// User is sending a chat message

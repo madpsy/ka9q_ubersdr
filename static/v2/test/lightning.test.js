@@ -61,12 +61,26 @@ t('a history strike is placed by its own GPS timestamp', () => {
     assert.strictEqual(s.time, '14:30:00.123', "the addon's own clock string is kept");
 });
 
-t('a live strike has no epoch, so it is placed when it arrived', () => {
-    // The compact stream sends "HH:MM:SS.mmm" and nothing else. Over a local network
-    // the difference is milliseconds, which does not show in one-second buckets.
+t('a live strike is placed when it arrived, with or without an epoch', () => {
+    // Older addons sent "HH:MM:SS.mmm" and nothing else. Newer ones send timestamp_ns
+    // too, but that is GPS time and this is the browser's: a strike stamped in this
+    // clock's future would fall off the strip. Over a local network the difference is
+    // milliseconds, which does not show in one-second buckets.
     const s = lx.normaliseStrike({ time: '14:29:59.900', snr_db: 9 }, NOW);
     assert.strictEqual(s.at, NOW);
     assert.strictEqual(s.time, '14:29:59.900');
+    const ahead = lx.normaliseStrike({ id: 'u', timestamp_ns: (NOW + 2000) * 1e6, snr_db: 30 }, NOW);
+    assert.strictEqual(ahead.at, NOW, 'a receiver clock two seconds ahead does not move it');
+    assert.strictEqual(ahead.id, 'u', 'and the id is kept, so the backfill copy is the same strike');
+});
+
+t('the pulse width and the flash come through, and are absent from an older addon', () => {
+    const s = lx.normaliseStrike({ id: 'w', timestamp_ns: NOW * 1e6, snr_db: 33, width_us: 62.5, flash: 17 });
+    assert.strictEqual(s.widthUs, 62.5);
+    assert.strictEqual(s.flash, 17);
+    const old = lx.normaliseStrike({ time: 'x', snr_db: 14, duration_ms: 3.2 }, NOW);
+    assert.strictEqual(old.widthUs, null);
+    assert.strictEqual(old.flash, 0);
 });
 
 t('a strike with neither a timestamp nor a clock gets both', () => {
@@ -80,6 +94,7 @@ t('missing numbers are zero rather than NaN', () => {
     const s = lx.normaliseStrike({ time: 'x' }, NOW);
     assert.strictEqual(s.snr, 0);
     assert.strictEqual(s.ms, 0);
+    assert.strictEqual(s.widthUs, null);
     assert.strictEqual(s.peak, 0);
     assert.strictEqual(s.saturated, false);
 });
@@ -146,10 +161,13 @@ t('the hour counts what is in the hour, and reports the hardest of it', () => {
 // --- the bands ---------------------------------------------------------------
 
 t('the SNR bands are the addon\'s own, so a strong strike is strong on both pages', () => {
-    assert.strictEqual(lx.snrBand(20), 'hi');
-    assert.strictEqual(lx.snrBand(19.9), 'med');
-    assert.strictEqual(lx.snrBand(12), 'med');
-    assert.strictEqual(lx.snrBand(11.9), 'lo');
+    // static/app.js snrClass in the addon: 40 and 30, since the trigger level went to
+    // 25 dB over the floor. At the old 20 and 12 every strike there is would be red.
+    assert.strictEqual(lx.snrBand(40), 'hi');
+    assert.strictEqual(lx.snrBand(39.9), 'med');
+    assert.strictEqual(lx.snrBand(30), 'med');
+    assert.strictEqual(lx.snrBand(29.9), 'lo');
+    assert.strictEqual(lx.snrBand(25), 'lo', 'a strike at the default trigger level is a faint one');
     assert.strictEqual(lx.snrBand(undefined), 'lo', 'and nothing is not a strong strike');
 });
 
@@ -216,7 +234,7 @@ t('every band the strip can ask for has a colour to draw it in', () => {
     // snrBand returns one of these three and the strip indexes the tone by it, so a
     // band without an entry would be an undefined fillStyle — ignored, i.e. black.
     const tone = lx.stripTone(() => '');
-    for (const db of [30, 20, 19, 12, 11, 0, undefined]) {
+    for (const db of [45, 40, 39, 30, 29, 0, undefined]) {
         assert.ok(tone[lx.snrBand(db)], `no colour for ${db} dB`);
     }
 });
@@ -245,8 +263,8 @@ t('a clock that is somehow ahead of us reads as now, not as negative', () => {
 t('a harder strike flashes brighter, up to a ceiling', () => {
     // A fixed flash would make a distant sferic look like a strike overhead; an
     // unbounded one would strobe on a storm.
-    assert.ok(lx.flashStrength(5) < lx.flashStrength(15));
-    assert.ok(lx.flashStrength(15) < lx.flashStrength(29));
+    assert.ok(lx.flashStrength(26) < lx.flashStrength(35));
+    assert.ok(lx.flashStrength(35) < lx.flashStrength(49));
     assert.strictEqual(lx.flashStrength(lx.FLASH_FULL_DB), lx.FLASH_MAX);
     assert.strictEqual(lx.flashStrength(120), lx.FLASH_MAX, 'a very close strike is not brighter still');
 });
@@ -254,11 +272,72 @@ t('a harder strike flashes brighter, up to a ceiling', () => {
 t('even the faintest strike is visible, and nonsense does not go dark', () => {
     // Below the floor a real strike would go unnoticed, which is the one thing the
     // flash exists to prevent.
-    assert.strictEqual(lx.flashStrength(0.1), lx.FLASH_MIN + (lx.FLASH_MAX - lx.FLASH_MIN) * (0.1 / lx.FLASH_FULL_DB));
+    assert.strictEqual(lx.flashStrength(lx.FLASH_FROM_DB), lx.FLASH_MIN);
+    assert.strictEqual(lx.flashStrength(12), lx.FLASH_MIN, 'below the trigger level is the floor, not darker');
     assert.strictEqual(lx.flashStrength(0), lx.FLASH_MIN);
     assert.strictEqual(lx.flashStrength(-4), lx.FLASH_MIN);
     assert.strictEqual(lx.flashStrength(undefined), lx.FLASH_MIN);
     assert.ok(lx.FLASH_MIN > 0);
+});
+
+t('the ramp spans the strikes the addon actually sends', () => {
+    // From zero, everything over the 25 dB trigger level would be in the top half.
+    const mid = (lx.FLASH_FROM_DB + lx.FLASH_FULL_DB) / 2;
+    const half = lx.FLASH_MIN + (lx.FLASH_MAX - lx.FLASH_MIN) / 2;
+    assert.ok(Math.abs(lx.flashStrength(mid) - half) < 1e-9);
+});
+
+// --- the list's last column -----------------------------------------------------
+
+t('the pulse width reads in µs, and in ms when it is that long', () => {
+    assert.strictEqual(lx.pulseLabel({ widthUs: 62.5 }), '63µs');
+    assert.strictEqual(lx.pulseLabel({ widthUs: 1500 }), '1.5ms');
+});
+
+t('an addon without a width still gets its duration', () => {
+    assert.strictEqual(lx.pulseLabel({ widthUs: null, ms: 3.25 }), '3.3ms');
+    assert.strictEqual(lx.pulseLabel(null), '');
+});
+
+// --- the addon's status -----------------------------------------------------------
+
+const STATUS = {
+    strike_count: 42,
+    detector: { connected: true, state: 'running', mains_active: true, threshold_db: 25 },
+    activity: {
+        per_min_1: 4, per_min_10: 2.6, strikes_last_hour: 42, level: 'moderate',
+        trend: 'approaching', trend_db_change: 3.4, trend_rate_now: 3.2, trend_rate_prev: 2,
+    },
+};
+
+t('the status is read into what the panel shows', () => {
+    const st = lx.normaliseStatus(STATUS);
+    assert.deepStrictEqual(st, {
+        trend: 'approaching', level: 'moderate', rateNow: 3.2, ratePrev: 2, dbChange: 3.4,
+        hour: 42, state: 'running', mains: true,
+    });
+    assert.strictEqual(lx.trendLabel(st), 'approaching');
+    assert.strictEqual(lx.trendTone(st), 'hi', 'red, as the addon\'s page has it');
+    assert.strictEqual(lx.trendDetail(st), '2.0 → 3.2 /min over the last ten minutes, +3.4 dB');
+});
+
+t('an addon too old to send a status gives none, and the figure is a dash', () => {
+    // The old /api/status was strike_count and server_time only.
+    assert.strictEqual(lx.normaliseStatus({ strike_count: 3, server_time: 'x' }), null);
+    assert.strictEqual(lx.normaliseStatus([]), null);
+    assert.strictEqual(lx.normaliseStatus(null), null);
+    assert.strictEqual(lx.trendLabel(null), '—');
+    assert.strictEqual(lx.trendTone(null), undefined);
+});
+
+t('no storm is a dash, a receding one is green, and the rest are plain', () => {
+    const with_ = (trend) => lx.normaliseStatus({ ...STATUS, activity: { ...STATUS.activity, trend } });
+    assert.strictEqual(lx.trendLabel(with_('none')), '—');
+    assert.strictEqual(lx.trendTone(with_('overhead')), 'hi');
+    assert.strictEqual(lx.trendTone(with_('receding')), 'good');
+    assert.strictEqual(lx.trendTone(with_('steady')), undefined);
+    assert.strictEqual(lx.trendTone(with_('distant')), undefined);
+    assert.ok(lx.trendDetail(with_('none')).startsWith('No storm'));
 });
 
 if (process.exitCode) console.log('\nlightning tests FAILED');

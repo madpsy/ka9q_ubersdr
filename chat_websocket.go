@@ -364,14 +364,15 @@ func (cm *ChatManager) setUsername(sessionID string, username string, moderator 
 		return ErrInvalidUsername
 	}
 
-	// Check the username against the built-in and custom word lists
-	if cm.chatFilter().UsernameBlocked(username) {
+	// Check the username against the built-in and custom word lists.
+	// Moderators and bypassed users are exempt (see chat_exempt.go).
+	if !cm.autoModExempt(sessionID, moderator) && cm.chatFilter().UsernameBlocked(username) {
 		log.Printf("Chat: Username '%s' rejected for session %s - contains profanity", username, sessionID)
 		return ErrProfaneUsername
 	}
 
 	// Chat-banned addresses can't rejoin until the ban ends
-	if err := cm.chatBanFor(sessionID); err != nil {
+	if err := cm.chatBanFor(sessionID, moderator); err != nil {
 		log.Printf("Chat: Username '%s' refused for session %s - chat-banned", username, sessionID)
 		return err
 	}
@@ -800,7 +801,7 @@ func (cm *ChatManager) SendMessage(sessionID string, messageText string) error {
 	}
 
 	// A chat ban removes the user, but refuse here too in case a message races it
-	if err := cm.chatBanFor(sessionID); err != nil {
+	if err := cm.chatBanFor(sessionID, cm.sessionIsModerator(sessionID)); err != nil {
 		return err
 	}
 
@@ -877,10 +878,10 @@ func (cm *ChatManager) SendMessage(sessionID string, messageText string) error {
 	sourceIP := cm.sessionIP(sessionID)
 
 	// Word and link filter: star out, or don't send at all. Moderators (signed-in
-	// admins) are trusted and skip it.
+	// admins) and bypassed users are trusted and skip it.
 	rawText := messageText
 	result := ChatFilterResult{Status: chatStatusOK, Output: messageText}
-	if !isModerator {
+	if !cm.autoModExempt(sessionID, isModerator) {
 		result = cm.chatFilter().Check(messageText)
 	}
 	status, logRaw := chatStatusOK, ""

@@ -281,12 +281,18 @@ func (cm *ChatManager) activeChatBan(ip string) (chatBanEntry, bool) {
 	return *b, true
 }
 
-// chatBanFor returns the error to refuse a session with when its IP is chat-banned.
-func (cm *ChatManager) chatBanFor(sessionID string) error {
-	if b, ok := cm.activeChatBan(cm.sessionIP(sessionID)); ok {
-		return chatBannedError(b.Until)
+// chatBanFor returns the error to refuse a session with when its IP is
+// chat-banned. Moderators are never kept out, and bypassed users are not kept
+// out by an automatic chat ban (see chat_exempt.go).
+func (cm *ChatManager) chatBanFor(sessionID string, moderator bool) error {
+	b, ok := cm.activeChatBan(cm.sessionIP(sessionID))
+	if !ok || moderator {
+		return nil
 	}
-	return nil
+	if b.By == "auto" && cm.sessionBypassed(sessionID) {
+		return nil
+	}
+	return chatBannedError(b.Until)
 }
 
 // ChatBans returns the chat bans in force, soonest to expire first.
@@ -434,6 +440,10 @@ func (cm *ChatManager) ChatBan(ip string, dur time.Duration, by, reason, usernam
 		"until": res.Until.Format(time.RFC3339),
 	}
 	for _, id := range cm.chatSessionsForIP(ip) {
+		// Moderators stay; bypassed users only leave for a ban made by hand.
+		if cm.sessionIsModerator(id) || (by == "auto" && cm.sessionBypassed(id)) {
+			continue
+		}
 		name, _ := cm.GetUsername(id)
 		cm.sendNotice(id, notice)
 		cm.RemoveUser(id)
@@ -448,7 +458,9 @@ func (cm *ChatManager) ChatBan(ip string, dur time.Duration, by, reason, usernam
 
 	// Optional escalation: enough chat bans in the window -> Ban from SDR.
 	esc := cm.modSettings().SDREscalation
-	if esc.Enabled && esc.ChatBans > 0 && esc.WindowDays > 0 {
+	if esc.Enabled && esc.ChatBans > 0 && esc.WindowDays > 0 && cm.ipBypassed(ip) {
+		log.Printf("Chat: %s is a bypassed address; no automatic Ban from SDR", ip)
+	} else if esc.Enabled && esc.ChatBans > 0 && esc.WindowDays > 0 {
 		since := now.AddDate(0, 0, -esc.WindowDays)
 		if n := cm.modActions.ChatBansSince(ip, since); n >= esc.ChatBans {
 			cm.modMu.Lock()
@@ -545,11 +557,7 @@ func (cm *ChatManager) recordStrike(sessionID, username, ip string) bool {
 	if ip == "" || strings.HasPrefix(username, "~") {
 		return false
 	}
-	cm.activeUsersMu.RLock()
-	u := cm.activeUsers[sessionID]
-	moderator := u != nil && u.Moderator
-	cm.activeUsersMu.RUnlock()
-	if moderator {
+	if cm.autoModExempt(sessionID, cm.sessionIsModerator(sessionID)) {
 		return false
 	}
 	auto := cm.modSettings().AutoModeration

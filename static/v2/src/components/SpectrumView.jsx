@@ -62,6 +62,7 @@ import {
     PEAK_GAP_PX, PEAK_REFRESH_MS, PEAK_TAU_MS, averageTrace, findPeaks, layoutPeakLabels,
     peakCount, peakPlace, peakSnr,
 } from '../lib/spectrumPeaks.js';
+import { PEAK_EMPTY, alignPeakHold, resamplePeak } from '../lib/peakHold.js';
 import { HOVER_QUERY, LANDSCAPE_QUERY, MOBILE_QUERY, TOUCH_QUERY, useMediaQuery } from '../lib/useMediaQuery.js';
 import { getFlex, getMidi, getRc28, getSync } from '../controls/sources.js';
 import { listSurfaces, onSurfaces } from '../controls/surfaces.js';
@@ -1390,6 +1391,11 @@ export default function SpectrumView() {
         const off = spectrumConn.on('frame', ({ bins, replay }) => {
             const g = gfx.current;
             g.bins = bins;
+            // The view these bins were taken in, read off the connection as
+            // they arrive. The React view trails it by a render, and peak hold
+            // folded a frame of the new view into the old one's pixels would
+            // keep that ghost for as long as it holds — forever at decay 0.
+            g.binsView = { centre: spectrumConn.centerFreq, span: spectrumConn.span };
             g.rowsPending++;
             g.dirty = true;
             // What a replayed frame was tuned to, for the ghost passband —
@@ -3862,7 +3868,12 @@ function drawFrame(g, d, ctx) {
 
     if (!g.px || g.px.length !== pxW) {
         g.px = new Float32Array(pxW);
-        g.peak = new Float32Array(pxW).fill(-200);
+        // A resized pane rescales the held peaks rather than dropping them:
+        // same frequencies, a different number of pixels.
+        g.peak = g.peak && g.peak.length
+            ? resamplePeak(g.peak, 0, pxW / g.peak.length, pxW)
+            : new Float32Array(pxW).fill(PEAK_EMPTY);
+        if (g.peakHold) { g.peakHold.peak = g.peak; g.peakHold.scratch = null; }
         g.smoothed = null;
     }
     binsToPixels(g.bins, pxW, g.px);
@@ -4957,6 +4968,12 @@ function drawSpectrum(g, d, spec, specH, pxW, trace, floor, range, cfg, tuning, 
     // the server's frame rate, so a per-frame decay made the hold time depend
     // on how fast the spectrum happened to be arriving. 0 holds indefinitely.
     if (d.peakHold) {
+        // Moved with the view first, so a pan or zoom carries the held line
+        // along with the signals instead of leaving it at the old pixels.
+        if (!g.peakHold) g.peakHold = { peak: g.peak, centre: 0, span: 0, scratch: null };
+        g.peakHold.peak = g.peak;
+        alignPeakHold(g.peakHold, g.binsView || { centre: cfg.centerFreq, span: cfg.span });
+        g.peak = g.peakHold.peak;
         const now = performance.now();
         const dt = g.peakAt ? Math.min(1, (now - g.peakAt) / 1000) : 0;
         g.peakAt = now;
@@ -4966,8 +4983,9 @@ function drawSpectrum(g, d, spec, specH, pxW, trace, floor, range, cfg, tuning, 
             g.peak[x] = v > g.peak[x] ? v : g.peak[x] - drop;
         }
     } else if (g.peak) {
-        g.peak.fill(-200);
+        g.peak.fill(PEAK_EMPTY);
         g.peakAt = 0;
+        if (g.peakHold) g.peakHold.span = 0;
     }
 
     // Solid area under the trace. Turning this off leaves a bare line, which

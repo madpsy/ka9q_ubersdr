@@ -180,6 +180,8 @@ esbuild ../src/lib/spectrumStats.js --bundle --format=cjs --platform=node \
     --outfile=.build/spectrumstats.cjs --log-level=warning
 esbuild ../src/lib/spectrumPeaks.js --bundle --format=cjs --platform=node \
     --outfile=.build/spectrumpeaks.cjs --log-level=warning
+esbuild ../src/lib/peakHold.js --bundle --format=cjs --platform=node \
+    --outfile=.build/peakhold.cjs --log-level=warning
 esbuild ../src/lib/share.js --bundle --format=cjs --platform=node \
     --outfile=.build/share.cjs --log-level=warning
 esbuild ../src/lib/appLinks.js --bundle --format=cjs --platform=node \
@@ -654,6 +656,7 @@ node share.test.js
 node applinks.test.js
 node spectrumstats.test.js
 node spectrumpeaks.test.js
+node peakhold.test.js
 node audiosinks.test.js
 node markernav.test.js
 node markernavsettings.test.js

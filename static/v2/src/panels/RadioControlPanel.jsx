@@ -16,8 +16,8 @@
 // re-downloads anything.
 
 import React, { useEffect, useState } from '../react.js';
-import { Button, Field, Segmented, Switch } from '../components/ui.jsx';
-import { serialAvailable } from '../controls/radiosync.js';
+import { Button, Field, Segmented, Slider, Switch } from '../components/ui.jsx';
+import { MAX_TX_HOLD_MS, serialAvailable } from '../controls/radiosync.js';
 import { getSync } from '../controls/sources.js';
 import { choiceValue, listProviders, onProviders } from '../controls/radioProviders.js';
 import { MAX_FREQ, MIN_FREQ } from '../radio/constants.js';
@@ -129,6 +129,15 @@ function RigDetails({ details }) {
 
 // `minimal` keeps the one thing here worth watching on its own: the rig's
 // frequency, mode and TX state. See the registry's `minimal`.
+
+// The hold's reading. The space is a no-break one: "350" on one line and "ms"
+// on the next is what a narrow panel would otherwise make of the hint.
+function holdText(ms) {
+    const n = Number(ms) || 0;
+    if (n <= 0) return 'Off';
+    return n < 1000 ? `${n}\u00a0ms` : `${(n / 1000).toFixed(2).replace(/0$/, '')}\u00a0s`;
+}
+
 export default function RadioControlPanel({ minimal }) {
     const [cfg, update] = useControlState();
     const [messages, pushMessage, clearMessages] = useMessages();
@@ -303,6 +312,20 @@ export default function RadioControlPanel({ minimal }) {
                     ? 'Silence the receiver while the radio is transmitting'
                     : 'This radio does not report when it is transmitting, so there is nothing to mute on'}
             />
+
+            {/* Stacked rather than inline, so the track keeps the panel's full
+                width however narrow it gets; the label row wraps on its own and
+                the reading is one unbreakable token — see holdText. */}
+            <Field label="Keep muted after transmit" hint={holdText(cfg.radiosync.txHoldMs)}>
+                <Slider
+                    value={Number(cfg.radiosync.txHoldMs) || 0}
+                    min={0}
+                    max={MAX_TX_HOLD_MS}
+                    step={50}
+                    disabled={!ptt || !cfg.radiosync.muteOnTx}
+                    onChange={(ms) => setSync({ txHoldMs: ms })}
+                />
+            </Field>
 
             {/* Serial only. A provider silences the receiver through the
                 bridge's duck, which is already after the recorder tap, so a

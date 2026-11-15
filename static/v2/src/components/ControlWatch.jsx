@@ -28,6 +28,7 @@ import { MAX_FREQ, MIN_FREQ, squelchEnabled, squelchThreshold } from '../radio/c
 import { getRecorder } from '../lib/recorder.js';
 import { pushNotification } from '../lib/notifications.js';
 import { serialAvailable } from '../controls/radiosync.js';
+import { onProviders, providerStatus } from '../controls/radioProviders.js';
 import { dialLinkFor } from '../lib/hostPanels.js';
 import {
     getDial, getGamepad, getRc28, getSurface, getSync, releaseSurfaceExcept, surfaceKeyLabel,
@@ -382,7 +383,48 @@ export default function ControlWatch() {
         sync.setDirection(rs.direction);
         sync.setMuteOnTx(rs.muteOnTx);
         sync.setRecordDuringTx(rs.recordDuringTx);
-    }, [sync, rs.direction, rs.muteOnTx, rs.recordDuringTx]);
+        sync.setTxHold(rs.txHoldMs);
+    }, [sync, rs.direction, rs.muteOnTx, rs.recordDuringTx, rs.txHoldMs]);
+
+    // The hold for a provider transport. The provider does the muting itself —
+    // the bridge ducks the tab on its own PTT edges — so the page cannot stretch
+    // that mute, only add to it: when the provider reports receive, the
+    // speakers-only gate closes for the hold and opens when it runs out. Keyed
+    // again inside it, the duck takes over and the next drop starts a fresh wait.
+    const providerTransport = rs.transport && rs.transport !== 'serial' ? rs.transport : null;
+    const providerHoldMs = providerTransport && rs.muteOnTx !== false ? Number(rs.txHoldMs) || 0 : 0;
+    const actionsRef = useRef(radio.actions);
+    actionsRef.current = radio.actions;
+    useEffect(() => {
+        if (!providerTransport || providerHoldMs <= 0) return undefined;
+        let wasTx = !!providerStatus(providerTransport).tx;
+        let timer = null;
+        let held = false;
+        const release = () => {
+            clearTimeout(timer);
+            timer = null;
+            if (!held) return;
+            held = false;
+            actionsRef.current.setTxSilenced(false);
+        };
+        const off = onProviders(() => {
+            const tx = !!providerStatus(providerTransport).tx;
+            if (tx === wasTx) return;
+            wasTx = tx;
+            if (tx) {
+                clearTimeout(timer);
+                timer = null;
+                return;
+            }
+            if (!held) {
+                held = true;
+                actionsRef.current.setTxSilenced(true);
+            }
+            clearTimeout(timer);
+            timer = setTimeout(release, providerHoldMs);
+        });
+        return () => { off(); release(); };
+    }, [providerTransport, providerHoldMs]);
 
     useEffect(() => {
         sync.setSyncFields({ frequency: rs.syncFrequency, mode: rs.syncMode });

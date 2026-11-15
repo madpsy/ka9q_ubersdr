@@ -324,6 +324,78 @@ t('a disconnect mid-over opens the gate', async () => {
     assert.deepStrictEqual(calls, [['gate', true], ['gate', false]]);
 });
 
+// The hold. CW break-in on many rigs reports TX only while the key is down, so
+// the mute has to outlast each drop or it flaps between elements and plays the
+// tail of the over back.
+const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+
+t('a hold keeps the mute on past the end of the over', async () => {
+    const { sync, calls, audio } = txRig();
+    sync.setTxHold(40);
+    sync._onPtt(true);
+    sync._onPtt(false);
+    assert.deepStrictEqual(calls, [['mute', true]]);
+    await wait(80);
+    assert.deepStrictEqual(calls, [['mute', true], ['mute', false]]);
+    assert.strictEqual(audio.muted, false);
+});
+
+t('keying again inside the hold carries the mute straight on', async () => {
+    const { sync, calls, audio } = txRig();
+    sync.setTxHold(40);
+    for (let i = 0; i < 4; i++) { sync._onPtt(true); sync._onPtt(false); }
+    assert.deepStrictEqual(calls, [['mute', true]]);
+    await wait(80);
+    assert.deepStrictEqual(calls, [['mute', true], ['mute', false]]);
+    assert.strictEqual(audio.muted, false);
+});
+
+t('a hold on the speakers-only gate', async () => {
+    const { sync, calls } = txRig();
+    sync.setRecordDuringTx(true);
+    sync.setTxHold(40);
+    sync._onPtt(true);
+    sync._onPtt(false);
+    sync._onPtt(true);
+    sync._onPtt(false);
+    assert.deepStrictEqual(calls, [['gate', true]]);
+    await wait(80);
+    assert.deepStrictEqual(calls, [['gate', true], ['gate', false]]);
+});
+
+t('turning mute on TX off during the hold lets go at once', async () => {
+    const { sync, calls } = txRig();
+    sync.setTxHold(40);
+    sync._onPtt(true);
+    sync._onPtt(false);
+    sync.setMuteOnTx(false);
+    assert.deepStrictEqual(calls, [['mute', true], ['mute', false]]);
+    await wait(80);
+    assert.deepStrictEqual(calls, [['mute', true], ['mute', false]], 'the timer fired after the release');
+});
+
+t('switching recordDuringTx during the hold lets go rather than restarting it', async () => {
+    const { sync, calls, audio } = txRig();
+    sync.setTxHold(40);
+    sync._onPtt(true);
+    sync._onPtt(false);
+    sync.setRecordDuringTx(true);
+    assert.deepStrictEqual(calls, [['mute', true], ['mute', false]]);
+    await wait(80);
+    assert.deepStrictEqual(calls, [['mute', true], ['mute', false]]);
+    assert.strictEqual(audio.muted, false);
+});
+
+t('the hold is clamped and junk reads as none', () => {
+    const { sync } = txRig();
+    sync.setTxHold(99999);
+    assert.strictEqual(sync.txHoldMs, 2000);
+    sync.setTxHold(-5);
+    assert.strictEqual(sync.txHoldMs, 0);
+    sync.setTxHold('nope');
+    assert.strictEqual(sync.txHoldMs, 0);
+});
+
 // --- serial auto-connect ------------------------------------------------------
 //
 // The bridge can only get a port from requestPort(), which needs a click. Auto-

@@ -21,6 +21,8 @@ const BASE = '/hamlib';
 // so a dead port would otherwise be polled — and logged — forever at 10 Hz.
 const MAX_POLL_FAILURES = 20;
 const POLL_MS = 100;
+// The longest the mute may outlast a transmission: the panel's slider end.
+export const MAX_TX_HOLD_MS = 2000;
 
 // How long hamlib_open gets to talk to the rig once the serial port is open.
 // A working rig answers in well under a second; this is only here so a rig that
@@ -91,6 +93,10 @@ export class RadioSync extends Emitter {
         // Mute on TX through a speakers-only gate instead of the mute button,
         // so a recording running across the over keeps the receiver's audio.
         this.recordDuringTx = false;
+        // How long the mute outlasts the rig going back to receive — see
+        // _onPtt. `holdTimer` is that wait while it runs.
+        this.txHoldMs = 0;
+        this.holdTimer = null;
         // Which of the two things are actually kept together. Either can be
         // turned off: a rig used as a transmitter for a fixed digital mode wants
         // its frequency followed and its mode left alone, and someone working
@@ -577,15 +583,24 @@ export class RadioSync extends Emitter {
     }
 
     // Switched mid-over, the rig is moved across to the other path rather than
-    // left silenced by one it no longer ends.
+    // left silenced by one it no longer ends. A hold still running is let go
+    // instead: the over is finished, and restarting its wait on the other path
+    // would only stretch it.
     setRecordDuringTx(on) {
         on = !!on;
         if (on === this.recordDuringTx) return;
         const live = this.rig.tx && this.muteOnTx;
-        if (live) this._endTx();
+        this._endTx();
         this.recordDuringTx = on;
         if (live) this._beginTx();
         this.emit('state', this.snapshot());
+    }
+
+    // Shortening the hold applies to the next over, not one already waiting:
+    // its timer was set from the old value and runs out on its own soon enough.
+    setTxHold(ms) {
+        const n = Number(ms);
+        this.txHoldMs = Number.isFinite(n) ? Math.max(0, Math.min(MAX_TX_HOLD_MS, n)) : 0;
     }
 
     // Turning a field back on has to re-assert it, not wait for the next time it
@@ -700,8 +715,26 @@ export class RadioSync extends Emitter {
         this.rig = { ...this.rig, tx };
         this.emit('state', this.snapshot());
         if (!this.muteOnTx) return;
-        if (tx && !wasTx) this._beginTx();
-        else if (!tx && wasTx) this._endTx();
+        if (tx && !wasTx) {
+            // Keyed again inside the hold: still silenced, so the wait is
+            // simply called off and the mute carries straight on.
+            if (this.holdTimer) this._cancelHold();
+            else this._beginTx();
+        } else if (!tx && wasTx) {
+            if (this.txHoldMs > 0) {
+                this.holdTimer = setTimeout(() => {
+                    this.holdTimer = null;
+                    this._endTx();
+                }, this.txHoldMs);
+            } else {
+                this._endTx();
+            }
+        }
+    }
+
+    _cancelHold() {
+        clearTimeout(this.holdTimer);
+        this.holdTimer = null;
     }
 
     // Muting on transmit remembers whether it pressed the mute, so dropping
@@ -725,6 +758,9 @@ export class RadioSync extends Emitter {
     }
 
     _endTx() {
+        // Whoever ends it — the hold running out, a setting, a disconnect —
+        // there is nothing left for a pending hold to end.
+        this._cancelHold();
         if (!this.ctx) return;
         if (this.txSilenced) {
             this.txSilenced = false;

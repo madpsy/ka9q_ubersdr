@@ -77,6 +77,12 @@ export const DEFAULT_STATE = {
     gamepad: { mappings: GAMEPAD_DEFAULT_MAPPINGS, device: '', autoConnect: false, rumble: rumbleSettings() },
     radiosync: {
         rig: '', baud: 0, direction: 'sdr-to-radio', muteOnTx: true, recordDuringTx: false,
+        // How long the mute outlasts the transmission, in ms. A rig that reports
+        // TX only while the key is down — CW break-in on many backends — drops
+        // out between every element, and the receiver's audio runs a buffer's
+        // worth behind it anyway, so dropping the mute on the edge plays the
+        // end of your own signal back. 0 is the edge itself.
+        txHoldMs: 0,
         // The serial adapter the radio was last connected through, as
         // {usbVendorId, usbProductId}: what serial auto-connect looks for.
         port: null,

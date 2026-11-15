@@ -303,6 +303,8 @@ esbuild gamepad.entry.js --bundle --format=cjs --platform=node \
     --outfile=.build/gamepad.cjs --log-level=warning
 esbuild gamepadpanel.entry.js --bundle --format=cjs --platform=node \
     --outfile=.build/gamepadpanel.cjs --log-level=warning
+esbuild radiocontrolpanel.entry.js --bundle --format=cjs --platform=node \
+    --outfile=.build/radiocontrolpanel.cjs --log-level=warning
 esbuild ../src/controls/hardware.js --bundle --format=cjs --platform=node \
     --outfile=.build/hardware.cjs --log-level=warning
 esbuild ../src/controls/radiosync.js --bundle --format=cjs --platform=node \
@@ -610,6 +612,7 @@ node rc28.test.js
 node dial.test.js
 node gamepad.test.js
 node gamepadpanel.test.js
+node radiocontrolpanel.test.js
 node spots.test.js
 node spotspanel.test.js
 node extensions.test.js

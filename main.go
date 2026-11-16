@@ -3827,7 +3827,9 @@ func main() {
 		// outbound half of the protocol; the inbound /~~orgstatus callback
 		// is served by websdrTCPRouter above.  Both must work for the
 		// receiver to appear in the listing.
-		if config.Server.WebSDRRegisterWebSDROrg {
+		if !websdrOrgRegistrationEnabled {
+			log.Printf("websdr.org: directory registration disabled in this build")
+		} else if config.Server.WebSDRRegisterWebSDROrg {
 			websdrRegistrar := NewWebSDROrgRegistrar(config)
 			websdrRegistrar.Start()
 			defer websdrRegistrar.Stop()

@@ -34,6 +34,12 @@ import (
 	"time"
 )
 
+// websdrOrgRegistrationEnabled is a code-level kill switch for websdr.org
+// directory registration.  While false, the registrar is never started,
+// regardless of server.websdr_register_websdrorg in config.  The code is
+// kept intact so registration can be re-enabled by flipping this flag.
+const websdrOrgRegistrationEnabled = false
+
 const (
 	websdrOrgServer = "websdr.ewi.utwente.nl"
 	websdrOrgPort   = 80

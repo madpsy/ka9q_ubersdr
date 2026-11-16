@@ -36,6 +36,12 @@
             document.getElementById('receiverCallsign').value = callsign;
         });
 
+        ['dxclusterCallsign', 'receiverCallsign'].forEach(id => {
+            document.getElementById(id).addEventListener('input', function(e) {
+                e.target.value = e.target.value.toUpperCase();
+            });
+        });
+
         // Auto-calculate Maidenhead locator when lat/lon changes
         document.getElementById('latitude').addEventListener('input', updateMaidenheadLocator);
         document.getElementById('longitude').addEventListener('input', updateMaidenheadLocator);
@@ -407,6 +413,29 @@
         }
     }
 
+    // Returns an error message, or null if the value looks like a callsign.
+    // Station names such as WESSEX are accepted even though they are not
+    // strictly callsigns; the leading/trailing separator rule is what rules out
+    // values like "-" that pass a character-class check alone.
+    // allowSlash permits portable/prefix forms (M9PSY/P) for the decoder and
+    // DX cluster logins; the station callsign stays letters, digits and hyphens.
+    function callsignError(raw, label, allowSlash) {
+        const callsign = (raw || '').trim().toUpperCase();
+        if (!callsign) return `${label} is required`;
+        if (callsign.length < 3) return `${label} must be at least 3 characters`;
+        const maxLen = allowSlash ? 15 : 10;
+        if (callsign.length > maxLen) return `${label} must be ${maxLen} characters or less`;
+        const allowed = allowSlash ? /^[A-Z0-9\/-]+$/ : /^[A-Z0-9-]+$/;
+        if (!allowed.test(callsign)) {
+            return allowSlash
+                ? `${label} can only contain letters, numbers, hyphens and slashes (no spaces)`
+                : `${label} can only contain letters, numbers, and hyphens (no spaces)`;
+        }
+        if (/^[-\/]|[-\/]$/.test(callsign)) return `${label} cannot start or end with a hyphen or slash`;
+        if (callsign === 'N0CALL') return `Please use a real callsign. "N0CALL" is a placeholder and not allowed`;
+        return null;
+    }
+
     function validateStep(step) {
         hideMessages();
         
@@ -432,6 +461,16 @@
                 }
             }
 
+            if (dxEnabled) {
+                const dxCallField = document.getElementById('dxclusterCallsign');
+                const err = callsignError(dxCallField.value, 'DX cluster callsign', true);
+                if (err) {
+                    showError(err);
+                    dxCallField.focus();
+                    return false;
+                }
+            }
+
             // Block Next if lookup is enabled but test has not passed
             const lookupEnabled = document.getElementById('lookupEnabled').value === 'true';
             if (lookupEnabled && !lookupTestPassed) {
@@ -441,43 +480,25 @@
             }
         }
 
+        // Step 4: receiver callsign is reported to PSKReporter/WSPRnet
+        if (step === 4 && document.getElementById('decoderEnabled').checked) {
+            const rxCallField = document.getElementById('receiverCallsign');
+            const err = callsignError(rxCallField.value, 'Receiver callsign', true);
+            if (err) {
+                showError(err);
+                rxCallField.focus();
+                return false;
+            }
+        }
+
         // Step 1 specific validation
         if (step === 1) {
             // Validate callsign
             const callsignField = document.getElementById('callsign');
             if (callsignField) {
-                const callsign = callsignField.value.trim().toUpperCase();
-                
-                if (!callsign) {
-                    showError('Callsign is required');
-                    callsignField.focus();
-                    return false;
-                }
-                
-                // Check length (max 10 characters)
-                if (callsign.length > 10) {
-                    showError('Callsign must be 10 characters or less');
-                    callsignField.focus();
-                    return false;
-                }
-                
-                // Callsign pattern: alphanumeric and hyphens only, no spaces
-                if (!/^[A-Z0-9\-]+$/.test(callsign)) {
-                    showError('Callsign can only contain letters, numbers, and hyphens (no spaces)');
-                    callsignField.focus();
-                    return false;
-                }
-                
-                // Check if callsign starts or ends with a hyphen
-                if (callsign.startsWith('-') || callsign.endsWith('-')) {
-                    showError('Callsign cannot start or end with a hyphen');
-                    callsignField.focus();
-                    return false;
-                }
-                
-                // Check if callsign is N0CALL (placeholder)
-                if (callsign === 'N0CALL') {
-                    showError('Please use a real callsign. "N0CALL" is a placeholder and not allowed');
+                const err = callsignError(callsignField.value, 'Callsign', false);
+                if (err) {
+                    showError(err);
                     callsignField.focus();
                     return false;
                 }

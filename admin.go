@@ -1212,6 +1212,11 @@ func (ah *AdminHandler) handlePutConfig(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 
+	if err := validateMainConfigCallsigns(newConfig); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
 	// Coerce every value to its declared Go type and prove the result loads
 	// before writing. A bad value is a 400 here rather than a dead server later.
 	yamlData, repairs, err := marshalMainConfigYAML(newConfig)
@@ -1381,6 +1386,21 @@ func (ah *AdminHandler) handlePatchConfig(w http.ResponseWriter, r *http.Request
 	for key, value := range updates {
 		if err := ah.setNestedValue(configMap, key, value); err != nil {
 			http.Error(w, fmt.Sprintf("Failed to update %s: %v", key, err), http.StatusBadRequest)
+			return
+		}
+	}
+
+	// Check only the callsigns this patch touches, so an unrelated patch is
+	// not refused because of a value already on disk.
+	if v, ok := updates["admin.callsign"].(string); ok {
+		if err := validateConfigCallsign("Callsign", v, false); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+	}
+	if v, ok := updates["dxcluster.callsign"].(string); ok && strings.TrimSpace(v) != "" {
+		if err := validateConfigCallsign("DX cluster callsign", v, true); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
 	}
@@ -4470,6 +4490,15 @@ func (ah *AdminHandler) handleUpdateDecoderConfig(w http.ResponseWriter, r *http
 	if err := json.NewDecoder(r.Body).Decode(&decoderConfig); err != nil {
 		http.Error(w, fmt.Sprintf("Invalid JSON: %v", err), http.StatusBadRequest)
 		return
+	}
+
+	if dec, ok := decoderConfig["decoder"].(map[string]interface{}); ok {
+		if cs, ok := dec["receiver_callsign"].(string); ok && strings.TrimSpace(cs) != "" {
+			if err := validateConfigCallsign("Receiver callsign", cs, true); err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+		}
 	}
 
 	// Backup existing file with timestamp before replacing

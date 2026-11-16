@@ -2473,6 +2473,21 @@ a.btn { text-decoration: none; }
    log" -- which has to be allowed to wrap or it runs out past the panel. */
 .field--inline .field__hint { white-space: nowrap; }
 
+/* An inline field whose hint is a phrase (Field's hintIsPhrase): the hint goes
+   under the label and wraps, rather than sitting beside it on one line, which
+   at any width narrower than the two together ran it into the label. The label
+   column takes the room left by the control, and the control keeps its size. */
+.field--inline.field--phrase .field__label {
+    flex-direction: column;
+    align-items: flex-start;
+    justify-content: flex-start;
+    gap: 2px;
+    flex: 1 1 auto;
+    min-width: 0;
+}
+.field--inline.field--phrase .field__hint { white-space: normal; text-align: left; }
+.field--inline.field--phrase > :not(.field__label) { flex: none; }
+
 /* Registering `--fill` is what lets a fill be animated at all.
    An unregistered custom property is an untyped token stream, so a change to it
    lands whole and the gradient stop it feeds jumps. That is why the volume

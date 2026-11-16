@@ -12,9 +12,10 @@ import { DEFAULTS } from '../src/display/DisplayContext.jsx';
 import * as verdict from '../src/lib/audioClass/verdict.js';
 import * as classifier from '../src/lib/audioClass/classifier.js';
 import { createWorkerHost } from '../src/lib/audioClass/workerHost.js';
+import { hintIsPhrase } from '../src/components/ui.jsx';
 
 module.exports = {
     deep, render, rerender, reset, walk, words,
     AudioClassTag, AudioClassWatch, DisplayPanel, DEFAULTS,
-    verdict, classifier, createWorkerHost,
+    verdict, classifier, createWorkerHost, hintIsPhrase,
 };

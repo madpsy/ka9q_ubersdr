@@ -85,9 +85,19 @@ export function Segmented({ options, value, onChange, size = 'md', columns, minI
     );
 }
 
+// Whether a hint is a phrase ("the view moves at the edge") rather than a
+// reading ("20 dB", "steps 500 Hz"). An inline field keeps a reading on one
+// line beside its label, and a phrase cannot be kept that way: unwrapped, it
+// runs into the label at any width narrower than the two together. A reading
+// has a number in it and is short; anything else is a phrase.
+export function hintIsPhrase(hint) {
+    return typeof hint === 'string' && (hint.length > 24 || !/\d/.test(hint));
+}
+
 export function Field({ label, hint, children, inline }) {
+    const phrase = inline && hint != null && hintIsPhrase(hint);
     return (
-        <label className={`field${inline ? ' field--inline' : ''}`}>
+        <label className={`field${inline ? ' field--inline' : ''}${phrase ? ' field--phrase' : ''}`}>
             <span className="field__label">
                 {label}
                 {hint != null && <span className="field__hint">{hint}</span>}

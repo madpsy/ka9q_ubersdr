@@ -349,6 +349,17 @@ t('the Display panel renders with the switch, and its hint', () => {
     out.cleanups.forEach((f) => f());
 });
 
+t('an inline hint that is a phrase wraps under its label; a reading stays beside it', () => {
+    for (const h of ['the view moves at the edge', 'hidden while a panel is open', 'follows the audio',
+        'Not available: the receiver could not supply the model (HTTP 404)',
+        'Listening — first verdict after 5 s of audio']) {
+        assert.ok(A.hintIsPhrase(h), h);
+    }
+    for (const h of ['20 dB', '512 ms', '-90 dBFS', 'steps 500 Hz', '45 % spectrum', undefined, null, 3]) {
+        assert.ok(!A.hintIsPhrase(h), String(h));
+    }
+});
+
 t('on by default', () => {
     assert.strictEqual(A.DEFAULTS.audioClass, true);
 });

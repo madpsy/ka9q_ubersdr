@@ -1749,9 +1749,6 @@ func getSystemLoad() map[string]interface{} {
 	}
 
 	// Use standard /proc/loadavg.
-	// NOTE: readCorrectedLoadAvg() (real-load-daemon.sh) is available but
-	// temporarily disabled — re-enable by wrapping the block below in:
-	//   if l1, l5, l15, ok := readCorrectedLoadAvg(); ok { ... } else { ... }
 	var load15 float64
 
 	{

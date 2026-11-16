@@ -12,50 +12,6 @@ import (
 	"github.com/shirou/gopsutil/v3/cpu"
 )
 
-// correctedLoadAvgPath is the state file written by real-load-daemon.sh on the host
-// and bind-mounted read-only into the container at the same path.
-// Format: "<ema1> <ema5> <ema15> <cpu_pct> <unix_timestamp>\n"
-const correctedLoadAvgPath = "/run/real-load-avg"
-
-// correctedLoadAvgMaxAge is the maximum age of the state file before we fall back
-// to /proc/loadavg.  If the daemon stops writing, we don't want to serve stale data.
-const correctedLoadAvgMaxAge = 30 * time.Second
-
-// readCorrectedLoadAvg attempts to read the corrected load averages written by
-// real-load-daemon.sh.  Returns (load1, load5, load15, ok).
-// Falls back gracefully: returns ok=false if the file is absent, unreadable,
-// unparseable, or older than correctedLoadAvgMaxAge.
-func readCorrectedLoadAvg() (load1, load5, load15 float64, ok bool) {
-	data, err := os.ReadFile(correctedLoadAvgPath)
-	if err != nil {
-		return 0, 0, 0, false
-	}
-
-	fields := strings.Fields(string(data))
-	if len(fields) < 5 {
-		return 0, 0, 0, false
-	}
-
-	// Check age: field[4] is a Unix timestamp written by the daemon
-	ts, err := strconv.ParseInt(fields[4], 10, 64)
-	if err != nil {
-		return 0, 0, 0, false
-	}
-	age := time.Since(time.Unix(ts, 0))
-	if age > correctedLoadAvgMaxAge {
-		return 0, 0, 0, false
-	}
-
-	l1, err1 := strconv.ParseFloat(fields[0], 64)
-	l5, err5 := strconv.ParseFloat(fields[1], 64)
-	l15, err15 := strconv.ParseFloat(fields[2], 64)
-	if err1 != nil || err5 != nil || err15 != nil {
-		return 0, 0, 0, false
-	}
-
-	return l1, l5, l15, true
-}
-
 // LoadHistoryTracker tracks historical system load metrics
 // Uses the same three-tier aggregation pattern as FrontendHistoryTracker
 type LoadHistoryTracker struct {
@@ -185,11 +141,6 @@ func (lht *LoadHistoryTracker) sampleLoop() {
 
 		case <-lht.sampleTicker.C:
 			// Use standard /proc/loadavg.
-			// NOTE: readCorrectedLoadAvg() (real-load-daemon.sh) is available but
-			// temporarily disabled — use it by replacing the block below with:
-			//   if l1, l5, l15, ok := readCorrectedLoadAvg(); ok {
-			//       load1, load5, load15 = l1, l5, l15
-			//   } else { /* /proc/loadavg fallback */ }
 			var load1, load5, load15 float64
 			{
 				data, err := os.ReadFile("/proc/loadavg")

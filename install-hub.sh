@@ -545,45 +545,22 @@ else
     echo "Warning: Failed to download RTL-TCP bridge binary. Skipping RTL-TCP bridge installation."
 fi
 
-# Install real-load daemon (cpuset-corrected load averages)
-echo "Installing real-load daemon..."
-REAL_LOAD_FAILED=0
-
-if curl -fsSL https://raw.githubusercontent.com/madpsy/ka9q_ubersdr/refs/heads/main/load/real-load-daemon.sh -o /tmp/real-load-daemon.sh 2>/dev/null; then
-    sudo mv /tmp/real-load-daemon.sh /usr/local/bin/real-load-daemon.sh
-    sudo chmod +x /usr/local/bin/real-load-daemon.sh
-    echo "real-load-daemon.sh installed to /usr/local/bin/."
-else
-    echo "Warning: Failed to download real-load-daemon.sh. Skipping real-load daemon installation."
-    REAL_LOAD_FAILED=1
+# Remove the retired real-load daemon (cpuset-corrected load averages) from
+# older installs. UberSDR reads /proc/loadavg directly, and the
+# /run/real-load-avg bind mount could stop the container starting after a
+# reboot if Docker created the path before the daemon did.
+if [ -f /etc/systemd/system/real-load-daemon.service ] || [ -e /usr/local/bin/real-load-daemon.sh ]; then
+    echo "Removing retired real-load daemon..."
+    sudo systemctl disable --now real-load-daemon.service 2>/dev/null || true
+    sudo rm -f /etc/systemd/system/real-load-daemon.service
+    sudo systemctl daemon-reload
+    sudo rm -f /usr/local/bin/real-load-daemon.sh /usr/local/bin/real-load.sh
 fi
-
-if [ $REAL_LOAD_FAILED -eq 0 ]; then
-    if curl -fsSL https://raw.githubusercontent.com/madpsy/ka9q_ubersdr/refs/heads/main/load/real-load.sh -o /tmp/real-load.sh 2>/dev/null; then
-        sudo mv /tmp/real-load.sh /usr/local/bin/real-load.sh
-        sudo chmod +x /usr/local/bin/real-load.sh
-        echo "real-load.sh installed to /usr/local/bin/."
-    else
-        echo "Warning: Failed to download real-load.sh. Skipping real-load reader installation."
-        REAL_LOAD_FAILED=1
-    fi
-fi
-
-if [ $REAL_LOAD_FAILED -eq 0 ]; then
-    if curl -fsSL https://raw.githubusercontent.com/madpsy/ka9q_ubersdr/refs/heads/main/load/real-load-daemon.service -o /tmp/real-load-daemon.service 2>/dev/null; then
-        sudo mv /tmp/real-load-daemon.service /etc/systemd/system/real-load-daemon.service
-        sudo systemctl daemon-reload
-        sudo systemctl enable real-load-daemon.service
-        if systemctl is-active --quiet real-load-daemon.service; then
-            sudo systemctl restart real-load-daemon.service
-            echo "real-load-daemon service updated and restarted."
-        else
-            sudo systemctl start real-load-daemon.service
-            echo "real-load-daemon service installed, enabled, and started."
-        fi
-    else
-        echo "Warning: Failed to download real-load-daemon.service. Skipping service installation."
-    fi
+sudo rm -rf /run/real-load-avg /run/real-load-daemon.pid
+if [ -f "$ACTUAL_HOME/ubersdr/docker-compose.yml" ] && \
+   grep -q '^[[:space:]]*-[[:space:]]*/run/real-load-avg:' "$ACTUAL_HOME/ubersdr/docker-compose.yml"; then
+    echo "Removing /run/real-load-avg mount from docker-compose.yml..."
+    sudo sed -i '/^[[:space:]]*-[[:space:]]*\/run\/real-load-avg:/d' "$ACTUAL_HOME/ubersdr/docker-compose.yml"
 fi
 
 # Create ubersdr directory in user's home

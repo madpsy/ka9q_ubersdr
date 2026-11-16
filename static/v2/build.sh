@@ -95,6 +95,18 @@ WHISPER=(
     --outfile=dist/whisper-worker.js
 )
 
+# The audio classifier's worker (src/lib/audioClass/), for the same reason. It
+# loads audioclass/audioclass.wasm and the model beside it, both committed —
+# see native/audioclass/build.sh.
+AUDIOCLASS=(
+    src/lib/audioClass/worker.entry.js
+    --bundle
+    --format=iife
+    --target=es2020
+    --log-level=warning
+    --outfile=dist/audioclass-worker.js
+)
+
 # The names a manifest may use, for the admin editor to check one against.
 #
 # Generated from the source rather than written out again: the icon keys and the
@@ -128,21 +140,24 @@ case "$MODE" in
         esbuild "${RUNTIME[@]}" --minify
         esbuild "${PLAYGROUND[@]}" --minify
         esbuild "${WHISPER[@]}" --minify
+        esbuild "${AUDIOCLASS[@]}" --minify
         panel_meta
-        echo "built $OUT ($(numfmt --to=iec < <(wc -c < "$OUT"))), dist/panel-runtime.js, dist/playground-worker.js, dist/whisper-worker.js and dist/v2.css"
+        echo "built $OUT ($(numfmt --to=iec < <(wc -c < "$OUT"))), dist/panel-runtime.js, dist/playground-worker.js, dist/whisper-worker.js, dist/audioclass-worker.js and dist/v2.css"
         ;;
     dev)
         esbuild "${COMMON[@]}" --sourcemap=inline
         esbuild "${RUNTIME[@]}" --sourcemap=inline
         esbuild "${PLAYGROUND[@]}" --sourcemap=inline
         esbuild "${WHISPER[@]}" --sourcemap=inline
+        esbuild "${AUDIOCLASS[@]}" --sourcemap=inline
         panel_meta
-        echo "built $OUT, dist/panel-runtime.js, dist/playground-worker.js and dist/whisper-worker.js (dev)"
+        echo "built $OUT, dist/panel-runtime.js, dist/playground-worker.js, dist/whisper-worker.js and dist/audioclass-worker.js (dev)"
         ;;
     watch)
         esbuild "${RUNTIME[@]}" --sourcemap=inline
         esbuild "${PLAYGROUND[@]}" --sourcemap=inline
         esbuild "${WHISPER[@]}" --sourcemap=inline
+        esbuild "${AUDIOCLASS[@]}" --sourcemap=inline
         panel_meta
         esbuild "${COMMON[@]}" --sourcemap=inline --watch
         ;;

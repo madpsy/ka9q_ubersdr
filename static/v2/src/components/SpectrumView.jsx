@@ -31,6 +31,7 @@ import {
     WHEEL_ACCELS, createAcceleratedWheelStep, nearestWheelAccel, wheelAccelLabel,
 } from '../lib/wheelStep.js';
 import MarkerBar from './MarkerBar.jsx';
+import AudioClassTag from './AudioClassTag.jsx';
 import SpectrumMenu from './SpectrumMenu.jsx';
 import AddBookmark from './AddBookmark.jsx';
 import {
@@ -2873,6 +2874,11 @@ export default function SpectrumView() {
                             what it sent. */}
                         <ClientNoiseTags />
                         <FilterTags />
+                        {/* What the audio coming out of the chain is — so
+                            after the tags for what has been done to it, and
+                            before the ones about what is driving the
+                            receiver. */}
+                        <AudioClassTag />
                         <ControlTags />
                         <ClipTag />
                         {/* Shown on a handset as well as the desktop, unlike the

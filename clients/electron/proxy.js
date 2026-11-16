@@ -34,6 +34,7 @@ const MIME = {
     '.woff2': 'font/woff2',
     '.woff': 'font/woff',
     '.md': 'text/plain; charset=utf-8',
+    '.wasm': 'application/wasm',
 };
 
 class InstanceProxy {

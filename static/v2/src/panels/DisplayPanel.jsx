@@ -27,6 +27,8 @@ import {
     themeSwatch, uiColorsFrom,
 } from '../lib/uiColors.js';
 import { haptic, hapticsSupported, setHapticMode, setHapticScopes } from '../lib/haptics.js';
+import useAudioClass from '../lib/audioClass/useAudioClass.js';
+import { statusText as audioClassStatus } from '../lib/audioClass/verdict.js';
 
 
 // Frames a second the spectrum loop may run at. Nothing above 60: the point of
@@ -36,7 +38,8 @@ const FPS_CHOICES = [0, 60, 30, 20, 15, 10];
 
 export default function DisplayPanel() {
     const d = useDisplay();
-    const { serverInfo, actions } = useRadio();
+    const { serverInfo, actions, tuning } = useRadio();
+    const audioClass = useAudioClass();
     // Whether the receiver's clock can be offered for the waterfall stamps.
     const rxZoneKnown = receiverOffsetMin(serverInfo && serverInfo.receiver) != null;
     // Two settings resolve per device — the zoom anchor and the idle throttle —
@@ -274,6 +277,23 @@ export default function DisplayPanel() {
                     />
                 </Field>
             )}
+
+            {/* The VOICE / MUSIC / NOISE tag above the spectrum. Its hint is
+                the classifier's own status — loading, waiting for a mode with
+                audio in it, or why it is not available — because the tag
+                itself stays hidden in all of those rather than show a fault to
+                every listener. */}
+            <Field
+                label="Identify audio"
+                hint={d.audioClass !== false ? audioClassStatus(audioClass, tuning.mode) || undefined : undefined}
+                inline
+            >
+                <Switch
+                    checked={d.audioClass !== false}
+                    onChange={(v) => d.set({ audioClass: v })}
+                    title="A tag above the spectrum saying whether what you are hearing is voice, music or noise — an audio tagger run in this browser on the receiver's audio, in SSB, AM and FM only. Uses some CPU while audio plays, and about 10 MB from this receiver the first time"
+                />
+            </Field>
 
             <div className="divider" />
 

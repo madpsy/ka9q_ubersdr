@@ -546,6 +546,11 @@ export const DEFAULTS = {
     // every palette change. Switching palettes now brings back whatever was
     // chosen for it last time.
     markOverrides: {},
+    // The VOICE / MUSIC / NOISE tag above the spectrum: an audio tagger run in
+    // this browser on what the receiver is playing (lib/audioClass/). On, and
+    // only while audio plays in SSB, AM or FM; about 7% of a desktop core then,
+    // and a one-off 10 MB from the receiver the first time.
+    audioClass: true,
 };
 
 // `tuneStep` set to `hz`, and remembered as this mode's. A figure that cannot be

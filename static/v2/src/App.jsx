@@ -35,6 +35,7 @@ import SubReceiversWatch from './components/SubReceiversWatch.jsx';
 import PlaygroundWatch from './components/PlaygroundWatch.jsx';
 import RecorderFormatWatch from './components/RecorderFormatWatch.jsx';
 import TimeshiftWatch from './components/TimeshiftWatch.jsx';
+import AudioClassWatch from './components/AudioClassWatch.jsx';
 import { MediaSessionProvider } from './radio/media/MediaSessionContext.jsx';
 import LegacyBridge from './compat/LegacyBridge.jsx';
 import BridgeHost from './bridge/BridgeHost.jsx';
@@ -323,6 +324,11 @@ export default function App() {
                                     and back to live on a retune. A replay must
                                     not outlive a collapsed panel's buttons. */}
                                 <TimeshiftWatch />
+                                {/* And the audio classifier's, which loads a
+                                    model it should not reload each time the
+                                    spectrum row that shows its badge is
+                                    remounted. */}
+                                <AudioClassWatch />
                                 <StartOverlay />
                                 {/* After the overlay, and drawn above it: the
                                     operator's notices appear the moment the page

@@ -834,7 +834,9 @@ if [[ "$SKIP_UI" -eq 0 ]]; then
         exit 1
     fi
 
-    cp -r "$V2/dist" "$V2/fonts" "$V2/vendor" www/v2/
+    # audioclass/ is the audio classifier's module and model (static/v2/
+    # audioclass/README.md): fetched by the page, so it has to be beside it.
+    cp -r "$V2/dist" "$V2/fonts" "$V2/vendor" "$V2/audioclass" www/v2/
 
     printf '%s (%s)\n' \
         "$(git -C "$V2" rev-parse --short HEAD 2>/dev/null || echo unknown)" \

@@ -550,6 +550,8 @@ esbuild whisperpanel.entry.js --bundle --format=cjs --platform=node \
     --outfile=.build/whisperpanel.cjs --log-level=warning
 esbuild whisperwasm.entry.js --bundle --format=cjs --platform=node \
     --outfile=.build/whisperwasm.cjs --log-level=warning
+esbuild audioclass.entry.js --bundle --format=cjs --platform=node \
+    --outfile=.build/audioclass.cjs --log-level=warning
 esbuild ../src/extensions/whisper/wasm/worker.entry.js --bundle --format=iife \
     --outfile=.build/whisper-worker.js --log-level=warning
 esbuild ../src/lib/measure.js --bundle --format=cjs --platform=node \
@@ -631,6 +633,7 @@ node whisperlocal.test.js
 node whisperengines.test.js
 node whisperpanel.test.js
 node whisperwasm.test.js
+node audioclass.test.js
 node waterfall.test.js
 node waterfalltimes.test.js
 node timeconstant.test.js

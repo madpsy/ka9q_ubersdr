@@ -8,6 +8,7 @@ import (
 	"os"
 	"slices"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 )
@@ -1141,7 +1142,9 @@ func (nfm *NoiseFloorMonitor) GetTrendData(date string, band string) ([]*BandMea
 		return nil, fmt.Errorf("noise floor historical data is not available (database not configured)")
 	}
 
-	today := time.Now().Format("2006-01-02")
+	// Dates are UTC days throughout; comparing with the local date sent a
+	// request for today to the archive near midnight on a non-UTC server.
+	today := time.Now().UTC().Format("2006-01-02")
 	var rawData []*BandMeasurement
 
 	if date == today {
@@ -1260,115 +1263,114 @@ func (nfm *NoiseFloorMonitor) GetTrendData(date string, band string) ([]*BandMea
 
 // GetTrendDataAllBands returns 24 hours of data for all bands averaged in 10-minute chunks from the SQLite database.
 func (nfm *NoiseFloorMonitor) GetTrendDataAllBands() (map[string][]*BandMeasurement, error) {
+	now := time.Now().UTC()
+	return nfm.QueryTrend(now.Add(-24*time.Hour), now, nil, 10*time.Minute)
+}
+
+// QueryTrend returns the measurements between from and to (inclusive),
+// averaged per band into step-long buckets aligned to UTC multiples of the
+// step, oldest first. bands restricts it to those bands (nil = all). Each
+// bucket's Timestamp is its start, in UTC. The band filter and time window are
+// applied in SQL, so a narrow request reads only the rows it returns.
+func (nfm *NoiseFloorMonitor) QueryTrend(from, to time.Time, bands []string, step time.Duration) (map[string][]*BandMeasurement, error) {
 	if nfm == nil {
 		return nil, fmt.Errorf("noise floor monitor not enabled")
 	}
 	if nfm.readDB == nil {
 		return nil, fmt.Errorf("noise floor historical data is not available (database not configured)")
 	}
+	if step < time.Minute {
+		step = 10 * time.Minute
+	}
 
-	now := time.Now()
-	startTS := now.Add(-24 * time.Hour).Unix()
-	endTS := now.Unix()
+	query := `SELECT ts, band, min_db, max_db, mean_db, median_db, p5_db, p10_db, p95_db,
+	                 dynamic_range, occupancy_pct, ft8_snr, snr_0_30_mhz, snr_1_8_30_mhz
+	          FROM noise_floor WHERE ts >= ? AND ts <= ?`
+	args := []interface{}{from.Unix(), to.Unix()}
+	if len(bands) > 0 {
+		query += " AND band IN (?" + strings.Repeat(",?", len(bands)-1) + ")"
+		for _, b := range bands {
+			args = append(args, b)
+		}
+	}
+	query += " ORDER BY ts ASC"
 
-	rows, err := nfm.readDB.Query(
-		`SELECT ts, band, min_db, max_db, mean_db, median_db, p5_db, p10_db, p95_db,
-		        dynamic_range, occupancy_pct, ft8_snr, snr_0_30_mhz, snr_1_8_30_mhz
-		 FROM noise_floor WHERE ts >= ? AND ts <= ? ORDER BY ts ASC`,
-		startTS, endTS,
-	)
+	rows, err := nfm.readDB.Query(query, args...)
 	if err != nil {
-		return nil, fmt.Errorf("noise_floor all-bands trend query error: %w", err)
+		return nil, fmt.Errorf("noise_floor trend query error: %w", err)
 	}
 	defer rows.Close()
 
-	var rawData []*BandMeasurement
+	type acc struct {
+		n                                                  float32
+		min, max, mean, median, p5, p10, p95, dr, occ, ft8 float32
+		snr030, snr1830                                    float32
+	}
+	stepSec := int64(step / time.Second)
+	buckets := map[string]map[int64]*acc{}
 	for rows.Next() {
 		var ts int64
-		m := &BandMeasurement{}
-		if err := rows.Scan(&ts, &m.Band, &m.MinDB, &m.MaxDB, &m.MeanDB, &m.MedianDB,
+		var band string
+		var m BandMeasurement
+		if err := rows.Scan(&ts, &band, &m.MinDB, &m.MaxDB, &m.MeanDB, &m.MedianDB,
 			&m.P5DB, &m.P10DB, &m.P95DB, &m.DynamicRange, &m.OccupancyPct,
 			&m.FT8SNR, &m.SNR_0_30MHz, &m.SNR_1_8_30MHz); err != nil {
 			return nil, fmt.Errorf("noise_floor scan error: %w", err)
 		}
-		m.Timestamp = time.Unix(ts, 0).UTC()
-		rawData = append(rawData, m)
+		bt := ts - ts%stepSec
+		if buckets[band] == nil {
+			buckets[band] = map[int64]*acc{}
+		}
+		a := buckets[band][bt]
+		if a == nil {
+			a = &acc{}
+			buckets[band][bt] = a
+		}
+		a.n++
+		a.min += m.MinDB
+		a.max += m.MaxDB
+		a.mean += m.MeanDB
+		a.median += m.MedianDB
+		a.p5 += m.P5DB
+		a.p10 += m.P10DB
+		a.p95 += m.P95DB
+		a.dr += m.DynamicRange
+		a.occ += m.OccupancyPct
+		a.ft8 += m.FT8SNR
+		a.snr030 += m.SNR_0_30MHz
+		a.snr1830 += m.SNR_1_8_30MHz
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
-
-	if len(rawData) == 0 {
+	if len(buckets) == 0 {
 		return nil, fmt.Errorf("no data available")
 	}
 
-	// Group measurements into 10-minute buckets by band
-	bucketSize := 10 * time.Minute
-	buckets := make(map[int64]map[string][]*BandMeasurement)
-
-	for _, m := range rawData {
-		// Calculate bucket timestamp (rounded down to 10-minute boundary)
-		bucketTime := m.Timestamp.Truncate(bucketSize).Unix()
-
-		if buckets[bucketTime] == nil {
-			buckets[bucketTime] = make(map[string][]*BandMeasurement)
+	result := make(map[string][]*BandMeasurement, len(buckets))
+	for band, byTime := range buckets {
+		list := make([]*BandMeasurement, 0, len(byTime))
+		for bt, a := range byTime {
+			list = append(list, &BandMeasurement{
+				Timestamp:     time.Unix(bt, 0).UTC(),
+				Band:          band,
+				MinDB:         a.min / a.n,
+				MaxDB:         a.max / a.n,
+				MeanDB:        a.mean / a.n,
+				MedianDB:      a.median / a.n,
+				P5DB:          a.p5 / a.n,
+				P10DB:         a.p10 / a.n,
+				P95DB:         a.p95 / a.n,
+				DynamicRange:  a.dr / a.n,
+				OccupancyPct:  a.occ / a.n,
+				FT8SNR:        a.ft8 / a.n,
+				SNR_0_30MHz:   a.snr030 / a.n,
+				SNR_1_8_30MHz: a.snr1830 / a.n,
+			})
 		}
-
-		buckets[bucketTime][m.Band] = append(buckets[bucketTime][m.Band], m)
+		sort.Slice(list, func(i, j int) bool { return list[i].Timestamp.Before(list[j].Timestamp) })
+		result[band] = list
 	}
-
-	// Average each bucket and organize by band
-	result := make(map[string][]*BandMeasurement)
-
-	for bucketTime, bandData := range buckets {
-		for bandName, measurements := range bandData {
-			if len(measurements) == 0 {
-				continue
-			}
-
-			// Calculate averages
-			var sumMin, sumMax, sumMean, sumMedian, sumP5, sumP10, sumP95, sumDynRange, sumOccupancy, sumFT8SNR float32
-			count := float32(len(measurements))
-
-			for _, m := range measurements {
-				sumMin += m.MinDB
-				sumMax += m.MaxDB
-				sumMean += m.MeanDB
-				sumMedian += m.MedianDB
-				sumP5 += m.P5DB
-				sumP10 += m.P10DB
-				sumP95 += m.P95DB
-				sumDynRange += m.DynamicRange
-				sumOccupancy += m.OccupancyPct
-				sumFT8SNR += m.FT8SNR
-			}
-
-			averaged := &BandMeasurement{
-				Timestamp:    time.Unix(bucketTime, 0),
-				Band:         bandName,
-				MinDB:        sumMin / count,
-				MaxDB:        sumMax / count,
-				MeanDB:       sumMean / count,
-				MedianDB:     sumMedian / count,
-				P5DB:         sumP5 / count,
-				P10DB:        sumP10 / count,
-				P95DB:        sumP95 / count,
-				DynamicRange: sumDynRange / count,
-				OccupancyPct: sumOccupancy / count,
-				FT8SNR:       sumFT8SNR / count,
-			}
-
-			result[bandName] = append(result[bandName], averaged)
-		}
-	}
-
-	// Sort each band's data by timestamp (oldest first)
-	for bandName := range result {
-		sort.Slice(result[bandName], func(i, j int) bool {
-			return result[bandName][i].Timestamp.Before(result[bandName][j].Timestamp)
-		})
-	}
-
 	return result, nil
 }
 

@@ -519,3 +519,94 @@ func mcpSchemaStrings(v interface{}) []string {
 	}
 	return nil
 }
+
+// stringList reads a list of strings given as a JSON array or one
+// comma-separated string, each checked against allowed (if non-empty, matched
+// case-insensitively and returned in its declared case) or pattern.
+func (a *mcpArgs) stringList(key string, maxItems int, allowed []string, pattern *regexp.Regexp) []string {
+	if !a.has(key) {
+		return nil
+	}
+	var items []string
+	switch v := a.args[key].(type) {
+	case []interface{}:
+		for _, it := range v {
+			s, ok := it.(string)
+			if !ok {
+				a.fail("%s must be a list of strings", key)
+				return nil
+			}
+			items = append(items, s)
+		}
+	case string:
+		for _, p := range strings.Split(v, ",") {
+			if p = strings.TrimSpace(p); p != "" {
+				items = append(items, p)
+			}
+		}
+	default:
+		a.fail("%s must be a list of strings", key)
+		return nil
+	}
+	if len(items) == 0 {
+		a.fail("%s is empty", key)
+		return nil
+	}
+	if len(items) > maxItems {
+		a.fail("%s has %d entries, at most %d allowed", key, len(items), maxItems)
+		return nil
+	}
+	out := make([]string, 0, len(items))
+	for _, s := range items {
+		s = strings.TrimSpace(s)
+		if len(allowed) > 0 {
+			match := ""
+			for _, al := range allowed {
+				if strings.EqualFold(s, al) {
+					match = al
+				}
+			}
+			if match == "" {
+				a.fail("%s: %q is not one of %s", key, mcpSafeEcho(s), strings.Join(allowed, ", "))
+				return nil
+			}
+			s = match
+		} else if pattern != nil && !pattern.MatchString(s) {
+			a.fail("%s: %q has the wrong format", key, mcpSafeEcho(s))
+			return nil
+		}
+		if !containsString(out, s) {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+// mcpSinceParam narrows a window starting at from to the optional 'since'
+// argument (RFC 3339, inclusive). It returns the start to use, or an error
+// message for a value that does not parse or lies in the future.
+func mcpSinceParam(request mcp.CallToolRequest, from, now time.Time) (time.Time, string) {
+	since := strings.TrimSpace(request.GetString("since", ""))
+	if since == "" {
+		return from, ""
+	}
+	t, err := time.Parse(time.RFC3339, since)
+	if err != nil {
+		return from, "since must be an RFC 3339 time such as 2026-11-17T17:40:00Z"
+	}
+	if t.After(now) {
+		return from, "since is in the future"
+	}
+	if t.After(from) {
+		return t.UTC(), ""
+	}
+	return from, ""
+}
+
+// mcpSinceProp is the 'since' argument the spot tools share.
+func mcpSinceProp() mcp.ToolOption {
+	return mcp.WithString("since",
+		mcp.MaxLength(40),
+		mcp.Description("Only spots at or after this RFC 3339 time (within hours). For a live view, pass the previous reply's until_utc; the boundary second can come back twice, so de-duplicate on timestamp, callsign and frequency."),
+	)
+}

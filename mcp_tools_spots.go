@@ -52,6 +52,7 @@ func (m *MCPServer) registerSpotTools() {
 				mcp.Max(100),
 				mcp.Description("Minimum SNR in dB (default: no filter)"),
 			),
+			mcpSinceProp(),
 			mcp.WithNumber("limit",
 				mcp.Min(1),
 				mcp.Max(500),
@@ -197,7 +198,10 @@ func (m *MCPServer) handleGetCWSpots(ctx context.Context, request mcp.CallToolRe
 	}
 
 	to := time.Now().UTC()
-	from := to.Add(-time.Duration(hours) * time.Hour)
+	from, msg := mcpSinceParam(request, to.Add(-time.Duration(hours)*time.Hour), to)
+	if msg != "" {
+		return mcp.NewToolResultError(msg), nil
+	}
 	band := request.GetString("band", "")
 	// One past the limit, so a cut-off result can say so.
 	spots, err := m.CWSkimmer.spotsLogger.GetCWHistoricalSpotsRange(
@@ -218,6 +222,8 @@ func (m *MCPServer) handleGetCWSpots(ctx context.Context, request mcp.CallToolRe
 
 	return mcpJSON(map[string]interface{}{
 		"hours":     hours,
+		"from_utc":  from.Format(time.RFC3339),
+		"until_utc": to.Format(time.RFC3339),
 		"count":     len(spots),
 		"truncated": truncated,
 		"spots":     spots,

@@ -10,6 +10,7 @@ import (
 	"log"
 	"math"
 	"net/http"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -252,6 +253,7 @@ func (m *MCPServer) registerTools() {
 				mcp.Description("Hours of history to retrieve (default: 1, max: 48)"),
 				mcp.DefaultNumber(1.0),
 			),
+			mcpSinceProp(),
 			mcp.WithString("format",
 				mcp.Enum("json", "text"),
 				mcp.Description("Output format: 'json' for structured data or 'text' for human-readable summary"),
@@ -415,11 +417,41 @@ func (m *MCPServer) registerTools() {
 	m.mcpServer.AddTool(
 		mcp.NewTool("get_noise_floor_trends",
 			mcpReadOnlyTool,
-			mcp.WithDescription("Get 24-hour noise floor trend data for analyzing propagation patterns over time. Includes measurements averaged in 10-minute intervals showing how noise floor changes throughout the day. Use this to identify best times for specific bands or to analyze propagation trends."),
+			mcp.WithDescription("Get noise floor trend data for analysing propagation over the last 24 hours: per band, averaged into 10-minute (or longer) steps, with noise floor percentiles, dynamic range, occupancy and an FT8 SNR estimate. Use this to identify the best times for specific bands or to see how conditions changed. "+
+				"With no arguments it returns every field for every band, about 500 KB; ask for only what you need with bands, fields, hours or since and the result comes back as compact columns (one shared time axis, one array per field) instead. "+
+				"To keep a chart current, pass since = the time_axis.start_utc of the newest step you already have: that step (which may have grown) and anything newer come back."),
 			mcp.WithString("band",
 				mcp.Pattern(`^[A-Za-z0-9.\-]+$`),
 				mcp.MaxLength(32),
-				mcp.Description("Specific band name (e.g., '20m', '40m') or empty for all bands"),
+				mcp.Description("One band (e.g. '20m'), returned in the original row format; use bands for several"),
+			),
+			mcp.WithArray("bands",
+				mcp.Description("Only these bands, e.g. ['20m', '40m'] (default: all)"),
+				mcp.Items(map[string]interface{}{"type": "string", "pattern": `^[A-Za-z0-9.\-]+$`, "maxLength": 32}),
+				mcp.MaxItems(32),
+			),
+			mcp.WithArray("fields",
+				mcp.Description("Only these values per step (default: all): "+strings.Join(nfTrendFieldNames, ", ")),
+				mcp.Items(map[string]interface{}{"type": "string", "enum": nfTrendFieldNames}),
+				mcp.MaxItems(len(nfTrendFieldNames)),
+			),
+			mcp.WithNumber("hours",
+				mcp.Min(1),
+				mcp.Max(24),
+				mcp.Description("The most recent N hours, 1-24 (default 24)"),
+			),
+			mcp.WithString("since",
+				mcp.MaxLength(40),
+				mcp.Description("RFC 3339 time: only steps starting at or after the step containing it (within the window)"),
+			),
+			mcp.WithNumber("step_minutes",
+				mcp.Min(10),
+				mcp.Max(1440),
+				mcp.Description("Average into steps of this many minutes, a multiple of 10 (default 10)"),
+			),
+			mcp.WithString("format",
+				mcp.Enum("columns", "rows"),
+				mcp.Description("'columns' (time axis plus one array per field) or 'rows' (one object per step). Default: 'columns' when any other option is given, otherwise the original rows"),
 			),
 		),
 		m.handleGetNoiseFloorTrends,
@@ -611,31 +643,32 @@ func (m *MCPServer) handleGetDecoderSpots(ctx context.Context, request mcp.CallT
 		return mcp.NewToolResultError("Decoder spots logging is not enabled"), nil
 	}
 
-	// Calculate time range
+	// The window is absolute: the date range picks the day files and
+	// fromTS/toTS trim them, so 'hours' means the last N hours rather than
+	// every spot since midnight on the first day it touches.
 	toTime := time.Now().UTC()
-	fromTime := toTime.Add(-time.Duration(hours) * time.Hour)
+	fromTime, msg := mcpSinceParam(request, toTime.Add(-time.Duration(hours)*time.Hour), toTime)
+	if msg != "" {
+		return mcp.NewToolResultError(msg), nil
+	}
 
-	fromDate := fromTime.Format("2006-01-02")
-	toDate := toTime.Format("2006-01-02")
-	// Don't use time filters - query the full date range
-	// Using startTime/endTime with cross-day queries causes issues
-	startTime := ""
-	endTime := ""
-
-	spots, err := m.multiDecoder.spotsLogger.GetHistoricalSpots(
+	spots, err := m.multiDecoder.spotsLogger.GetHistoricalSpotsRange(
 		mode, "", "", "", "", "", "", "",
-		fromDate, toDate, startTime, endTime,
+		fromTime.Format("2006-01-02"), toTime.Format("2006-01-02"), "", "",
 		true, true, 0, -999,
+		fromTime.Unix(), toTime.Unix()+1, 0,
 	)
 	if err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("Failed to get spots: %v", err)), nil
 	}
 
 	result := map[string]interface{}{
-		"spots": spots,
-		"count": len(spots),
-		"hours": hours,
-		"mode":  mode,
+		"spots":     spots,
+		"count":     len(spots),
+		"hours":     hours,
+		"mode":      mode,
+		"from_utc":  fromTime.Format(time.RFC3339),
+		"until_utc": toTime.Format(time.RFC3339),
 	}
 
 	if format == "text" {
@@ -1006,40 +1039,160 @@ func (m *MCPServer) handleGetWidebandSpectrum(ctx context.Context, request mcp.C
 	return mcp.NewToolResultText(string(jsonData)), nil
 }
 
-func (m *MCPServer) handleGetNoiseFloorTrends(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	band := request.GetString("band", "")
+var mcpBandNameRe = regexp.MustCompile(`^[A-Za-z0-9.\-]{1,32}$`)
 
+// nfTrendFieldNames are the per-step values get_noise_floor_trends can return.
+var nfTrendFieldNames = []string{"p5_db", "p10_db", "median_db", "mean_db", "p95_db", "min_db", "max_db",
+	"dynamic_range", "occupancy_pct", "ft8_snr", "snr_0_30_mhz", "snr_1_8_30_mhz"}
+
+func nfTrendField(bm *BandMeasurement, name string) float32 {
+	switch name {
+	case "p5_db":
+		return bm.P5DB
+	case "p10_db":
+		return bm.P10DB
+	case "median_db":
+		return bm.MedianDB
+	case "mean_db":
+		return bm.MeanDB
+	case "p95_db":
+		return bm.P95DB
+	case "min_db":
+		return bm.MinDB
+	case "max_db":
+		return bm.MaxDB
+	case "dynamic_range":
+		return bm.DynamicRange
+	case "occupancy_pct":
+		return bm.OccupancyPct
+	case "ft8_snr":
+		return bm.FT8SNR
+	case "snr_0_30_mhz":
+		return bm.SNR_0_30MHz
+	case "snr_1_8_30_mhz":
+		return bm.SNR_1_8_30MHz
+	}
+	return float32(math.NaN())
+}
+
+func (m *MCPServer) handleGetNoiseFloorTrends(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	if m.noiseFloorMonitor == nil {
 		return mcp.NewToolResultError("Noise floor monitoring is not enabled"), nil
 	}
+	a := newMCPArgs(request)
+	band := a.str("band", "", 32)
+	bands := a.stringList("bands", 32, nil, mcpBandNameRe)
+	if band != "" && len(bands) > 0 {
+		a.fail("give band or bands, not both")
+	}
+	fields := nfTrendFieldNames
+	if a.has("fields") {
+		fields = a.stringList("fields", len(nfTrendFieldNames), nfTrendFieldNames, nil)
+	}
+	hours := a.integer("hours", 24, 1, 24)
+	step := a.integer("step_minutes", 10, 10, 1440)
+	if step%10 != 0 {
+		a.fail("step_minutes must be a multiple of 10")
+	}
+	now := time.Now().UTC()
+	from := now.Add(-time.Duration(hours) * time.Hour)
+	since := a.str("since", "", 40)
+	if since != "" {
+		t, err := time.Parse(time.RFC3339, since)
+		switch {
+		case err != nil:
+			a.fail("since must be an RFC 3339 time such as 2026-11-17T17:40:00Z")
+		case t.After(now):
+			a.fail("since is in the future")
+		case t.After(from):
+			from = t.UTC()
+		}
+	}
+	// Whole steps only: start at the step containing 'from'.
+	stepSec := int64(step) * 60
+	from = time.Unix(from.Unix()-from.Unix()%stepSec, 0).UTC()
+	options := len(bands) > 0 || a.has("fields") || a.has("hours") || since != "" || a.has("step_minutes")
+	format := a.enum("format", "", "columns", "rows")
+	if a.Err() != nil {
+		return mcp.NewToolResultError(a.Err().Error()), nil
+	}
 
-	var trends interface{}
-	var err error
-
-	if band == "" {
-		// Get trends for all bands
-		trends, err = m.noiseFloorMonitor.GetTrendDataAllBands()
-		if err != nil {
+	query := bands
+	if band != "" {
+		query = []string{band}
+	}
+	trends, err := m.noiseFloorMonitor.QueryTrend(from, now, query, time.Duration(step)*time.Minute)
+	if err != nil {
+		if err.Error() == "no data available" && options {
+			trends = map[string][]*BandMeasurement{} // an incremental fetch with nothing new is not an error
+		} else {
 			return mcp.NewToolResultError(fmt.Sprintf("Failed to get trend data: %v", err)), nil
 		}
-	} else {
-		// Get trends for specific band (last 24 hours from today)
-		today := time.Now().Format("2006-01-02")
-		trends, err = m.noiseFloorMonitor.GetTrendData(today, band)
-		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("Failed to get trend data for band %s: %v", band, err)), nil
+	}
+
+	// The original shapes, for callers that pass nothing new.
+	if !options && format != "columns" {
+		if band != "" {
+			return mcpCompactJSON(trends[band])
 		}
+		return mcpCompactJSON(trends)
 	}
 
-	if trends == nil {
-		return mcp.NewToolResultError("No trend data available"), nil
+	if format == "rows" {
+		out := map[string][]map[string]interface{}{}
+		for b, list := range trends {
+			for _, bm := range list {
+				row := map[string]interface{}{"timestamp": bm.Timestamp.Format(time.RFC3339)}
+				for _, f := range fields {
+					row[f] = roundTo(float64(nfTrendField(bm, f)), 2)
+				}
+				out[b] = append(out[b], row)
+			}
+		}
+		return mcpCompactJSON(map[string]interface{}{"step_minutes": step, "bands": out})
 	}
 
-	jsonData, err := json.MarshalIndent(trends, "", "  ")
+	// Columns: one time axis shared by every band, null where a band has no
+	// measurement in a step.
+	nSteps := int((now.Unix()-from.Unix())/stepSec) + 1
+	cols := map[string]map[string][]*float64{}
+	for b, list := range trends {
+		c := map[string][]*float64{}
+		for _, f := range fields {
+			c[f] = make([]*float64, nSteps)
+		}
+		for _, bm := range list {
+			i := int((bm.Timestamp.Unix() - from.Unix()) / stepSec)
+			if i < 0 || i >= nSteps {
+				continue
+			}
+			for _, f := range fields {
+				v := roundTo(float64(nfTrendField(bm, f)), 1)
+				c[f][i] = &v
+			}
+		}
+		cols[b] = c
+	}
+	return mcpCompactJSON(map[string]interface{}{
+		"time_axis": map[string]interface{}{
+			"start_utc":    from.Format(time.RFC3339),
+			"step_minutes": step,
+			"steps":        nSteps,
+			"note":         "value i covers start_utc + i*step_minutes; the last step is still filling; null = no measurement",
+		},
+		"fields": fields,
+		"bands":  cols,
+	})
+}
+
+// mcpCompactJSON is mcpJSON without indentation, for results large enough
+// that the whitespace is a sizeable share of them.
+func mcpCompactJSON(v interface{}) (*mcp.CallToolResult, error) {
+	data, err := json.Marshal(v)
 	if err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("Failed to marshal data: %v", err)), nil
 	}
-	return mcp.NewToolResultText(string(jsonData)), nil
+	return mcp.NewToolResultText(string(data)), nil
 }
 
 func (m *MCPServer) handleGetReceiverInfo(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {

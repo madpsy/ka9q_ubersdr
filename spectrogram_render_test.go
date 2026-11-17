@@ -88,17 +88,41 @@ func TestSpectrogramRenderMatchesReference(t *testing.T) {
 	}
 }
 
-// TestSpectrogramAutoRangeAtSampleCap covers the 500k-sample cap, where the
-// sort is largest.
+// TestSpectrogramAutoRangeAtSampleCap: past the 500k-sample cap the floor is
+// taken from rows spread over the whole span, not the oldest ones that fill
+// the cap first, and the ceiling still sees every row. A 24-hour wideband
+// recording (1440 rows of ~3850 bins) used to be scaled from its first two
+// hours alone.
 func TestSpectrogramAutoRangeAtSampleCap(t *testing.T) {
-	rng := rand.New(rand.NewSource(6))
-	rows := randomSpectrogramRows(rng, 300, 2048)
-	for _, sb := range [][2]int{{0, 0}, {100, 1900}} {
-		a, b := refAutoRangeRowsSlice(rows, sb[0], sb[1], -130, -60)
-		c, d := autoRangeRowsSlice(rows, sb[0], sb[1], -130, -60)
-		if a != c || b != d {
-			t.Fatalf("slice %v: auto range %v..%v, reference %v..%v", sb, c, d, a, b)
+	const nRows, bins = 1440, 3850
+	rows := make([][]float32, nRows)
+	for i := range rows {
+		floor := float32(-110) // a quiet night...
+		if i < 130 {
+			floor = -80 // ...after a loud first two hours
 		}
+		row := make([]float32, bins)
+		for j := range row {
+			row[j] = floor + float32(j%7)
+		}
+		rows[i] = row
+	}
+	// One strong signal in a row the floor sample skips.
+	rows[nRows-2][bins/2] = -20
+
+	lo, hi := autoRangeRowsSlice(rows, 0, 0, -130, -60)
+	if lo > -100 {
+		t.Errorf("floor %v: taken from the loud first rows, not the whole span", lo)
+	}
+	if hi != -17 {
+		t.Errorf("ceiling %v, want -17: the peak in an unsampled row plus 3 dB", hi)
+	}
+
+	// Under the cap nothing is skipped, so the result matches the reference.
+	small := rows[:100]
+	a, b := refAutoRangeRowsSlice(small, 100, 1900, -130, -60)
+	if c, d := autoRangeRowsSlice(small, 100, 1900, -130, -60); a != c || b != d {
+		t.Fatalf("under the cap: auto range %v..%v, reference %v..%v", c, d, a, b)
 	}
 }
 

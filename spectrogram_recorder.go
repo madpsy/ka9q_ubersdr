@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"encoding/json"
+	"fmt"
 	"image"
 	"image/color"
 	"image/png"
@@ -1256,24 +1257,38 @@ func autoRangeRowsSlice(rows [][]float32, startBin, endBin int, configMin, confi
 		startBin = 0
 		endBin = binCount
 	}
+	// Past the cap, sample every rowStep-th row so the floor reflects the whole
+	// time span. Filling up from the first row instead set a 24-hour image's
+	// scale from its oldest two hours alone. Whole rows rather than a stride
+	// over all values, which would land on the same columns every row whenever
+	// the stride divides the width.
+	rowStep := 1
+	if width := endBin - startBin; width > 0 && len(rows)*width > maxSamples {
+		rowStep = (len(rows)*width + maxSamples - 1) / maxSamples
+	}
 	valid := make([]float32, 0, min(len(rows)*(endBin-startBin), maxSamples))
-	for _, row := range rows {
+	peak := float32(math.Inf(-1))
+	for i, row := range rows {
 		if len(row) < endBin {
 			continue // skip malformed rows
 		}
+		sample := i%rowStep == 0
 		for _, v := range row[startBin:endBin] {
 			// +Inf as well as the -Inf no-data sentinel: one infinite bin
 			// would make the range infinite and every colour undefined.
 			if math.IsInf(float64(v), 0) || math.IsNaN(float64(v)) {
 				continue
 			}
-			valid = append(valid, v)
-			if len(valid) >= maxSamples {
-				goto done
+			// The ceiling comes from every row, not just the sampled ones,
+			// so no signal can rise above it.
+			if v > peak {
+				peak = v
+			}
+			if sample && len(valid) < maxSamples {
+				valid = append(valid, v)
 			}
 		}
 	}
-done:
 	if len(valid) < 10 {
 		return configMin, configMax
 	}
@@ -1286,7 +1301,7 @@ done:
 		p5idx = len(valid) - 1
 	}
 	dbMin := valid[p5idx]
-	dbMax := valid[len(valid)-1] + 3 // actual max + 3 dB headroom
+	dbMax := peak + 3 // actual max + 3 dB headroom
 	// Ensure a minimum 10 dB spread to avoid degenerate images
 	if dbMax-dbMin < 10 {
 		dbMax = dbMin + 10
@@ -3630,6 +3645,54 @@ func handleSpectrogramAllRows(w http.ResponseWriter, r *http.Request,
 	enc.Encode(resp)
 }
 
+// dayRows returns one UTC day's rows, oldest first, with a timestamp for every
+// row: today's from memory, earlier days from the archived .bin. Rows without a
+// JSONL entry are timed from midnight plus their index. dateStr must already
+// be a validated YYYY-MM-DD; the result is a copy the caller may keep.
+// The error is os.ErrNotExist when the day was never recorded or has been
+// cleaned up.
+func (sr *SpectrogramRecorder) dayRows(dateStr string) ([][]float32, []SpectrogramRowMeta, error) {
+	day, err := time.Parse("2006-01-02", dateStr)
+	if err != nil || day.Format("2006-01-02") != dateStr {
+		return nil, nil, fmt.Errorf("invalid date %q", dateStr)
+	}
+
+	var rows [][]float32
+	if dateStr == time.Now().UTC().Format("2006-01-02") {
+		sr.mu.Lock()
+		rows = make([][]float32, sr.rowCount)
+		for i := range rows {
+			rows[i] = append([]float32(nil), sr.rows[i]...)
+		}
+		sr.mu.Unlock()
+	} else {
+		data, err := os.ReadFile(filepath.Join(sr.config.DataDir, "spectrogram_"+dateStr+".bin"))
+		if err != nil {
+			return nil, nil, err
+		}
+		decoded, fileBins := spectrogramBinRows(data)
+		if decoded == nil || fileBins != sr.binCount {
+			return nil, nil, fmt.Errorf("spectrogram file for %s is unreadable or has %d bins, want %d", dateStr, fileBins, sr.binCount)
+		}
+		rows = decoded
+	}
+
+	byRow := make(map[int]SpectrogramRowMeta)
+	for _, rm := range sr.readJSONL(dateStr) {
+		byRow[rm.Row] = rm
+	}
+	meta := make([]SpectrogramRowMeta, len(rows))
+	for i := range rows {
+		if rm, ok := byRow[i]; ok {
+			meta[i] = rm
+			continue
+		}
+		t := day.Add(time.Duration(i) * time.Minute)
+		meta[i] = SpectrogramRowMeta{Row: i, UTCTime: t.Format("15:04"), Unix: t.Unix()}
+	}
+	return rows, meta, nil
+}
+
 // TimesliceResponse is the JSON response for GET /api/spectrogram/timeslice.
 type TimesliceResponse struct {
 	FreqHz       float64        `json:"freq_hz"`
@@ -3774,66 +3837,15 @@ func handleSpectrogramTimeslice(w http.ResponseWriter, r *http.Request,
 		metaRows = rr.metaRows
 		dateStr = "rolling-24h"
 	} else {
-		isToday := dateStr == today
-		if isToday {
-			// Use live in-memory data
-			recorder.mu.Lock()
-			rowCount := recorder.rowCount
-			rows = make([][]float32, rowCount)
-			for i := 0; i < rowCount; i++ {
-				row := make([]float32, recorder.binCount)
-				copy(row, recorder.rows[i])
-				rows[i] = row
-			}
-			recorder.mu.Unlock()
-			// Load meta from JSONL
-			jsonlMap := make(map[int]SpectrogramRowMeta)
-			for _, rm := range recorder.readJSONL(dateStr) {
-				jsonlMap[rm.Row] = rm
-			}
-			todayDate, _ := time.Parse("2006-01-02", dateStr)
-			midnight := time.Date(todayDate.Year(), todayDate.Month(), todayDate.Day(), 0, 0, 0, 0, time.UTC)
-			metaRows = make([]SpectrogramRowMeta, rowCount)
-			for i := 0; i < rowCount; i++ {
-				if m, ok := jsonlMap[i]; ok {
-					metaRows[i] = m
-				} else {
-					t := midnight.Add(time.Duration(i) * time.Minute)
-					metaRows[i] = SpectrogramRowMeta{Row: i, UTCTime: t.Format("15:04"), Unix: t.Unix()}
-				}
-			}
-		} else {
-			// Load from archived .bin file
-			safeDateStr := regexp.MustCompile(`[^0-9\-]`).ReplaceAllString(dateStr, "")
-			binPath := filepath.Join(recorder.config.DataDir, "spectrogram_"+safeDateStr+".bin")
-			binData, err := os.ReadFile(binPath)
-			if err != nil {
+		var err error
+		rows, metaRows, err = recorder.dayRows(dateStr)
+		if err != nil {
+			if os.IsNotExist(err) {
 				http.Error(w, `{"error":"no data available for this date"}`, http.StatusNotFound)
-				return
-			}
-			decoded, fileBinCount := spectrogramBinRows(binData)
-			if decoded == nil || fileBinCount != recorder.binCount {
+			} else {
 				http.Error(w, `{"error":"incompatible data file"}`, http.StatusInternalServerError)
-				return
 			}
-			rows = decoded
-			rowCount := len(rows)
-			// Load meta from JSONL
-			jsonlMap := make(map[int]SpectrogramRowMeta)
-			for _, rm := range recorder.readJSONL(safeDateStr) {
-				jsonlMap[rm.Row] = rm
-			}
-			archDate, _ := time.Parse("2006-01-02", safeDateStr)
-			midnight := time.Date(archDate.Year(), archDate.Month(), archDate.Day(), 0, 0, 0, 0, time.UTC)
-			metaRows = make([]SpectrogramRowMeta, rowCount)
-			for i := 0; i < rowCount; i++ {
-				if m, ok := jsonlMap[i]; ok {
-					metaRows[i] = m
-				} else {
-					t := midnight.Add(time.Duration(i) * time.Minute)
-					metaRows[i] = SpectrogramRowMeta{Row: i, UTCTime: t.Format("15:04"), Unix: t.Unix()}
-				}
-			}
+			return
 		}
 	}
 

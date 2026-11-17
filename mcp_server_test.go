@@ -41,7 +41,9 @@ func callTool(t *testing.T, m *MCPServer, name, ip string, args map[string]inter
 	req := mcp.CallToolRequest{}
 	req.Params.Name = name
 	req.Params.Arguments = args
-	res, err := tool.Handler(ctx, req)
+	// Through the argument validation every real call passes, so a test
+	// cannot rely on a value a client could never get past it.
+	res, err := m.validateToolArgs(tool.Handler)(ctx, req)
 	if err != nil {
 		t.Fatalf("%s: handler error: %v", name, err)
 	}
@@ -163,6 +165,7 @@ var allMCPTools = []string{
 	"get_snr",
 	"get_space_weather",
 	"get_spectrogram",
+	"get_spectrogram_data",
 	"get_ssb_predictions",
 	"get_station_rankings",
 	"get_sun_times",
@@ -412,5 +415,128 @@ func TestMCPClientIPReachesToolsOverHTTP(t *testing.T) {
 	}
 	if got := call("192.168.1.11:4000", b); strings.Contains(got, "Rate limit") {
 		t.Errorf("B was limited by A's call, so both looked like the same client: %s", got)
+	}
+}
+
+// Every tool only reads receiver state, and must advertise that: without the
+// hints mcp-go reports destructiveHint true and clients confirm each call.
+func TestMCPToolsAreAnnotatedReadOnly(t *testing.T) {
+	m := newTestMCPServer(t, nil, nil, nil)
+	tools := m.mcpServer.ListTools()
+	if len(tools) == 0 {
+		t.Fatal("no tools registered")
+	}
+	for name, st := range tools {
+		a := st.Tool.Annotations
+		if a.ReadOnlyHint == nil || !*a.ReadOnlyHint ||
+			a.DestructiveHint == nil || *a.DestructiveHint ||
+			a.IdempotentHint == nil || !*a.IdempotentHint ||
+			a.OpenWorldHint == nil || *a.OpenWorldHint {
+			t.Errorf("%s: annotations not read-only (add mcpReadOnlyTool to its NewTool options)", name)
+		}
+	}
+}
+
+// get_receiver_info returns whatever the description builder returns, the map
+// /api/description serves, rather than a hand-kept copy of part of it.
+func TestGetReceiverInfoIsTheDescription(t *testing.T) {
+	m := newTestMCPServer(t, nil, nil, nil)
+	wantToolError(t, callTool(t, m, "get_receiver_info", "127.0.0.1", nil), "not available")
+
+	m.Describe = func() map[string]interface{} {
+		return map[string]interface{}{"tuning_range": map[string]interface{}{"max_hz": 30e6}, "addons": []string{"navtex"}}
+	}
+	res := callTool(t, m, "get_receiver_info", "127.0.0.1", nil)
+	var got map[string]interface{}
+	if err := json.Unmarshal([]byte(resultText(t, res)), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got["tuning_range"] == nil || got["addons"].([]interface{})[0] != "navtex" {
+		t.Errorf("got %v, want the description map", got)
+	}
+}
+
+// Every tool's arguments are checked against its schema before its handler
+// runs.
+func TestMCPArgumentValidation(t *testing.T) {
+	m := newTestMCPServer(t, nil, nil, nil)
+	cases := []struct {
+		tool string
+		args map[string]interface{}
+		want string
+	}{
+		{"get_cw_spots", map[string]interface{}{"hours": "NaN"}, "finite"},
+		{"get_cw_spots", map[string]interface{}{"hours": "-Inf"}, "finite"},
+		{"get_cw_spots", map[string]interface{}{"hours": 0}, "between 1 and 48"},
+		{"get_cw_spots", map[string]interface{}{"limit": 1e9}, "between 1 and 500"},
+		{"get_cw_spots", map[string]interface{}{"hours": []interface{}{1}}, "must be a number"},
+		{"get_cw_spots", map[string]interface{}{"band": "20m\n"}, ""}, // trailing whitespace is trimmed, not refused
+		{"get_cw_spots", map[string]interface{}{"band": "20m\x07x"}, "control characters"},
+		{"get_cw_spots", map[string]interface{}{"band": "20m; DROP TABLE"}, "a name such as 20m"},
+		{"get_cw_spots", map[string]interface{}{"country": strings.Repeat("a", 300)}, "too long"},
+		{"get_cw_spots", map[string]interface{}{"continent": "Europe"}, "two-letter code"},
+		{"get_cw_spots", map[string]interface{}{"callsign": "G3XYZ<script>"}, "callsigns"},
+		{"get_space_weather", map[string]interface{}{"format": "xml"}, "one of json, text"},
+		{"get_space_weather", map[string]interface{}{"verbose": true}, `unknown argument "verbose"`},
+		{"get_receiver_info", map[string]interface{}{"x": 1}, "takes no arguments"},
+		{"get_cw_analytics", map[string]interface{}{"hourly": "yes"}, "true or false"},
+		{"get_sun_times", map[string]interface{}{"locator": "../etc"}, "Maidenhead locator"},
+		{"get_sun_times", map[string]interface{}{"locator": "../../etc"}, "too long"},
+		{"get_session_history", map[string]interface{}{"timezone": "Europe/London;rm"}, "IANA timezone"},
+		{"get_session_history", map[string]interface{}{"from_date": "2026-11-17T00:00"}, "YYYY-MM-DD"},
+		{"whats_on_frequency", map[string]interface{}{}, "frequency_khz is required"},
+		{"whats_on_frequency", map[string]interface{}{"frequency_khz": "1e400"}, "must be a number"},
+		{"get_snr", map[string]interface{}{"avg_sec": 61}, "between 0 and 60"},
+		{"get_voice_activity", map[string]interface{}{"min_confidence": 2}, "between 0 and 1"},
+	}
+	for _, c := range cases {
+		res := callTool(t, m, c.tool, "127.0.0.1", c.args)
+		text := resultText(t, res)
+		if c.want == "" {
+			if strings.Contains(text, "Invalid arguments") {
+				t.Errorf("%s %v: refused: %s", c.tool, c.args, text)
+			}
+			continue
+		}
+		if !res.IsError || !strings.Contains(text, "Invalid arguments") || !strings.Contains(text, c.want) {
+			t.Errorf("%s %v: got %q, want an invalid-arguments error mentioning %q", c.tool, c.args, text, c.want)
+		}
+	}
+}
+
+func TestMCPValidateArgsNormalises(t *testing.T) {
+	schema := mcp.NewTool("t",
+		mcp.WithNumber("n", mcp.Min(1), mcp.Max(10)),
+		mcp.WithString("f", mcp.Enum("json", "text")),
+		mcp.WithBoolean("b"),
+		mcp.WithArray("l", mcp.Items(map[string]interface{}{"type": "number"})),
+	).InputSchema
+	got, err := mcpValidateArgs(schema, map[string]interface{}{"n": " 5 ", "f": "JSON", "b": "true", "l": []interface{}{"7.5"}, "gone": nil})
+	if err == nil {
+		t.Fatalf("unknown argument %q should be refused even when null", "gone")
+	}
+	got, err = mcpValidateArgs(schema, map[string]interface{}{"n": " 5 ", "f": "JSON", "b": "true", "l": []interface{}{"7.5"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got["n"] != 5.0 || got["f"] != "json" || got["b"] != true || got["l"].([]interface{})[0] != 7.5 {
+		t.Errorf("normalised %v, want n=5 f=json b=true l=[7.5]", got)
+	}
+	if _, err := mcpValidateArgs(schema, []interface{}{1}); err == nil {
+		t.Error("arguments that are not an object should be refused")
+	}
+}
+
+// The validation is wired into the server itself, not only the test helper.
+func TestMCPArgumentValidationIsWired(t *testing.T) {
+	m := newTestMCPServer(t, nil, nil, nil)
+	ctx := context.WithValue(context.Background(), mcpClientIPKey{}, "127.0.0.1")
+	msg := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_cw_spots","arguments":{"hours":"NaN"}}}`
+	out, err := json.Marshal(m.mcpServer.HandleMessage(ctx, json.RawMessage(msg)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(out), "Invalid arguments for get_cw_spots") || !strings.Contains(string(out), "finite") {
+		t.Errorf("tools/call with hours=NaN through the server: %s", out)
 	}
 }

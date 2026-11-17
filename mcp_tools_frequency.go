@@ -27,12 +27,17 @@ const (
 func (m *MCPServer) registerFrequencyTools() {
 	m.mcpServer.AddTool(
 		mcp.NewTool("whats_on_frequency",
+			mcpReadOnlyTool,
 			mcp.WithDescription("Find out what is on a frequency: shortwave broadcasts scheduled now (EiBi database) with station, language and target area; DRM digital broadcasts scheduled now; the operator's bookmarks; DX cluster spots from the last 30 minutes; and how many listeners on this receiver are tuned there, with their modes and client protocols. Use this to identify a signal or to explain why listeners are on a frequency."),
 			mcp.WithNumber("frequency_khz",
+				mcp.Min(0.001),
+				mcp.Max(10000000),
 				mcp.Required(),
 				mcp.Description("Frequency in kHz, e.g. 9410 or 14205.5"),
 			),
 			mcp.WithNumber("tolerance_khz",
+				mcp.Min(0),
+				mcp.Max(mcpFreqMaxToleranceKHz),
 				mcp.Description("How far either side counts as the same frequency for listeners, spots, bookmarks and DRM, in kHz (default: 5, max: 50). EiBi broadcasts always match within 1 kHz."),
 				mcp.DefaultNumber(mcpFreqDefaultToleranceKHz),
 			),

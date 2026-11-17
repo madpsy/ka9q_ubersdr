@@ -15,6 +15,7 @@ import (
 func (m *MCPServer) registerStationTools() {
 	m.mcpServer.AddTool(
 		mcp.NewTool("get_station_rankings",
+			mcpReadOnlyTool,
 			mcp.WithDescription("Get this receiver's standing in the public leaderboards it reports to: PSK Reporter (rank by reports and by countries heard, last 24 hours), WSPR Live (rank by unique spots for the rolling 24 hours, yesterday and today) and the Reverse Beacon Network (rank by CW skimmer spot count). Each position has the rank, the value it is based on and the number of stations ranked. Optionally includes how the receiver's rank moved over the last 24 hours, 7 days or 30 days."),
 			mcp.WithString("history",
 				mcp.Description("Also return the receiver's rank history: 'none' (default), '24h' (every snapshot), '7d' or '30d' (one snapshot per day)"),
@@ -26,6 +27,7 @@ func (m *MCPServer) registerStationTools() {
 
 	m.mcpServer.AddTool(
 		mcp.NewTool("get_frequency_reference",
+			mcpReadOnlyTool,
 			mcp.WithDescription("Get the state of the receiver's frequency reference tracking: a known reference signal is measured continuously, and its offset from the expected frequency shows how accurately the receiver is calibrated. Returns the current offset in Hz and parts per billion, signal strength and SNR, plus the last hour (per minute) and last day (per hour) of history with a summary of the drift. Use this to judge whether reported frequencies can be trusted to the hertz."),
 		),
 		m.handleGetFrequencyReference,

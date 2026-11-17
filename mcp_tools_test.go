@@ -128,10 +128,12 @@ func TestGetDXClusterSpotsTool(t *testing.T) {
 	if got.Count != 2 {
 		t.Errorf("last 10 minutes: %d spots, want 2", got.Count)
 	}
-	resultJSON(t, callTool(t, m, "get_dx_cluster_spots", "127.0.0.1", map[string]interface{}{"minutes": 100000}), &got)
+	resultJSON(t, callTool(t, m, "get_dx_cluster_spots", "127.0.0.1", map[string]interface{}{"minutes": 1440}), &got)
 	if got.Count != 4 {
-		t.Errorf("minutes beyond the max is clamped to a day: %d spots, want all 4", got.Count)
+		t.Errorf("the whole day: %d spots, want all 4", got.Count)
 	}
+	// Beyond the documented maximum is refused, not quietly clamped.
+	wantToolError(t, callTool(t, m, "get_dx_cluster_spots", "127.0.0.1", map[string]interface{}{"minutes": 100000}), "between 1 and 1440")
 }
 
 // ── Voice activity ──────────────────────────────────────────────────────────
@@ -249,7 +251,7 @@ func TestWhatsOnFrequency(t *testing.T) {
 	}
 
 	wantToolError(t, callTool(t, m, "whats_on_frequency", "127.0.0.1", nil), "frequency_khz")
-	wantToolError(t, callTool(t, m, "whats_on_frequency", "127.0.0.1", map[string]interface{}{"frequency_khz": -5}), "positive")
+	wantToolError(t, callTool(t, m, "whats_on_frequency", "127.0.0.1", map[string]interface{}{"frequency_khz": -5}), "between 0.001 and")
 
 	// Without a schedule, it says so rather than reporting no broadcasts.
 	m.EiBi = nil
@@ -388,7 +390,7 @@ func TestGetSunTimesTool(t *testing.T) {
 	}
 
 	wantToolError(t, callTool(t, m, "get_sun_times", "127.0.0.1", map[string]interface{}{"latitude": 10}), "both latitude and longitude")
-	wantToolError(t, callTool(t, m, "get_sun_times", "127.0.0.1", map[string]interface{}{"latitude": 95, "longitude": 0}), "-90 to 90")
+	wantToolError(t, callTool(t, m, "get_sun_times", "127.0.0.1", map[string]interface{}{"latitude": 95, "longitude": 0}), "between -90 and 90")
 	wantToolError(t, callTool(t, m, "get_sun_times", "127.0.0.1", map[string]interface{}{"locator": "ZZ99"}), "locator")
 	wantToolError(t, callTool(t, m, "get_sun_times", "127.0.0.1", map[string]interface{}{"date": "21/06/2026"}), "YYYY-MM-DD")
 }
@@ -651,13 +653,14 @@ func TestGetPropagationPredictionsTool(t *testing.T) {
 	m.spaceWeatherMonitor = &SpaceWeatherMonitor{data: &SpaceWeatherData{KIndex: 2, SolarFlux: 150}}
 
 	var got BandPredictionsResponse
-	resultJSON(t, callTool(t, m, "get_propagation_predictions", "127.0.0.1", map[string]interface{}{"continent": "na", "hours": 500}), &got)
+	resultJSON(t, callTool(t, m, "get_propagation_predictions", "127.0.0.1", map[string]interface{}{"continent": "na", "hours": 168}), &got)
 	if got.CurrentSpaceWeather.SolarFlux != 150 || got.CurrentSpaceWeather.KIndex != 2 {
 		t.Errorf("space weather %+v, want SFI 150 K 2", got.CurrentSpaceWeather)
 	}
 	if got.TimeRange.Hours != 168 {
-		t.Errorf("hours %d, want the 168-hour cap", got.TimeRange.Hours)
+		t.Errorf("hours %d, want 168", got.TimeRange.Hours)
 	}
+	wantToolError(t, callTool(t, m, "get_propagation_predictions", "127.0.0.1", map[string]interface{}{"hours": 500}), "between 1 and 168")
 	if got.Filters.Continent != "NA" {
 		t.Errorf("continent filter %q, want NA (upper-cased)", got.Filters.Continent)
 	}

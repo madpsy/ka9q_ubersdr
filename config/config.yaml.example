@@ -2372,6 +2372,9 @@ mcp:
   #       * get_wideband_spectrum - Full-span FFT data
   #       * get_snr - SNR and occupancy of a band or range, right now
   #       * get_spectrogram - Recorded 24-hour waterfall as an image
+  #       * get_spectrogram_data - Recorded spectrogram as numbers: level over
+  #         time at chosen frequencies, a spectrum at any minute, a time x
+  #         frequency grid, and detected gaps, bursts and carriers
   #       * get_decoder_spots - Recent digital mode spots (FT8, FT4, WSPR...)
   #       * get_decoder_analytics - Digital spots by country/continent
   #       * get_decoder_analytics_hourly - Digital spots by hour

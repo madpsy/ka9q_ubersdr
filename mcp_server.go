@@ -57,6 +57,9 @@ type MCPSources struct {
 	Spectrogram      *SpectrogramRecorder            // wideband recorder
 	BandSpectrograms map[string]*SpectrogramRecorder // per-band recorders
 	RateLimiter      *FFTRateLimiter                 // per client IP, keyed per tool
+	// Describe builds the public receiver description, the same map
+	// GET /api/description serves; get_receiver_info returns it.
+	Describe func() map[string]interface{}
 }
 
 // AttachSources hands the MCP server the data sources main.go builds after it.
@@ -64,6 +67,17 @@ type MCPSources struct {
 func (m *MCPServer) AttachSources(src MCPSources) {
 	m.MCPSources = src
 }
+
+// mcpReadOnlyTool marks a tool as reading receiver state only. Every tool is
+// one, and must say so: mcp-go's NewTool defaults to readOnlyHint false and
+// destructiveHint true, which makes clients treat a query like a write and ask
+// for confirmation before each call.
+var mcpReadOnlyTool = mcp.WithToolAnnotation(mcp.ToolAnnotation{
+	ReadOnlyHint:    mcp.ToBoolPtr(true),
+	DestructiveHint: mcp.ToBoolPtr(false),
+	IdempotentHint:  mcp.ToBoolPtr(true),
+	OpenWorldHint:   mcp.ToBoolPtr(false),
+})
 
 // mcpClientIPKey carries the caller's real IP from the HTTP request into the
 // tool handlers, which mcp-go otherwise gives no view of the request.
@@ -127,6 +141,7 @@ func NewMCPServer(sessions *SessionManager, swm *SpaceWeatherMonitor,
 		"UberSDR",
 		"1.0.0",
 		server.WithToolCapabilities(true),
+		server.WithToolHandlerMiddleware(m.validateToolArgs),
 	)
 
 	// Register all tools, then withdraw the ones the operator turned off
@@ -191,8 +206,10 @@ func (m *MCPServer) registerTools() {
 	// Tool: get_space_weather
 	m.mcpServer.AddTool(
 		mcp.NewTool("get_space_weather",
+			mcpReadOnlyTool,
 			mcp.WithDescription("Get current space weather conditions including Solar Flux Index (SFI), A-index, and K-index which affect HF radio propagation. Use this to understand current ionospheric conditions. Higher SFI (>150) = better HF propagation. Higher K-index (>5) = disturbed conditions and poor propagation."),
 			mcp.WithString("format",
+				mcp.Enum("json", "text"),
 				mcp.Description("Output format: 'json' for structured data or 'text' for human-readable summary"),
 				mcp.DefaultString("json"),
 			),
@@ -203,11 +220,15 @@ func (m *MCPServer) registerTools() {
 	// Tool: get_noise_floor
 	m.mcpServer.AddTool(
 		mcp.NewTool("get_noise_floor",
+			mcpReadOnlyTool,
 			mcp.WithDescription("Get noise floor measurements for amateur radio bands, including dynamic range, occupancy, and estimated FT8 SNR. Use this to assess current band conditions and signal quality. Lower noise floor = better conditions. Higher estimated FT8 SNR = better decode capability."),
 			mcp.WithString("band",
+				mcp.Pattern(`^[A-Za-z0-9.\-]+$`),
+				mcp.MaxLength(32),
 				mcp.Description("Specific band name (e.g., '20m', '40m', '80m') or leave empty for all bands"),
 			),
 			mcp.WithString("format",
+				mcp.Enum("json", "text"),
 				mcp.Description("Output format: 'json' for structured data or 'text' for human-readable summary"),
 				mcp.DefaultString("json"),
 			),
@@ -218,15 +239,21 @@ func (m *MCPServer) registerTools() {
 	// Tool: get_decoder_spots
 	m.mcpServer.AddTool(
 		mcp.NewTool("get_decoder_spots",
+			mcpReadOnlyTool,
 			mcp.WithDescription("Get recent individual digital mode spots (FT8, FT4, WSPR, JS8, FT2) decoded from the radio. Use this for RAW spot data with callsigns, locators, SNR, frequencies, and messages. For questions about specific callsigns, locators, or individual decodes, use this tool. For aggregated statistics by country/band/time, use get_decoder_analytics or get_decoder_analytics_hourly instead."),
 			mcp.WithString("mode",
+				mcp.Pattern(`^[A-Za-z0-9]+$`),
+				mcp.MaxLength(32),
 				mcp.Description("Mode filter: 'FT8', 'FT4', 'WSPR', 'JS8', 'FT2', or empty for all modes"),
 			),
 			mcp.WithNumber("hours",
+				mcp.Min(1),
+				mcp.Max(48),
 				mcp.Description("Hours of history to retrieve (default: 1, max: 48)"),
 				mcp.DefaultNumber(1.0),
 			),
 			mcp.WithString("format",
+				mcp.Enum("json", "text"),
 				mcp.Description("Output format: 'json' for structured data or 'text' for human-readable summary"),
 				mcp.DefaultString("json"),
 			),
@@ -237,28 +264,40 @@ func (m *MCPServer) registerTools() {
 	// Tool: get_decoder_analytics
 	m.mcpServer.AddTool(
 		mcp.NewTool("get_decoder_analytics",
+			mcpReadOnlyTool,
 			mcp.WithDescription("Get aggregated analytics about decoder spots by country, continent, mode, and band. Use this to answer questions about WHICH bands/countries have the most activity overall (e.g., 'which band is best for South Korea?'). Returns total spot counts, average SNR, and band distribution for each country."),
 			mcp.WithString("country",
 				mcp.Description("Country name filter (e.g., 'South Korea', 'Japan', 'United States', 'Germany') or empty for all countries"),
 			),
 			mcp.WithString("continent",
+				mcp.Pattern(`^[A-Za-z]{2}$`),
+				mcp.MaxLength(32),
 				mcp.Description("Continent code: 'AF' (Africa), 'AS' (Asia), 'EU' (Europe), 'NA' (North America), 'OC' (Oceania), 'SA' (South America), 'AN' (Antarctica), or empty for all"),
 			),
 			mcp.WithString("mode",
+				mcp.Pattern(`^[A-Za-z0-9]+$`),
+				mcp.MaxLength(32),
 				mcp.Description("Mode filter: 'FT8', 'FT4', 'WSPR', or empty for all modes"),
 			),
 			mcp.WithString("band",
+				mcp.Pattern(`^[A-Za-z0-9.\-]+$`),
+				mcp.MaxLength(32),
 				mcp.Description("Band filter (e.g., '20m', '40m') or empty for all bands"),
 			),
 			mcp.WithNumber("min_snr",
+				mcp.Min(-999),
+				mcp.Max(100),
 				mcp.Description("Minimum SNR in dB (default: -999 = no filter)"),
 				mcp.DefaultNumber(-999.0),
 			),
 			mcp.WithNumber("hours",
+				mcp.Min(1),
+				mcp.Max(48),
 				mcp.Description("Hours of history (default: 24, max: 48)"),
 				mcp.DefaultNumber(24.0),
 			),
 			mcp.WithString("format",
+				mcp.Enum("json", "text"),
 				mcp.Description("Output format: 'json' for structured data or 'text' for human-readable summary"),
 				mcp.DefaultString("json"),
 			),
@@ -269,28 +308,40 @@ func (m *MCPServer) registerTools() {
 	// Tool: get_decoder_analytics_hourly
 	m.mcpServer.AddTool(
 		mcp.NewTool("get_decoder_analytics_hourly",
+			mcpReadOnlyTool,
 			mcp.WithDescription("Get hourly aggregated analytics about decoder spots, broken down by hour for trend analysis. Use this to answer questions about WHEN specific countries/bands are most active (e.g., 'what time is South Korea most active on 20m?'). Returns spot counts and SNR data for each hour of the day, allowing you to identify peak propagation times."),
 			mcp.WithString("country",
 				mcp.Description("Country name filter (e.g., 'South Korea', 'Japan', 'United States') or empty for all countries"),
 			),
 			mcp.WithString("continent",
+				mcp.Pattern(`^[A-Za-z]{2}$`),
+				mcp.MaxLength(32),
 				mcp.Description("Continent code (AF, AS, EU, NA, OC, SA, AN) or empty for all"),
 			),
 			mcp.WithString("mode",
+				mcp.Pattern(`^[A-Za-z0-9]+$`),
+				mcp.MaxLength(32),
 				mcp.Description("Mode filter: 'FT8', 'FT4', 'WSPR', or empty for all modes"),
 			),
 			mcp.WithString("band",
+				mcp.Pattern(`^[A-Za-z0-9.\-]+$`),
+				mcp.MaxLength(32),
 				mcp.Description("Band filter (e.g., '20m', '40m') or empty for all bands"),
 			),
 			mcp.WithNumber("min_snr",
+				mcp.Min(-999),
+				mcp.Max(100),
 				mcp.Description("Minimum SNR in dB (default: -999 = no filter)"),
 				mcp.DefaultNumber(-999.0),
 			),
 			mcp.WithNumber("hours",
+				mcp.Min(1),
+				mcp.Max(48),
 				mcp.Description("Hours of history (default: 24, max: 48)"),
 				mcp.DefaultNumber(24.0),
 			),
 			mcp.WithString("format",
+				mcp.Enum("json", "text"),
 				mcp.Description("Output format: 'json' for structured data or 'text' for human-readable summary"),
 				mcp.DefaultString("json"),
 			),
@@ -301,8 +352,10 @@ func (m *MCPServer) registerTools() {
 	// Tool: get_active_sessions
 	m.mcpServer.AddTool(
 		mcp.NewTool("get_active_sessions",
+			mcpReadOnlyTool,
 			mcp.WithDescription("Get list of active radio listening sessions showing what frequencies and modes are currently in use by other users. Frequencies are in Hz (frequency_khz gives the same in kHz). Each session's protocol says which client it uses: 'native' (the UberSDR web or app client), 'kiwi' (a KiwiSDR-compatible client) or 'websdr' (a WebSDR-compatible client). Includes approximate location (GeoIP, rounded to 0.1 degree), country, and chat usernames. Use this to see what other people are listening to right now; for listener numbers over days or weeks use get_session_history."),
 			mcp.WithString("format",
+				mcp.Enum("json", "text"),
 				mcp.Description("Output format: 'json' for structured data or 'text' for human-readable summary"),
 				mcp.DefaultString("json"),
 			),
@@ -313,8 +366,10 @@ func (m *MCPServer) registerTools() {
 	// Tool: get_band_conditions
 	m.mcpServer.AddTool(
 		mcp.NewTool("get_band_conditions",
+			mcpReadOnlyTool,
 			mcp.WithDescription("Get comprehensive band conditions analysis combining space weather, noise floor measurements, and recent decoder activity. Use this for a quick overview of current HF propagation conditions across all bands. Perfect for answering 'what are conditions like right now?' or 'which bands are open?'"),
 			mcp.WithString("format",
+				mcp.Enum("json", "text"),
 				mcp.Description("Output format: 'json' for structured data or 'text' for human-readable summary"),
 				mcp.DefaultString("json"),
 			),
@@ -335,8 +390,11 @@ func (m *MCPServer) registerTools() {
 	spectrumSpanKHz := float64(m.config.Receiver.Span()) / 1e3
 	m.mcpServer.AddTool(
 		mcp.NewTool("get_wideband_spectrum",
+			mcpReadOnlyTool,
 			mcp.WithDescription(fmt.Sprintf("Get full HF spectrum FFT data (0-%.0f MHz) showing the entire radio spectrum with noise floor and signal levels across all frequencies. Returns raw FFT bins with frequency and power data. Use this for detailed spectrum analysis or to identify signals across the entire HF spectrum.", spectrumTopMHz)),
 			mcp.WithNumber("center_freq",
+				mcp.Min(0),
+				mcp.Max(1000),
 				mcp.Description(fmt.Sprintf("Center frequency in MHz (default: %.1f, range: 0-%.0f)", spectrumCentreMHz, spectrumTopMHz)),
 				// The schema default has to be derived too, not just the sentence beside
 				// it: an LLM client reads the description but *fills in* this number, so
@@ -344,6 +402,8 @@ func (m *MCPServer) registerTools() {
 				mcp.DefaultNumber(spectrumCentreMHz),
 			),
 			mcp.WithNumber("span",
+				mcp.Min(3),
+				mcp.Max(1000000),
 				mcp.Description(fmt.Sprintf("Frequency span in kHz (default: %.0f = full spectrum, min: 3)", spectrumSpanKHz)),
 				mcp.DefaultNumber(spectrumSpanKHz),
 			),
@@ -354,8 +414,11 @@ func (m *MCPServer) registerTools() {
 	// Tool: get_noise_floor_trends
 	m.mcpServer.AddTool(
 		mcp.NewTool("get_noise_floor_trends",
+			mcpReadOnlyTool,
 			mcp.WithDescription("Get 24-hour noise floor trend data for analyzing propagation patterns over time. Includes measurements averaged in 10-minute intervals showing how noise floor changes throughout the day. Use this to identify best times for specific bands or to analyze propagation trends."),
 			mcp.WithString("band",
+				mcp.Pattern(`^[A-Za-z0-9.\-]+$`),
+				mcp.MaxLength(32),
 				mcp.Description("Specific band name (e.g., '20m', '40m') or empty for all bands"),
 			),
 		),
@@ -365,7 +428,8 @@ func (m *MCPServer) registerTools() {
 	// Tool: get_receiver_info
 	m.mcpServer.AddTool(
 		mcp.NewTool("get_receiver_info",
-			mcp.WithDescription("Get comprehensive information about the SDR receiver including location (GPS coordinates, Maidenhead grid square), antenna details, receiver capabilities, enabled features (space weather, noise floor, digital decodes, CW skimmer, chat), available client slots, spectrum dynamic range (SNR measurements for 0-30 MHz and 1.8-30 MHz), rotator status, frequency reference tracking, and public access settings. Use this to understand the receiver's configuration, capabilities, and current status."),
+			mcpReadOnlyTool,
+			mcp.WithDescription("Get comprehensive information about the SDR receiver, the same as its public /api/description: name, callsign, location (GPS, Maidenhead grid square, country, timezone), antenna, tuning range, default frequency and mode, available and maximum client slots, session time limit, spectrum dynamic range (SNR for 0-30 MHz and 1.8-30 MHz), enabled features (space weather, noise floor, spectrogram, digital decodes and which modes, CW skimmer, DX cluster, chat, speech to text, DSP filters, add-ons, widgets), rotator and antenna switch status, frequency reference and GPSDO, leaderboard ranks, server time and software version. Use this to understand the receiver's configuration, capabilities, and current status."),
 		),
 		m.handleGetReceiverInfo,
 	)
@@ -376,6 +440,7 @@ func (m *MCPServer) registerTools() {
 	m.registerPropagationTools()
 	m.registerStationTools()
 	m.registerSpectrogramTool()
+	m.registerSpectrogramDataTool()
 }
 
 // HandleMCP handles MCP protocol requests over HTTP
@@ -978,133 +1043,10 @@ func (m *MCPServer) handleGetNoiseFloorTrends(ctx context.Context, request mcp.C
 }
 
 func (m *MCPServer) handleGetReceiverInfo(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	// Calculate available client slots
-	currentNonBypassedUsers := m.sessions.GetNonBypassedUserCount()
-	availableClients := m.config.Server.MaxSessions - currentNonBypassedUsers
-	if availableClients < 0 {
-		availableClients = 0
+	if m.Describe == nil {
+		return mcp.NewToolResultError("Receiver information is not available yet"), nil
 	}
-
-	// Construct public_url from instance connection info
-	var publicURL string
-	if m.instanceReporter != nil {
-		publicURL = m.config.InstanceReporting.ConstructPublicURL(m.instanceReporter.GetEffectiveHost())
-	} else {
-		publicURL = m.config.InstanceReporting.ConstructPublicURL()
-	}
-
-	// Build list of public IQ modes
-	publicIQModes := []string{}
-	wideIQModes := []string{"iq48", "iq96", "iq192", "iq384"}
-	for _, mode := range wideIQModes {
-		if m.config.Server.PublicIQModes[mode] {
-			publicIQModes = append(publicIQModes, mode)
-		}
-	}
-
-	// Get public_uuid from instance reporter if available
-	publicUUID := ""
-	if m.instanceReporter != nil {
-		status := m.instanceReporter.GetReportStatus()
-		if uuid, ok := status["public_uuid"].(string); ok {
-			publicUUID = uuid
-		}
-	}
-
-	// Get chat user count
-	chatUserCount := 0
-	if m.dxClusterWsHandler != nil {
-		chatUserCount = m.dxClusterWsHandler.GetChatUserCount()
-	}
-
-	// Get wideband SNR measurements if noise floor monitor is available
-	snr_0_30, snr_1_8_30 := float32(-1), float32(-1)
-	if m.noiseFloorMonitor != nil {
-		snr_0_30, snr_1_8_30 = m.noiseFloorMonitor.GetWidebandSNR()
-	}
-
-	// Get rotator information if available
-	rotatorInfo := map[string]interface{}{
-		"enabled":   false,
-		"connected": false,
-		"azimuth":   -1,
-	}
-	if m.rotctlHandler != nil && m.config.Rotctl.Enabled {
-		rotatorInfo["enabled"] = true
-		rotatorInfo["connected"] = m.rotctlHandler.controller.client.IsConnected()
-		state := m.rotctlHandler.controller.GetState()
-		rotatorInfo["azimuth"] = int(state.Position.Azimuth + 0.5)
-	}
-
-	// Get frequency reference information if available
-	freqRefInfo := map[string]interface{}{
-		"enabled": false,
-	}
-	if m.freqRefMonitor != nil {
-		freqRefStatus := m.freqRefMonitor.GetStatus()
-		freqRefInfo["enabled"] = freqRefStatus["enabled"]
-
-		// Only include additional fields if enabled AND we have averaged history data
-		if enabled, ok := freqRefStatus["enabled"].(bool); ok && enabled {
-			history := m.freqRefMonitor.GetHistory()
-			if len(history) > 0 {
-				latest := history[len(history)-1]
-				freqRefInfo["expected_frequency"] = freqRefStatus["expected_frequency"]
-				freqRefInfo["detected_frequency"] = latest.DetectedFreq
-				freqRefInfo["frequency_offset"] = latest.FrequencyOffset
-				freqRefInfo["signal_strength"] = latest.SignalStrength
-				freqRefInfo["snr"] = latest.SNR
-				freqRefInfo["noise_floor"] = latest.NoiseFloor
-			}
-		}
-	}
-
-	// Calculate Maidenhead grid locator from GPS coordinates
-	maidenhead := latLonToGridSquare(m.config.Admin.GPS.Lat, m.config.Admin.GPS.Lon)
-
-	// Build the response with all receiver information
-	response := map[string]interface{}{
-		"description": m.config.Admin.Description,
-		"receiver": map[string]interface{}{
-			"name":       m.config.Admin.Name,
-			"callsign":   m.config.Admin.Callsign,
-			"public_url": publicURL,
-			"gps": map[string]interface{}{
-				"lat":          m.config.Admin.GPS.Lat,
-				"lon":          m.config.Admin.GPS.Lon,
-				"maidenhead":   maidenhead,
-				"gps_enabled":  m.config.Admin.GPS.GPSEnabled,
-				"tdoa_enabled": m.config.Admin.GPS.TDOAEnabled,
-			},
-			"asl":            m.config.Admin.ASL,
-			"location":       m.config.Admin.Location,
-			"antenna":        m.config.Admin.Antenna,
-			"snr_0_30_mhz":   int(snr_0_30),
-			"snr_1_8_30_mhz": int(snr_1_8_30),
-		},
-		"max_clients":          m.config.Server.MaxSessions,
-		"available_clients":    availableClients,
-		"max_session_time":     m.config.Server.MaxSessionTime,
-		"version":              Version,
-		"space_weather":        m.config.SpaceWeather.Enabled,
-		"noise_floor":          m.config.NoiseFloor.Enabled,
-		"digital_decodes":      m.config.DigitalSpotsEnabled(),
-		"cw_skimmer":           m.config.CWSpotsEnabled(m.cwskimmerConfig),
-		"chat_enabled":         m.config.Chat.Enabled,
-		"chat_users":           chatUserCount,
-		"public_iq_modes":      publicIQModes,
-		"spectrum_poll_period": m.config.Spectrum.PollPeriodMs,
-		"public_uuid":          publicUUID,
-		"cors_enabled":         m.config.Server.EnableCORS,
-		"rotator":              rotatorInfo,
-		"frequency_reference":  freqRefInfo,
-	}
-
-	jsonData, err := json.MarshalIndent(response, "", "  ")
-	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("Failed to marshal data: %v", err)), nil
-	}
-	return mcp.NewToolResultText(string(jsonData)), nil
+	return mcpJSON(m.Describe())
 }
 
 // roundCoordinate rounds a GeoIP latitude or longitude to 0.1 degree.

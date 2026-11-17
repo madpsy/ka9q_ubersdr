@@ -3046,6 +3046,9 @@ func main() {
 			Spectrogram:      spectrogramRecorder,
 			BandSpectrograms: bandSpectrogramRecorders,
 			RateLimiter:      fftRateLimiter,
+			Describe: func() map[string]interface{} {
+				return buildDescription(config, cwskimmerConfig, sessions, instanceReporter, dxClusterWsHandler, noiseFloorMonitor, rotctlHandler, freqRefMonitor, adminHandler, pskRankFetcher, wsprRankFetcher, rbnStore, gpsdoMonitor, frontendHistory, antSwitchHandler, widgetManager)
+			},
 		})
 		http.HandleFunc("/api/mcp", mcpServer.HandleMCP)
 		log.Printf("MCP endpoint enabled at /api/mcp")
@@ -4994,9 +4997,18 @@ func handleExtensionsBundle(w http.ResponseWriter, r *http.Request, config *Conf
 
 // handleDescription serves the description HTML from config plus all status information
 func handleDescription(w http.ResponseWriter, r *http.Request, config *Config, cwskimmerConfig *CWSkimmerConfig, sessions *SessionManager, instanceReporter *InstanceReporter, dxClusterWsHandler *DXClusterWebSocketHandler, noiseFloorMonitor *NoiseFloorMonitor, rotctlHandler *RotctlAPIHandler, freqRefMonitor *FrequencyReferenceMonitor, adminHandler *AdminHandler, pskRankFetcher *PSKRankFetcher, wsprRankFetcher *WSPRRankFetcher, rbnStore *RBNDataStore, gpsdoMonitor *GPSDOMonitor, frontendHistory *FrontendHistoryTracker, antSwitchHandler *AntSwitchHandler, widgetManager *WidgetManager) {
+	response := buildDescription(config, cwskimmerConfig, sessions, instanceReporter, dxClusterWsHandler, noiseFloorMonitor, rotctlHandler, freqRefMonitor, adminHandler, pskRankFetcher, wsprRankFetcher, rbnStore, gpsdoMonitor, frontendHistory, antSwitchHandler, widgetManager)
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		log.Printf("Error encoding description: %v", err)
+	}
+}
 
+// buildDescription is the receiver's public description: identity, location,
+// capabilities and live status. GET /api/description serves it, and the MCP
+// get_receiver_info tool returns the same map, so the two cannot drift apart.
+func buildDescription(config *Config, cwskimmerConfig *CWSkimmerConfig, sessions *SessionManager, instanceReporter *InstanceReporter, dxClusterWsHandler *DXClusterWebSocketHandler, noiseFloorMonitor *NoiseFloorMonitor, rotctlHandler *RotctlAPIHandler, freqRefMonitor *FrequencyReferenceMonitor, adminHandler *AdminHandler, pskRankFetcher *PSKRankFetcher, wsprRankFetcher *WSPRRankFetcher, rbnStore *RBNDataStore, gpsdoMonitor *GPSDOMonitor, frontendHistory *FrontendHistoryTracker, antSwitchHandler *AntSwitchHandler, widgetManager *WidgetManager) map[string]interface{} {
 	// Calculate available client slots (max - current non-bypassed users)
 	currentNonBypassedUsers := sessions.GetNonBypassedUserCount()
 	availableClients := config.Server.MaxSessions - currentNonBypassedUsers
@@ -5268,9 +5280,7 @@ func handleDescription(w http.ResponseWriter, r *http.Request, config *Config, c
 	response["rank_sources"] = BuildRankSources(pskRankFetcher, wsprRankFetcher, rbnStore,
 		config.Decoder.ReceiverCallsign, cwRankCallsign)
 
-	if err := json.NewEncoder(w).Encode(response); err != nil {
-		log.Printf("Error encoding description: %v", err)
-	}
+	return response
 }
 
 // InstanceStatusRequest represents the request body for instance status check

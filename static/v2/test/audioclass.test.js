@@ -170,7 +170,10 @@ const named = (sig) => r('noise', { signal: { say: 'name', name: 'Morse Code (CW
 t('the badge: a name first, then a kind, then VOICE / MUSIC / NOISE', () => {
     const b = V.badge({ status: 'ready', history: [named()] }, 'usb');
     assert.strictEqual(b.text, 'CW');
-    assert.strictEqual(b.tone, 'accent');
+    assert.strictEqual(b.tone, 'good', 'over 90%: green');
+    assert.strictEqual(V.badge({ status: 'ready', history: [named({ p: 0.85 })] }, 'usb').tone, 'accent');
+    assert.strictEqual(V.badge({ status: 'ready', history: [named({ p: 0.9 })] }, 'usb').tone, 'accent', 'exactly 90%: not above');
+    assert.strictEqual(V.badge({ status: 'ready', quiet: true, history: [named()] }, 'usb').tone, 'ghost');
     assert.match(b.title, /Morse Code \(CW\) — 92% likely, over the last 33 s/);
     assert.match(b.title, /Next closest: ICV 5%/);
     assert.match(b.title, /reference recordings/);
@@ -438,6 +441,48 @@ t('the tag renders nothing until there is a verdict', () => {
     const empty = A.render(A.AudioClassTag, {}, context());
     assert.strictEqual(empty.tree, null);
     empty.cleanups.forEach((f) => f());
+});
+
+t('the tooltip holds still while the pointer or focus is on the badge', () => {
+    // A browser closes an open tooltip when its text changes, and this one's
+    // changes with every verdict: the text is held while hovered.
+    A.reset();
+    const cls = C.getAudioClassifier();
+    const real = { getState: cls.getState, subscribe: cls.subscribe };
+    let st = { status: 'ready', history: [r('voice', { confidence: 0.8 })], quiet: false };
+    let push = () => {};
+    cls.getState = () => st;
+    cls.subscribe = (fn) => { push = fn; return () => {}; };
+    const update = (next) => { st = next; push(st); };
+    try {
+        let out = A.render(A.AudioClassTag, {}, context());
+        const first = out.tree.props.title;
+        assert.match(first, /80% likely/);
+        out.tree.props.onMouseEnter();
+        update({ ...st, history: [r('voice', { confidence: 0.6 })] });
+        out = A.rerender(A.AudioClassTag, {}, context(), out);
+        assert.strictEqual(out.tree.props.title, first, 'changed under the pointer');
+        out.tree.props.onMouseLeave();
+        out = A.rerender(A.AudioClassTag, {}, context(), out);
+        assert.match(out.tree.props.title, /60% likely/);
+        // Keyboard focus holds it the same way.
+        out.tree.props.onFocus();
+        const focused = out.tree.props.title;
+        update({ ...st, history: [r('voice', { confidence: 0.9 })] });
+        out = A.rerender(A.AudioClassTag, {}, context(), out);
+        assert.strictEqual(out.tree.props.title, focused);
+        // Gone while held (a retune): let go, so the next badge is not stale.
+        update({ ...st, history: [] });
+        out = A.rerender(A.AudioClassTag, {}, context(), out);
+        assert.strictEqual(out.tree, null);
+        update({ ...st, history: [r('music', { confidence: 0.7 })] });
+        out = A.rerender(A.AudioClassTag, {}, context(), out);
+        assert.match(out.tree.props.title, /^Music/);
+        out.cleanups.forEach((f) => f());
+    } finally {
+        cls.getState = real.getState;
+        cls.subscribe = real.subscribe;
+    }
 });
 
 t('the watch mounts and unmounts without starting anything when stopped', () => {

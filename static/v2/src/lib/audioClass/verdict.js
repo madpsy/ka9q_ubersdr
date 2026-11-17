@@ -57,6 +57,9 @@ export function smoothLabel(history) {
     return recent[recent.length - 1].label;
 }
 
+// A named signal this likely shows green.
+export const SURE = 0.9;
+
 const SHORT = { voice: 'VOICE', music: 'MUSIC', noise: 'NOISE' };
 const NAME = { voice: 'Voice', music: 'Music', noise: 'Noise' };
 
@@ -75,7 +78,9 @@ export function badge(state, mode) {
     const latest = history[history.length - 1];
     const sig = latest && latest.signal;
     if (sig && sig.say === 'name') {
-        return { text: sig.short, tone: state.quiet ? 'ghost' : 'accent', title: signalTitle(sig, latest, state, true) };
+        // Green when very sure, as the other badges are when all is well.
+        const tone = state.quiet ? 'ghost' : (sig.p > SURE ? 'good' : 'accent');
+        return { text: sig.short, tone, title: signalTitle(sig, latest, state, true) };
     }
     if (sig && sig.say === 'family') {
         return { text: sig.familyText, tone: 'ghost', title: signalTitle(sig, latest, state, false) };

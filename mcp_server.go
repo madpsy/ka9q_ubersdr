@@ -3,10 +3,15 @@ package main
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
+	"math"
 	"net/http"
+	"sort"
+	"strings"
 	"time"
 
 	"github.com/mark3labs/mcp-go/mcp"
@@ -29,6 +34,70 @@ type MCPServer struct {
 	freqRefMonitor      *FrequencyReferenceMonitor
 	mcpServer           *server.MCPServer
 	httpServer          *server.StreamableHTTPServer
+
+	// Set by AttachSources once main has built them; nil when the feature is
+	// off, and every tool that reads one says so rather than failing.
+	MCPSources
+}
+
+// MCPSources are the data sources the MCP tools read that main.go creates after
+// the MCP server itself. They are attached once, before the HTTP server starts
+// serving, and never change afterwards, so the tools read them without locking.
+type MCPSources struct {
+	SessionDB        *sql.DB // read-only handle on the session history tables
+	CWSkimmer        *CWSkimmerClient
+	CTY              *CTYDatabase
+	DXCluster        *DXClusterClient
+	EiBi             *EiBiSchedule
+	DRM              *DRMSchedule
+	StatsLogger      *StatsLogger
+	PSKRank          *PSKRankFetcher
+	WSPRRank         *WSPRRankFetcher
+	RBNStore         *RBNDataStore
+	Spectrogram      *SpectrogramRecorder            // wideband recorder
+	BandSpectrograms map[string]*SpectrogramRecorder // per-band recorders
+	RateLimiter      *FFTRateLimiter                 // per client IP, keyed per tool
+}
+
+// AttachSources hands the MCP server the data sources main.go builds after it.
+// Must be called before the HTTP server starts serving.
+func (m *MCPServer) AttachSources(src MCPSources) {
+	m.MCPSources = src
+}
+
+// mcpClientIPKey carries the caller's real IP from the HTTP request into the
+// tool handlers, which mcp-go otherwise gives no view of the request.
+type mcpClientIPKey struct{}
+
+// mcpClientIP returns the caller's IP as getClientIP saw it, or "" outside an
+// HTTP request (in tests that call the handlers directly).
+func mcpClientIP(ctx context.Context) string {
+	ip, _ := ctx.Value(mcpClientIPKey{}).(string)
+	return ip
+}
+
+// allowToolCall applies the per-IP rate limit to the tools that do real work
+// (database scans, image renders). Each tool has its own bucket, so a busy
+// session-history query does not lock a client out of everything else.
+func (m *MCPServer) allowToolCall(ctx context.Context, tool string) bool {
+	if m.RateLimiter == nil {
+		return true
+	}
+	return m.RateLimiter.AllowRequest(mcpClientIP(ctx), "mcp-"+tool)
+}
+
+// mcpRateLimited is the result a rate-limited tool call returns.
+func mcpRateLimited(tool string) *mcp.CallToolResult {
+	return mcp.NewToolResultError(fmt.Sprintf("Rate limit exceeded for %s: wait a couple of seconds and try again", tool))
+}
+
+// mcpJSON returns v as an indented JSON tool result.
+func mcpJSON(v interface{}) (*mcp.CallToolResult, error) {
+	data, err := json.MarshalIndent(v, "", "  ")
+	if err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("Failed to marshal data: %v", err)), nil
+	}
+	return mcp.NewToolResultText(string(data)), nil
 }
 
 // NewMCPServer creates a new MCP server instance
@@ -60,16 +129,55 @@ func NewMCPServer(sessions *SessionManager, swm *SpaceWeatherMonitor,
 		server.WithToolCapabilities(true),
 	)
 
-	// Register all tools
+	// Register all tools, then withdraw the ones the operator turned off
 	m.registerTools()
+	m.removeDisabledTools()
 
 	// Wrap tool handlers with logging
 	m.wrapToolHandlersWithLogging()
 
-	// Create HTTP server wrapper
-	m.httpServer = server.NewStreamableHTTPServer(m.mcpServer)
+	// Create HTTP server wrapper. The context function hands each tool call the
+	// caller's real IP, for per-client rate limiting.
+	m.httpServer = server.NewStreamableHTTPServer(m.mcpServer,
+		server.WithHTTPContextFunc(func(ctx context.Context, r *http.Request) context.Context {
+			return context.WithValue(ctx, mcpClientIPKey{}, getClientIP(r))
+		}),
+	)
 
 	return m
+}
+
+// removeDisabledTools drops every tool named in mcp.disabled_tools. A name that
+// matches no tool is logged rather than fatal: tools come and go between
+// versions, and a stale entry should not stop the server starting.
+func (m *MCPServer) removeDisabledTools() {
+	if m.config == nil || len(m.config.MCP.DisabledTools) == 0 {
+		return
+	}
+	registered := m.mcpServer.ListTools()
+	var remove []string
+	for name := range registered {
+		if m.config.MCP.IsToolDisabled(name) {
+			remove = append(remove, name)
+		}
+	}
+	sort.Strings(remove)
+	for _, want := range m.config.MCP.DisabledTools {
+		found := false
+		for name := range registered {
+			if strings.EqualFold(strings.TrimSpace(want), name) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			log.Printf("MCP: disabled_tools entry %q matches no tool", want)
+		}
+	}
+	if len(remove) > 0 {
+		m.mcpServer.DeleteTools(remove...)
+		log.Printf("MCP: disabled tools: %v", remove)
+	}
 }
 
 // wrapToolHandlersWithLogging wraps all tool handlers to log requests
@@ -193,7 +301,7 @@ func (m *MCPServer) registerTools() {
 	// Tool: get_active_sessions
 	m.mcpServer.AddTool(
 		mcp.NewTool("get_active_sessions",
-			mcp.WithDescription("Get list of active radio listening sessions showing what frequencies and modes are currently in use by other users. Includes geographic location (latitude/longitude), country, and chat usernames. Use this to see what other people are listening to right now."),
+			mcp.WithDescription("Get list of active radio listening sessions showing what frequencies and modes are currently in use by other users. Frequencies are in Hz (frequency_khz gives the same in kHz). Each session's protocol says which client it uses: 'native' (the UberSDR web or app client), 'kiwi' (a KiwiSDR-compatible client) or 'websdr' (a WebSDR-compatible client). Includes approximate location (GeoIP, rounded to 0.1 degree), country, and chat usernames. Use this to see what other people are listening to right now; for listener numbers over days or weeks use get_session_history."),
 			mcp.WithString("format",
 				mcp.Description("Output format: 'json' for structured data or 'text' for human-readable summary"),
 				mcp.DefaultString("json"),
@@ -261,12 +369,30 @@ func (m *MCPServer) registerTools() {
 		),
 		m.handleGetReceiverInfo,
 	)
+
+	m.registerSessionHistoryTool()
+	m.registerSpotTools()
+	m.registerFrequencyTools()
+	m.registerPropagationTools()
+	m.registerStationTools()
+	m.registerSpectrogramTool()
 }
 
 // HandleMCP handles MCP protocol requests over HTTP
 func (m *MCPServer) HandleMCP(w http.ResponseWriter, r *http.Request) {
 	// Check if IP is banned
 	if checkIPBan(w, r, m.ipBanManager) {
+		return
+	}
+
+	// Only clients in mcp.allowed_ips may use the endpoint at all.
+	if clientIP := getClientIP(r); !m.config.MCP.IsIPAllowed(clientIP) {
+		log.Printf("MCP access denied for IP %s (not in mcp.allowed_ips)", clientIP)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusForbidden)
+		json.NewEncoder(w).Encode(map[string]string{
+			"error": "Access denied: this receiver only accepts MCP connections from addresses listed in mcp.allowed_ips",
+		})
 		return
 	}
 
@@ -593,8 +719,9 @@ func (m *MCPServer) handleGetActiveSessions(ctx context.Context, request mcp.Cal
 				sessionInfo := map[string]interface{}{
 					"index":          index,
 					"frequency":      session.Frequency,
+					"frequency_khz":  float64(session.Frequency) / 1e3,
 					"mode":           session.Mode,
-					"bandwidth":      session.Bandwidth,
+					"protocol":       protocolFromUserSessionID(session.UserSessionID),
 					"bandwidth_low":  session.BandwidthLow,
 					"bandwidth_high": session.BandwidthHigh,
 					"created_at":     session.CreatedAt,
@@ -603,14 +730,17 @@ func (m *MCPServer) handleGetActiveSessions(ctx context.Context, request mcp.Cal
 					"country_code":   session.CountryCode,
 				}
 
-				// Add GeoIP coordinates if available
+				// Add GeoIP coordinates if available. GeoIP is city-level at
+				// best, so the coordinates are rounded to 0.1 degree (about
+				// 11 km) rather than handing out false precision about where a
+				// listener is.
 				if m.geoIPService != nil && m.geoIPService.IsEnabled() {
 					if result, err := m.geoIPService.Lookup(session.ClientIP, false); err == nil {
 						if result.Latitude != nil {
-							sessionInfo["latitude"] = *result.Latitude
+							sessionInfo["latitude"] = roundCoordinate(*result.Latitude)
 						}
 						if result.Longitude != nil {
-							sessionInfo["longitude"] = *result.Longitude
+							sessionInfo["longitude"] = roundCoordinate(*result.Longitude)
 						}
 						if result.AccuracyRadius != nil {
 							sessionInfo["accuracy_radius_km"] = *result.AccuracyRadius
@@ -642,16 +772,17 @@ func (m *MCPServer) handleGetActiveSessions(ctx context.Context, request mcp.Cal
 		if len(sessions) > 0 {
 			for _, sess := range sessions {
 				idx, _ := sess["index"].(int)
-				freq, _ := sess["frequency"].(int)
+				freqKHz, _ := sess["frequency_khz"].(float64)
 				mode, _ := sess["mode"].(string)
+				protocol, _ := sess["protocol"].(string)
 				country, _ := sess["country"].(string)
-				text += fmt.Sprintf("%d. %.3f MHz | %s | %s", idx, float64(freq)/1e3, mode, country)
+				text += fmt.Sprintf("%d. %.3f kHz | %s | %s | %s", idx, freqKHz, mode, protocol, country)
 				if username, ok := sess["chat_username"].(string); ok && username != "" {
 					text += fmt.Sprintf(" | User: %s", username)
 				}
 				if lat, ok := sess["latitude"].(float64); ok {
 					if lon, ok := sess["longitude"].(float64); ok {
-						text += fmt.Sprintf(" | Coords: %.4f, %.4f", lat, lon)
+						text += fmt.Sprintf(" | Coords: %.1f, %.1f", lat, lon)
 					}
 				}
 				text += "\n"
@@ -974,4 +1105,9 @@ func (m *MCPServer) handleGetReceiverInfo(ctx context.Context, request mcp.CallT
 		return mcp.NewToolResultError(fmt.Sprintf("Failed to marshal data: %v", err)), nil
 	}
 	return mcp.NewToolResultText(string(jsonData)), nil
+}
+
+// roundCoordinate rounds a GeoIP latitude or longitude to 0.1 degree.
+func roundCoordinate(v float64) float64 {
+	return math.Round(v*10) / 10
 }

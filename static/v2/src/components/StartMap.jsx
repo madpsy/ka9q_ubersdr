@@ -15,6 +15,7 @@ import React, { useEffect, useRef, useState } from '../react.js';
 import { addBaseLayer, TILE_ATTRIBUTION } from '../lib/leafletBase.js';
 import { loadScript, loadStyle } from '../lib/loadScript.js';
 import { fetchMyIp, greeting, hasPosition, myipPosition } from '../lib/myip.js';
+import { buildPopup, fetchNearbyReceivers } from '../lib/nearbyReceivers.js';
 
 const LEAFLET_JS = '/leaflet.js';
 const LEAFLET_CSS = '/leaflet.css';
@@ -23,6 +24,15 @@ const SUNCALC_JS = '/suncalc.js';
 // v1's zoom before it fits to both markers, and what it falls back to when
 // there is nobody to fit to.
 const ZOOM = 6;
+
+// The other public receivers: small amber dots, under this receiver's red pin
+// and your green one, so the map still reads as "here and you" first. Drawn on
+// a canvas with a generous hit tolerance — a few hundred of them is cheap that
+// way, and a 4 px dot is otherwise impossible to tap.
+const OTHER_STYLE = {
+    radius: 4, color: '#ffffff', weight: 1, opacity: 0.85,
+    fillColor: '#f5a623', fillOpacity: 0.9,
+};
 
 // Daylight at the receiver, from v1's own SunCalc. Absent rather than guessed
 // if the library will not load: an hour's error either way is worse than
@@ -53,6 +63,11 @@ export default function StartMap({ receiver, handheld }) {
         const lat = gps.lat;
         const lon = gps.lon;
 
+        // Started now, alongside Leaflet, and never awaited by anything else: the
+        // pins, the greeting and the fit do not wait on it. It cannot reject.
+        const nearbyAbort = typeof AbortController === 'function' ? new AbortController() : null;
+        const nearby = fetchNearbyReceivers({ signal: nearbyAbort ? nearbyAbort.signal : undefined });
+
         const build = async () => {
             await Promise.all([loadStyle(LEAFLET_CSS), loadScript(LEAFLET_JS)]);
             // Best-effort: the map is worth having without the day/night note.
@@ -61,9 +76,11 @@ export default function StartMap({ receiver, handheld }) {
             if (cancelled || !L || !box.current || map.current) return;
 
             const m = L.map(box.current, {
-                // A map inside a dialog should not swallow the page's scroll;
-                // it is here to be looked at, and the buttons matter more.
-                scrollWheelZoom: false,
+                // Wheel zoom on: the other receivers are only found by zooming
+                // out from the fit to this receiver and you. Pinch (touchZoom)
+                // and the +/- buttons are Leaflet's defaults and stay on too.
+                scrollWheelZoom: true,
+                touchZoom: true,
             }).setView([lat, lon], ZOOM);
             map.current = m;
 
@@ -91,6 +108,26 @@ export default function StartMap({ receiver, handheld }) {
                 .addTo(m)
                 .bindTooltip(label, { permanent: true, direction: 'top', className: 'startmap__tip' })
                 .openTooltip();
+
+            // Everyone else, whenever the list turns up. The view is left alone:
+            // it stays fitted to this receiver and you, and the rest are there to
+            // be found by zooming out.
+            nearby.then((list) => {
+                if (cancelled || map.current !== m || !list.length) return;
+                const renderer = L.canvas({ padding: 0.5, tolerance: 8 });
+                for (const r of list) {
+                    const dot = L.circleMarker([r.lat, r.lon], { ...OTHER_STYLE, renderer });
+                    if (!handheld && r.callsign) {
+                        dot.bindTooltip(r.callsign, { direction: 'top', className: 'startmap__tip' });
+                    }
+                    dot.bindPopup(() => buildPopup(document, r), {
+                        className: 'startmap-pop', closeButton: true, maxWidth: 240, autoPanPadding: [12, 12],
+                    });
+                    // The hover label would sit on top of the popup it opened.
+                    dot.on('popupopen', () => dot.closeTooltip());
+                    dot.addTo(m);
+                }
+            });
 
             // Where the listener is. Only ever an approximation from GeoIP, so
             // it is not labelled with a place — the line and the distance are
@@ -122,6 +159,7 @@ export default function StartMap({ receiver, handheld }) {
 
         return () => {
             cancelled = true;
+            if (nearbyAbort) nearbyAbort.abort();
             if (map.current) {
                 map.current.remove();
                 map.current = null;

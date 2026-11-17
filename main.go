@@ -2962,6 +2962,29 @@ func main() {
 	http.HandleFunc("/api/myip", func(w http.ResponseWriter, r *http.Request) {
 		handleMyIP(w, r, geoIPService, config)
 	})
+	// Other public receivers for v2's start map, from a copy refreshed in the
+	// background — see nearby_receivers.go. Answers from memory only, so an
+	// offline receiver or a slow collector never delays the page. Fetched only
+	// by a receiver that reports to the directory itself (instanceReporter is
+	// non-nil exactly when instance_reporting.enabled is set); otherwise the
+	// endpoint is still served, with an empty list, so the map simply shows no
+	// other receivers.
+	receiverPosition := func() (float64, float64, bool) {
+		lat, lon := config.Admin.GPS.Lat, config.Admin.GPS.Lon
+		// 0,0 is the config default, not a position.
+		return lat, lon, lat != 0 || lon != 0
+	}
+	var nearbySelfID func() string
+	if instanceReporter != nil {
+		nearbySelfID = instanceReporter.PublicUUID
+	}
+	nearbyReceivers := NewNearbyReceivers(config.InstanceReporting.Hostname, config.InstanceReporting.Port, nearbySelfID, receiverPosition)
+	if instanceReporter != nil && config.Server.NearbyReceiversIsEnabled() {
+		go nearbyReceivers.Run(context.Background())
+	} else {
+		log.Printf("Nearby receivers: not fetching the directory (needs instance_reporting.enabled and server.nearby_receivers_enabled); /api/nearby-receivers will be empty")
+	}
+	http.HandleFunc("/api/nearby-receivers", gzipHandler(nearbyReceivers.ServeHTTP))
 	http.HandleFunc("/api/description", func(w http.ResponseWriter, r *http.Request) {
 		handleDescription(w, r, config, cwskimmerConfig, sessions, instanceReporter, dxClusterWsHandler, noiseFloorMonitor, rotctlHandler, freqRefMonitor, adminHandler, pskRankFetcher, wsprRankFetcher, rbnStore, gpsdoMonitor, frontendHistory, antSwitchHandler, widgetManager)
 	})
@@ -3007,6 +3030,23 @@ func main() {
 
 	// MCP endpoint (Model Context Protocol for AI assistants)
 	if mcpServer != nil {
+		// Everything the MCP tools read that was built after the MCP server.
+		// Attached here, before serving starts, and never changed afterwards.
+		mcpServer.AttachSources(MCPSources{
+			SessionDB:        dbManager.ReadDB(),
+			CWSkimmer:        cwSkimmer,
+			CTY:              globalCTY,
+			DXCluster:        dxCluster,
+			EiBi:             eibiSchedule,
+			DRM:              drmSchedule,
+			StatsLogger:      statsLogger,
+			PSKRank:          pskRankFetcher,
+			WSPRRank:         wsprRankFetcher,
+			RBNStore:         rbnStore,
+			Spectrogram:      spectrogramRecorder,
+			BandSpectrograms: bandSpectrogramRecorders,
+			RateLimiter:      fftRateLimiter,
+		})
 		http.HandleFunc("/api/mcp", mcpServer.HandleMCP)
 		log.Printf("MCP endpoint enabled at /api/mcp")
 	}

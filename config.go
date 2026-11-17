@@ -421,6 +421,7 @@ type ServerConfig struct {
 	SessionActivityLogRetentionDays int               `yaml:"session_activity_log_retention_days"` // Number of days to retain session activity logs (default: 30, 0 = keep forever)
 	SessionsGeoJSONEnabled          bool              `yaml:"sessions_geojson_enabled"`            // Expose a public /api/sessions.geojson feed of active listeners (approx GeoIP location) for e.g. Home Assistant maps (default: false)
 	PublicSessionStatsEnabled       *bool             `yaml:"public_session_stats_enabled"`        // Serve the public /api/session-stats endpoint (*bool so nil = key absent = enabled; default: true)
+	NearbyReceiversEnabled          *bool             `yaml:"nearby_receivers_enabled"`            // Fetch the public receiver directory every 15 min and show other receivers on v2's start map; only when instance_reporting.enabled is also set (*bool so nil = key absent = enabled; default: true)
 	CustomHeadHTML                  string            `yaml:"custom_head_html"`                    // Custom HTML to inject into <head> section of both index.html and v2's shell (for analytics, ads, meta tags, etc.)
 	CustomBodyHTML                  string            `yaml:"custom_body_html"`                    // Custom HTML to inject before </body> in both index.html and v2's shell (for visible banners, DOM-dependent scripts, ad unit divs, etc.)
 	CustomAdsTxt                    string            `yaml:"custom_ads_txt"`                      // Custom content for /ads.txt endpoint (for Google AdSense verification)
@@ -448,6 +449,13 @@ type ServerConfig struct {
 // true when the key is absent.
 func (s *ServerConfig) PublicSessionStatsIsEnabled() bool {
 	return s.PublicSessionStatsEnabled == nil || *s.PublicSessionStatsEnabled
+}
+
+// NearbyReceiversIsEnabled reports whether this receiver may fetch the public
+// directory for v2's start map. The fetch also needs instance reporting on.
+// Defaults to true when the key is absent.
+func (s *ServerConfig) NearbyReceiversIsEnabled() bool {
+	return s.NearbyReceiversEnabled == nil || *s.NearbyReceiversEnabled
 }
 
 // SetAddonContainerResolver installs a callback returning the container
@@ -940,6 +948,16 @@ type SSHProxyConfig struct {
 // MCPConfig contains Model Context Protocol server settings
 type MCPConfig struct {
 	Enabled bool `yaml:"enabled"` // Enable/disable MCP endpoint
+
+	// AllowedIPs lists the IPs/CIDRs allowed to use the endpoint. Empty or
+	// unset means mcpDefaultAllowedIPs (private and loopback ranges only); see
+	// mcp_config.go.
+	AllowedIPs []string `yaml:"allowed_ips"`
+
+	// DisabledTools names tools that are not offered at all.
+	DisabledTools []string `yaml:"disabled_tools"`
+
+	allowedNets []*net.IPNet // Parsed AllowedIPs (internal use)
 }
 
 // WhisperConfig contains Whisper speech-to-text settings
@@ -1333,6 +1351,12 @@ func LoadConfig(filename string) (*Config, error) {
 		if err := config.Prometheus.parseAllowedHosts(); err != nil {
 			return nil, fmt.Errorf("failed to parse prometheus.allowed_hosts: %w", err)
 		}
+	}
+
+	// Parse MCP allowed IPs/CIDRs. Done even when MCP is disabled so a typo
+	// fails at startup rather than when someone later turns MCP on.
+	if err := config.MCP.parseAllowedIPs(); err != nil {
+		return nil, fmt.Errorf("failed to parse mcp.allowed_ips: %w", err)
 	}
 
 	// Parse SSH proxy allowed IPs/CIDRs

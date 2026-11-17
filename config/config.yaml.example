@@ -692,6 +692,17 @@ server:
   # Requires session_activity_log_enabled to produce anything useful.
   public_session_stats_enabled: true
 
+  # Other receivers on v2's start map
+  # Every 15 minutes this receiver fetches the public directory's short list of
+  # online UberSDR receivers (from instance_reporting.hostname) and shows them as
+  # small dots on the map in the start overlay, nearest first. Visitors' browsers
+  # never contact the directory themselves: they ask this receiver, which answers
+  # from memory, so a receiver with no internet access just shows no dots. A failed
+  # fetch keeps the previous list (for up to 6 hours). Only fetched when
+  # instance_reporting.enabled is also true. Set to false to stop the fetch; either
+  # way /api/nearby-receivers is still served, with an empty list.
+  nearby_receivers_enabled: true
+
   # Active-listener GeoJSON feed for maps (e.g. Home Assistant)
   # When true, exposes a public, unauthenticated endpoint at
   #   /api/sessions.geojson
@@ -2314,38 +2325,79 @@ geoip:
 # Enables programmatic access to SDR data, space weather, and band conditions
 mcp:
   # Enable MCP endpoint (default: false)
-  # When enabled, exposes /mcp endpoint for AI assistant integration
-  # Provides tools for querying space weather, noise floor, decoder spots, etc.
+  # When enabled, exposes /api/mcp for AI assistant integration (Claude,
+  # ChatGPT and other clients that speak the Model Context Protocol)
   enabled: false
-  
+
+  # List of IP addresses or CIDR ranges allowed to use the MCP endpoint
+  # The endpoint has no authentication, and some tools describe the receiver's
+  # listeners (where they are, what they tune to), so by default it only
+  # answers clients on private networks and the local machine.
+  # Leave empty (or remove) to use the default:
+  #   10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16 (RFC 1918 private ranges),
+  #   127.0.0.0/8 and ::1 (loopback)
+  # A hosted AI assistant (e.g. a claude.ai or chatgpt.com connector) connects
+  # from the provider's servers on the public internet, so it is refused by
+  # the default. To allow it, list the provider's published address ranges,
+  # or allow everyone with "0.0.0.0/0" and "::/0".
+  # Supports both IPv4 and IPv6 addresses with CIDR notation
+  # Examples:
+  #   - "192.168.1.0/24"      # One local network only
+  #   - "203.0.113.7"         # A single public address
+  #   - "fc00::/7"            # IPv6 unique local addresses
+  #   - "0.0.0.0/0"           # Every IPv4 address (no restriction)
+  #   - "::/0"                # Every IPv6 address
+  allowed_ips:
+    - "10.0.0.0/8"
+    - "172.16.0.0/12"
+    - "192.168.0.0/16"
+    - "127.0.0.0/8"
+    - "::1"
+
+  # Tools to withhold from MCP clients, by name (default: none)
+  # e.g. to keep listener information private while sharing propagation data:
+  #   disabled_tools:
+  #     - get_active_sessions
+  #     - get_session_history
+  disabled_tools: []
+
   # MCP Endpoint:
   #   POST /api/mcp
-  #     - JSON-RPC style requests for tool execution
+  #     - Model Context Protocol over streamable HTTP (JSON-RPC 2.0)
   #     - Available tools:
-  #       * get_space_weather - Current propagation conditions
+  #       * get_space_weather - Current propagation conditions (SFI, A, K)
   #       * get_noise_floor - Band noise levels and FFT data
-  #       * get_decoder_spots - Recent digital mode activity
-  #       * get_decoder_analytics - Aggregated analytics by country/continent
-  #       * get_decoder_analytics_hourly - Hourly aggregated analytics
-  #       * get_active_sessions - Current users and frequencies
+  #       * get_noise_floor_trends - 24-hour noise floor trends
   #       * get_band_conditions - Combined propagation analysis
-  #       * list_tools - List all available tools
-  #
-  # Example usage with curl:
-  #   curl -X POST http://localhost:8080/mcp \
-  #     -H "Content-Type: application/json" \
-  #     -d '{"method":"get_space_weather","params":{}}'
+  #       * get_wideband_spectrum - Full-span FFT data
+  #       * get_snr - SNR and occupancy of a band or range, right now
+  #       * get_spectrogram - Recorded 24-hour waterfall as an image
+  #       * get_decoder_spots - Recent digital mode spots (FT8, FT4, WSPR...)
+  #       * get_decoder_analytics - Digital spots by country/continent
+  #       * get_decoder_analytics_hourly - Digital spots by hour
+  #       * get_cw_spots - Recent CW skimmer spots
+  #       * get_cw_analytics - CW skimmer activity by country/band/hour
+  #       * get_dx_cluster_spots - Recent DX cluster spots
+  #       * get_voice_activity - SSB signals detected on the bands now
+  #       * get_propagation_predictions - When each band is expected to open
+  #       * get_ssb_predictions - SSB reach estimated from WSPR spots
+  #       * get_sun_times - Sunrise/sunset/greyline at the receiver and a far end
+  #       * whats_on_frequency - Broadcasts, bookmarks, spots and listeners on a frequency
+  #       * get_active_sessions - Current listeners: frequency, mode, client protocol
+  #       * get_session_history - Listener numbers over time, by protocol and place
+  #       * get_station_rankings - Standing on PSK Reporter, WSPR Live and RBN
+  #       * get_frequency_reference - Frequency calibration and drift
+  #       * get_receiver_info - Receiver location, antenna and capabilities
   #
   # Security:
-  #   - No authentication required (read-only access)
-  #   - Rate limiting applies (same as other API endpoints)
+  #   - No authentication; access is limited by allowed_ips above
   #   - IP ban checking applies
+  #   - Expensive tools are rate limited per client IP
   #
   # Use cases:
   #   - AI-powered propagation analysis
-  #   - Automated band condition monitoring
+  #   - Listener reports, e.g. compared against web analytics
   #   - Integration with Claude, ChatGPT, or other AI assistants
-  #   - Programmatic SDR data access
 
 # ==============================================================================
 # Whisper Speech-to-Text Configuration

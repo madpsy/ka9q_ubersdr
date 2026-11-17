@@ -1890,6 +1890,51 @@ button.lsn-dot::after {
 }
 .startmap__tip::before { display: none; }
 
+/* Another receiver's popup on the start map: callsign first, then who and
+   where, then a way in. Two classes deep, as .ncdxf-pop is, because Leaflet's
+   own stylesheet loads later and wins every tie. */
+.leaflet-popup.startmap-pop .leaflet-popup-content-wrapper {
+    background: var(--surface-2);
+    color: var(--text);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-sm);
+    box-shadow: var(--shadow-sm);
+}
+.leaflet-popup.startmap-pop .leaflet-popup-content {
+    margin: 7px 10px;
+    font-size: calc(11px * var(--ui-scale));
+    line-height: 1.4;
+}
+.leaflet-popup.startmap-pop .leaflet-popup-tip {
+    background: var(--surface-2);
+    border: 1px solid var(--border-strong);
+    box-shadow: none;
+}
+.leaflet-popup.startmap-pop a.leaflet-popup-close-button { color: var(--text-faint); }
+.startmap-pop__call {
+    font-family: var(--mono);
+    font-weight: 600;
+    font-size: calc(12.5px * var(--ui-scale));
+    padding-right: 14px; /* clear of the close button */
+}
+.startmap-pop__name { color: var(--text); }
+.startmap-pop__loc { color: var(--text-dim); }
+.startmap-pop__facts { color: var(--text-faint); font-size: calc(10.5px * var(--ui-scale)); }
+.startmap-pop__body .startmap-pop__connect {
+    margin-top: 6px;
+    width: 100%;
+    padding: 4px 8px;
+    font: inherit;
+    font-weight: 600;
+    color: var(--accent-ink);
+    background: var(--accent);
+    border: 1px solid var(--accent);
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+}
+.startmap-pop__body .startmap-pop__connect:hover { filter: brightness(1.1); }
+.startmap-pop__body .startmap-pop__connect:focus-visible { outline: 2px solid var(--text); outline-offset: 1px; }
+
 /* The VibeSDR / app-link / password dialogs the overlay opens. */
 
 /* Its own card, for the reason .confirm and .spotmap give above: the Modal is a

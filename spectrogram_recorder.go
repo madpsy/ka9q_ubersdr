@@ -1612,8 +1612,16 @@ func (b *pngBufferPool) Put(e *png.EncoderBuffer) { b.p.Put(e) }
 // 24-hour thumbnail: it is regenerated every minute and never stored on disk.
 // startBin and endBin define the column slice to render (0, 0 = full width).
 func renderRowsAsThumbnail(rows [][]float32, palette string, dbMin, dbMax float32, binCount, startBin, endBin int) []byte {
+	return renderRowsScaled(rows, palette, dbMin, dbMax, binCount, startBin, endBin, spectrogramThumbW, spectrogramThumbH)
+}
+
+// renderRowsScaled renders rows straight to a dstW × dstH PNG by box-filtering
+// in dB space: each pixel averages the source cells that map onto it, ignoring
+// no-data cells. Rows and columns are repeated when the output is the larger,
+// so it serves for scaling either way.
+func renderRowsScaled(rows [][]float32, palette string, dbMin, dbMax float32, binCount, startBin, endBin, dstW, dstH int) []byte {
 	srcH := len(rows)
-	if srcH == 0 {
+	if srcH == 0 || dstW <= 0 || dstH <= 0 {
 		return nil
 	}
 	// Normalise bin bounds
@@ -1632,12 +1640,12 @@ func renderRowsAsThumbnail(rows [][]float32, palette string, dbMin, dbMax float3
 		return nil
 	}
 
-	img := image.NewNRGBA(image.Rect(0, 0, spectrogramThumbW, spectrogramThumbH))
+	img := image.NewNRGBA(image.Rect(0, 0, dstW, dstH))
 	black := color.NRGBA{0, 0, 0, 255}
-	scaleX := float64(srcW) / float64(spectrogramThumbW)
-	scaleY := float64(srcH) / float64(spectrogramThumbH)
+	scaleX := float64(srcW) / float64(dstW)
+	scaleY := float64(srcH) / float64(dstH)
 
-	for dy := 0; dy < spectrogramThumbH; dy++ {
+	for dy := 0; dy < dstH; dy++ {
 		iy0 := int(float64(dy) * scaleY)
 		iy1 := int(float64(dy+1) * scaleY)
 		if iy1 > srcH {
@@ -1646,7 +1654,7 @@ func renderRowsAsThumbnail(rows [][]float32, palette string, dbMin, dbMax float3
 		if iy1 <= iy0 {
 			iy1 = iy0 + 1
 		}
-		for dx := 0; dx < spectrogramThumbW; dx++ {
+		for dx := 0; dx < dstW; dx++ {
 			ix0 := startBin + int(float64(dx)*scaleX)
 			ix1 := startBin + int(float64(dx+1)*scaleX)
 			if ix1 > endBin {

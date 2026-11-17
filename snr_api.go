@@ -399,17 +399,34 @@ func handleSNR(w http.ResponseWriter, r *http.Request, nfm *NoiseFloorMonitor, i
 		return
 	}
 
-	var widebandEnd uint64
-	nfm.fftMu.RLock()
-	if nfm.wideBandFFTBuffer != nil {
-		widebandEnd = nfm.wideBandFFTBuffer.EndFreq
+	st, status, err := nfm.snrMeasure(name, loHz, hiHz, avgSec)
+	if err != nil {
+		snrError(w, status, err.Error())
+		return
 	}
-	nfm.fftMu.RUnlock()
+	snrWriteJSON(w, http.StatusOK, st)
+}
 
+// snrWidebandEnd is the top of the wideband buffer, 0 when there is none yet.
+func (nfm *NoiseFloorMonitor) snrWidebandEnd() (endHz uint64, binWidth float64) {
+	nfm.fftMu.RLock()
+	defer nfm.fftMu.RUnlock()
+	if nfm.wideBandFFTBuffer != nil {
+		return nfm.wideBandFFTBuffer.EndFreq, nfm.wideBandFFTBuffer.BinWidth
+	}
+	return 0, 0
+}
+
+// snrMeasure takes one /api/snr reading of [loHz, hiHz], averaged over avgSec.
+// name is the preset it came from, or "" for a custom range. On failure the
+// returned status is the HTTP status the error deserves: 400 for a range the
+// receiver cannot measure, 503 for data that is not there yet or has gone
+// stale. Shared by the HTTP handler and the MCP get_snr tool.
+func (nfm *NoiseFloorMonitor) snrMeasure(name string, loHz, hiHz uint64, avgSec int) (SNRStats, int, error) {
+	widebandEnd, _ := nfm.snrWidebandEnd()
 	source := snrResolveSource(loHz, hiHz, nfm.snrSourceBands(), widebandEnd)
 	if source == "" {
-		snrError(w, http.StatusBadRequest, "range is outside the receiver's coverage")
-		return
+		return SNRStats{}, http.StatusBadRequest, fmt.Errorf("range is outside the receiver's coverage")
 	}
 
 	ttl := time.Duration(nfm.config.Spectrum.BackgroundPollPeriodMs) * time.Millisecond
@@ -421,19 +438,16 @@ func handleSNR(w http.ResponseWriter, r *http.Request, nfm *NoiseFloorMonitor, i
 	if !ok {
 		buf := nfm.snrBufferSnapshot(source)
 		if buf == nil || len(buf.Samples) == 0 {
-			snrError(w, http.StatusServiceUnavailable, "no spectrum data yet")
-			return
+			return SNRStats{}, http.StatusServiceUnavailable, fmt.Errorf("no spectrum data yet")
 		}
 		start, end := snrBinRange(loHz, hiHz, buf.StartFreq, buf.EndFreq, len(buf.Samples[len(buf.Samples)-1].Data))
 		if end-start < snrMinBins {
-			snrError(w, http.StatusBadRequest, fmt.Sprintf("range is too narrow: it covers %d bins of %.0f Hz on %s, at least %d are needed",
-				end-start, buf.BinWidth, source, snrMinBins))
-			return
+			return SNRStats{}, http.StatusBadRequest, fmt.Errorf("range is too narrow: it covers %d bins of %.0f Hz on %s, at least %d are needed",
+				end-start, buf.BinWidth, source, snrMinBins)
 		}
 		computed, err := snrComputeStats(buf, start, end, avgSec)
 		if err != nil {
-			snrError(w, http.StatusServiceUnavailable, err.Error())
-			return
+			return SNRStats{}, http.StatusServiceUnavailable, err
 		}
 		st = *computed
 		st.Source = source
@@ -441,13 +455,46 @@ func handleSNR(w http.ResponseWriter, r *http.Request, nfm *NoiseFloorMonitor, i
 	}
 
 	if time.Since(st.Timestamp) > snrStaleAge {
-		snrError(w, http.StatusServiceUnavailable, "spectrum data is stale")
-		return
+		return SNRStats{}, http.StatusServiceUnavailable, fmt.Errorf("spectrum data is stale")
 	}
 	st.Range = name
 	st.LoKHz = float64(loHz) / 1000
 	st.HiKHz = float64(hiHz) / 1000
-	snrWriteJSON(w, http.StatusOK, st)
+	return st, http.StatusOK, nil
+}
+
+// snrRangeInfo is one entry of /api/snr/ranges.
+type snrRangeInfo struct {
+	Name       string  `json:"name"`
+	LoKHz      float64 `json:"lo_khz"`
+	HiKHz      float64 `json:"hi_khz"`
+	Source     string  `json:"source"`
+	BinWidthHz float64 `json:"bin_width_hz"`
+}
+
+// snrRanges lists every preset the receiver can measure, with the source and
+// bin width it would be measured from.
+func (nfm *NoiseFloorMonitor) snrRanges() []snrRangeInfo {
+	widebandEnd, widebandBinWidth := nfm.snrWidebandEnd()
+	bands := nfm.snrSourceBands()
+	out := make([]snrRangeInfo, 0)
+	for _, p := range nfm.snrPresets() {
+		source := snrResolveSource(p.LoHz, p.HiHz, bands, widebandEnd)
+		if source == "" {
+			continue
+		}
+		binWidth := widebandBinWidth
+		for _, b := range bands {
+			if b.Name == source {
+				binWidth = b.BinWidth
+			}
+		}
+		out = append(out, snrRangeInfo{
+			Name: p.Name, LoKHz: float64(p.LoHz) / 1000, HiKHz: float64(p.HiHz) / 1000,
+			Source: source, BinWidthHz: binWidth,
+		})
+	}
+	return out
 }
 
 // handleSNRRanges serves GET /api/snr/ranges: every preset with its span, and the
@@ -466,39 +513,5 @@ func handleSNRRanges(w http.ResponseWriter, r *http.Request, nfm *NoiseFloorMoni
 		return
 	}
 
-	var widebandEnd uint64
-	var widebandBinWidth float64
-	nfm.fftMu.RLock()
-	if nfm.wideBandFFTBuffer != nil {
-		widebandEnd = nfm.wideBandFFTBuffer.EndFreq
-		widebandBinWidth = nfm.wideBandFFTBuffer.BinWidth
-	}
-	nfm.fftMu.RUnlock()
-
-	bands := nfm.snrSourceBands()
-	type rangeInfo struct {
-		Name       string  `json:"name"`
-		LoKHz      float64 `json:"lo_khz"`
-		HiKHz      float64 `json:"hi_khz"`
-		Source     string  `json:"source"`
-		BinWidthHz float64 `json:"bin_width_hz"`
-	}
-	out := make([]rangeInfo, 0)
-	for _, p := range nfm.snrPresets() {
-		source := snrResolveSource(p.LoHz, p.HiHz, bands, widebandEnd)
-		if source == "" {
-			continue
-		}
-		binWidth := widebandBinWidth
-		for _, b := range bands {
-			if b.Name == source {
-				binWidth = b.BinWidth
-			}
-		}
-		out = append(out, rangeInfo{
-			Name: p.Name, LoKHz: float64(p.LoHz) / 1000, HiKHz: float64(p.HiHz) / 1000,
-			Source: source, BinWidthHz: binWidth,
-		})
-	}
-	snrWriteJSON(w, http.StatusOK, out)
+	snrWriteJSON(w, http.StatusOK, nfm.snrRanges())
 }

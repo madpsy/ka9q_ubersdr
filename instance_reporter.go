@@ -955,6 +955,14 @@ func (ir *InstanceReporter) IsRegistered() bool {
 		ir.lastPublicUUID != ""
 }
 
+// PublicUUID returns the public UUID the collector last assigned, or "" before
+// the first successful report.
+func (ir *InstanceReporter) PublicUUID() string {
+	ir.mu.RLock()
+	defer ir.mu.RUnlock()
+	return ir.lastPublicUUID
+}
+
 // GetReportStatus returns the current instance reporting status
 func (ir *InstanceReporter) GetReportStatus() map[string]interface{} {
 	ir.mu.RLock()

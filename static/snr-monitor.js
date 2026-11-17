@@ -246,7 +246,48 @@
         captures: [],        // saved data sets
         baselineId: null,
         compareChart: null,
+        tz: 'local',         // 'utc' | 'local' | 'receiver' (snr-tz)
+        receiverTz: null,    // IANA name from /api/description, e.g. "Europe/London"
+        lastReading: null,
     };
+
+    const TZ_PREF = 'snrMonitorTimezone';
+
+    // ── times ─────────────────────────────────────────────────────────────────
+    // Every time on the section is formatted here, always 24-hour, in the zone picked
+    // in snr-tz. The chart's date adapter only knows the browser's zone, so the axis
+    // and tooltip go through these too rather than through its displayFormats.
+
+    function tzName() {
+        if (state.tz === 'utc') return 'UTC';
+        if (state.tz === 'receiver' && state.receiverTz) return state.receiverTz;
+        return undefined; // browser's own zone
+    }
+
+    const fmtCache = new Map();
+    function formatTime(ms, { seconds = true, date = false } = {}) {
+        const zone = tzName();
+        const key = `${zone}|${seconds}|${date}`;
+        let f = fmtCache.get(key);
+        if (!f) {
+            const opts = { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' };
+            if (seconds) opts.second = '2-digit';
+            if (date) Object.assign(opts, { day: '2-digit', month: 'short', year: 'numeric' });
+            try {
+                f = new Intl.DateTimeFormat('en-GB', Object.assign({ timeZone: zone }, opts));
+            } catch (e) { // unknown IANA name: fall back to the browser's zone
+                f = new Intl.DateTimeFormat('en-GB', opts);
+            }
+            fmtCache.set(key, f);
+        }
+        return f.format(new Date(ms));
+    }
+
+    function tzLabel() {
+        if (state.tz === 'utc') return 'UTC';
+        if (state.tz === 'receiver' && state.receiverTz) return state.receiverTz;
+        return Intl.DateTimeFormat().resolvedOptions().timeZone || 'local';
+    }
 
     function fmt(v, digits = 1) {
         return (typeof v === 'number' && Number.isFinite(v)) ? v.toFixed(digits) : '--';
@@ -344,6 +385,7 @@
                     annotation: { annotations: {} },
                     tooltip: {
                         callbacks: {
+                            title: items => items.length ? formatTime(items[0].parsed.x) : '',
                             label: c => `${c.dataset.label}: ${fmt(c.parsed.y)} dB`,
                         },
                     },
@@ -351,8 +393,21 @@
                 scales: {
                     x: {
                         type: 'time',
-                        time: { displayFormats: { second: 'HH:mm:ss', minute: 'HH:mm' } },
-                        ticks: { color: '#fff', maxRotation: 0 },
+                        // With only a few seconds of data Chart.js picks 'millisecond' ticks,
+                        // whose labels pile on top of each other; minUnit stops that. Labels
+                        // come from formatTime so they follow the snr-tz zone.
+                        time: { minUnit: 'second' },
+                        title: { display: true, text: '', color: '#fff' },
+                        ticks: {
+                            color: '#fff', maxRotation: 0, autoSkip: true, autoSkipPadding: 20, maxTicksLimit: 10,
+                            callback: (value, i, ticks) => {
+                                const step = ticks.length > 1 ? ticks[1].value - ticks[0].value : 1000;
+                                return formatTime(value, {
+                                    seconds: step % 60000 !== 0,
+                                    date: step >= 24 * 3600 * 1000,
+                                });
+                            },
+                        },
                         grid: { color: 'rgba(255,255,255,0.1)' },
                     },
                     y: {
@@ -386,6 +441,18 @@
         ds[2].data = visible.map(r => ({ x: r._t, y: r.p5_db }));
         ds[3].data = visible.map(r => ({ x: r._t, y: r.snr_db }));
 
+        // Give the axis at least a minute of span so a fresh capture fills in from the left
+        // instead of stretching its first couple of points across the whole width.
+        const x = state.chart.options.scales.x;
+        if (visible.length) {
+            const first = visible[0]._t, last = visible[visible.length - 1]._t;
+            x.min = first;
+            x.max = Math.max(last, first + Math.min(60 * 1000, windowMs()));
+        } else {
+            delete x.min;
+            delete x.max;
+        }
+
         const ann = {};
         visible.forEach((r, i) => {
             if (!r.marker) return;
@@ -399,10 +466,12 @@
             };
         });
         state.chart.options.plugins.annotation.annotations = ann;
+        state.chart.options.scales.x.title.text = `Time (${tzLabel()})`;
         state.chart.update('none');
     }
 
     function showReading(st) {
+        state.lastReading = st;
         $('snr-v-snr').textContent = fmt(st.snr_db);
         $('snr-v-p5').textContent = fmt(st.p5_db);
         $('snr-v-p10').textContent = fmt(st.p10_db);
@@ -417,7 +486,7 @@
             `${what} · ${st.lo_khz}-${st.hi_khz} kHz · source ${st.source} · ` +
             `${st.bins} bins × ${fmt(st.bin_width_hz, st.bin_width_hz < 100 ? 2 : 0)} Hz · ` +
             `avg ${st.avg_sec}s (${st.samples} sweep${st.samples === 1 ? '' : 's'}) · ` +
-            `${new Date(st.timestamp).toLocaleTimeString()}`;
+            `${formatTime(Date.parse(st.timestamp))} ${tzLabel()}`;
         $('snr-count').textContent = `${state.rows.length} reading${state.rows.length === 1 ? '' : 's'} recorded`;
     }
 
@@ -758,7 +827,7 @@
             const nameCell = td(c.name);
             const sub = document.createElement('div');
             sub.className = 'snr-compare-sub';
-            sub.textContent = `${new Date(c.start).toLocaleString()} · ${c.readings} readings`;
+            sub.textContent = `${formatTime(Date.parse(c.start), { seconds: false, date: true })} ${tzLabel()} · ${c.readings} readings`;
             nameCell.appendChild(sub);
             tr.appendChild(nameCell);
 
@@ -875,9 +944,46 @@
         setCaptureStatus('All captures deleted', 'ok');
     }
 
+    function applyTimezone() {
+        state.tz = $('snr-tz').value;
+        try { localStorage.setItem(TZ_PREF, state.tz); } catch (e) { /* private mode */ }
+        redrawChart();
+        if (state.lastReading) showReading(state.lastReading);
+        renderComparison();
+    }
+
+    // The receiver's zone is the admin-configured IANA name (config admin.timezone,
+    // default "UTC"), published under receiver.timezone in /api/description.
+    async function loadReceiverTimezone() {
+        const opt = $('snr-tz').querySelector('option[value="receiver"]');
+        try {
+            const res = await fetch('/api/description');
+            const body = await res.json();
+            const tz = body && body.receiver && body.receiver.timezone;
+            if (tz) {
+                state.receiverTz = tz;
+                opt.textContent = `Receiver's time (${tz})`;
+                return;
+            }
+        } catch (e) { /* fall through */ }
+        opt.textContent = "Receiver's time (unknown)";
+        opt.disabled = true;
+        if ($('snr-tz').value === 'receiver') {
+            $('snr-tz').value = 'local';
+            state.tz = 'local';
+        }
+    }
+
     async function init() {
         if (!$('snrSection')) return;
+        try {
+            const saved = localStorage.getItem(TZ_PREF);
+            if (['utc', 'local', 'receiver'].includes(saved)) $('snr-tz').value = saved;
+        } catch (e) { /* private mode */ }
+        state.tz = $('snr-tz').value;
         makeChart();
+        $('snr-tz').addEventListener('change', applyTimezone);
+        loadReceiverTimezone().then(() => { redrawChart(); if (state.lastReading) showReading(state.lastReading); renderComparison(); });
         $('snr-range').addEventListener('change', () => {
             fillEdgesFromPreset();
             if ($('snr-range').value !== '__custom') apply();

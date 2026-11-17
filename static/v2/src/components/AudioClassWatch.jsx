@@ -7,7 +7,7 @@
 // would reload its model every time the row came back.
 //
 // It listens only while there is something to hear: audio playing, the page
-// in view, a mode that carries demodulated audio (SSB, AM, FM — not CW, IQ or
+// in view, a mode that carries demodulated audio (SSB, AM, FM, CW — not IQ or
 // the data a decoder works on). Off in the Display panel, it unloads.
 //
 // It draws nothing.

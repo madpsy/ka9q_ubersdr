@@ -38,9 +38,11 @@ const r = (label, extra = {}) => ({ label, confidence: 0.8, tags: [], seconds: 5
 
 // ── what the verdicts mean ───────────────────────────────────────────────────
 
-t('only SSB, AM and FM are classified', () => {
-    for (const m of ['usb', 'lsb', 'am', 'sam', 'fm', 'nfm', 'USB']) assert.ok(V.classifiableMode(m), m);
-    for (const m of ['cwu', 'cwl', 'iq', 'iq48', 'iq384', '', null, 'drm']) assert.ok(!V.classifiableMode(m), String(m));
+t('SSB, AM, FM and CW are classified; VOICE / MUSIC / NOISE only means something in SSB, AM and FM', () => {
+    for (const m of ['usb', 'lsb', 'am', 'sam', 'fm', 'nfm', 'USB', 'cwu', 'cwl']) assert.ok(V.classifiableMode(m), m);
+    for (const m of ['iq', 'iq48', 'iq384', '', null, 'drm']) assert.ok(!V.classifiableMode(m), String(m));
+    for (const m of ['usb', 'lsb', 'am', 'fm']) assert.ok(V.voiceMode(m), m);
+    for (const m of ['cwu', 'cwl', 'iq']) assert.ok(!V.voiceMode(m), m);
 });
 
 t('the badge is the majority of the last three, else the latest', () => {
@@ -88,11 +90,119 @@ t('a closed squelch keeps the last verdict, dimmed, and says so', () => {
 t('the Display panel hint says what it is doing, or why not', () => {
     assert.strictEqual(V.statusText({ status: 'off' }, 'usb'), '');
     assert.match(V.statusText({ status: 'idle' }, 'usb'), /Starts when audio is playing/);
-    assert.match(V.statusText({ status: 'loading' }, 'usb'), /10 MB/);
+    assert.match(V.statusText({ status: 'loading' }, 'usb'), /9 MB/);
     assert.match(V.statusText({ status: 'error', error: 'HTTP 404' }, 'usb'), /Not available: HTTP 404/);
-    assert.match(V.statusText({ status: 'ready', history: [] }, 'cwu'), /SSB, AM or FM/);
+    assert.match(V.statusText({ status: 'ready', history: [] }, 'iq'), /SSB, AM, FM or CW/);
     assert.match(V.statusText({ status: 'ready', history: [] }, 'usb'), /first verdict after 5 s/);
     assert.strictEqual(V.statusText({ status: 'ready', history: [r('voice')] }, 'usb'), '');
+});
+
+// ── naming the signal ────────────────────────────────────────────────────────
+
+// Three signals in three dimensions: A and B close together (both FSK), C far
+// off (PSK). Each reference is its own centroid.
+function tinyRef() {
+    const unit = (v) => { const n = Math.hypot(...v); return v.map((x) => x / n); };
+    const A = unit([1, 0, 0]), B = unit([0.995, 0.1, 0]), Cc = unit([0, 0, 1]);
+    const header = {
+        dims: 3, tau: 0.05,
+        rule: { t_name: 0.7, s_min: -0.191, t_family: 0.7 },
+        voice: { conf: 0.4, windows: 2, strong: 0.25 },
+        signals: [{ name: 'Alpha (A)', short: 'A', family: 'fsk' }, { name: 'Bravo', short: 'B', family: 'fsk' },
+            { name: 'Charlie', short: 'C', family: 'psk' }],
+        families: [{ id: 'fsk', text: 'FSK' }, { id: 'psk', text: 'PSK' }],
+        references: { total: 3 },
+    };
+    return {
+        header, D: 3, S: 3, N: 3, mean: new Float32Array(3),
+        refs: Float32Array.from([...A, ...B, ...Cc]), refSig: Uint16Array.from([0, 1, 2]),
+        cent: Float32Array.from([...A, ...B, ...Cc]), sigFam: Uint16Array.from([0, 0, 1]),
+    };
+}
+
+const S = A.signals;
+const quiet = (n) => Array.from({ length: n }, () => ({ label: 'noise', confidence: 0.9 }));
+const many = (v, n) => Array.from({ length: n }, () => Float32Array.from(v));
+
+t('a signal is named only when it is clearly the closest, and only after a few looks', () => {
+    const ref = tinyRef();
+    const far = S.scoreWindows(ref, many([0, 0, 1], S.MIN_WINDOWS), quiet(S.MIN_WINDOWS));
+    assert.strictEqual(far.say, 'name');
+    assert.strictEqual(far.short, 'C');
+    assert.ok(far.p > 0.99);
+    // One look is not enough to say anything.
+    assert.strictEqual(S.scoreWindows(ref, many([0, 0, 1], 1), quiet(1)).say, 'nothing');
+});
+
+t('between two signals of one kind: the kind, not a name', () => {
+    const ref = tinyRef();
+    const s = S.scoreWindows(ref, many([0.999, 0.05, 0], 6), quiet(6));
+    assert.strictEqual(s.say, 'family');
+    assert.strictEqual(s.familyText, 'FSK');
+    assert.ok(s.familyP > 0.99 && s.p < 0.7, JSON.stringify(s));
+});
+
+t('speech outweighs a name when there is plenty of it, and fills in when nothing is named', () => {
+    const ref = tinyRef();
+    const v = many([0, 0, 1], 8);
+    const speech = (k) => [...quiet(8 - k), ...Array.from({ length: k }, () => ({ label: 'voice', confidence: 0.8 }))];
+    assert.strictEqual(S.scoreWindows(ref, v, speech(1)).say, 'name');   // one window of speech: noise
+    assert.strictEqual(S.scoreWindows(ref, v, speech(2)).say, 'voice');  // a quarter of 8
+    // Weak speech (below the confidence floor) does not count.
+    const weak = [...quiet(6), { label: 'voice', confidence: 0.2 }, { label: 'voice', confidence: 0.3 }];
+    assert.strictEqual(S.scoreWindows(ref, v, weak).say, 'name');
+});
+
+t('the tracker forgets on clear and keeps only the last minute', () => {
+    const ref = tinyRef();
+    const tr = S.createSignalTracker(ref);
+    assert.strictEqual(tr.score(), null);
+    for (let i = 0; i < S.MAX_WINDOWS + 5; i++) tr.add([0, 0, 1], { label: 'noise', confidence: 0.9 });
+    assert.strictEqual(tr.count(), S.MAX_WINDOWS);
+    assert.strictEqual(tr.score().short, 'C');
+    tr.clear();
+    assert.strictEqual(tr.count(), 0);
+});
+
+const named = (sig) => r('noise', { signal: { say: 'name', name: 'Morse Code (CW)', short: 'CW', p: 0.92, family: 'ook',
+    familyText: 'OOK', familyP: 0.95, top: [{ name: 'Morse Code (CW)', p: 0.92 }, { name: 'ICV', p: 0.05 }], windows: 12, speech: 0, ...sig } });
+
+t('the badge: a name first, then a kind, then VOICE / MUSIC / NOISE', () => {
+    const b = V.badge({ status: 'ready', history: [named()] }, 'usb');
+    assert.strictEqual(b.text, 'CW');
+    assert.strictEqual(b.tone, 'accent');
+    assert.match(b.title, /Morse Code \(CW\) — 92% likely, over the last 33 s/);
+    assert.match(b.title, /Next closest: ICV 5%/);
+    assert.match(b.title, /sigidwiki/);
+    const f = V.badge({ status: 'ready', history: [named({ say: 'family', p: 0.4 })] }, 'usb');
+    assert.strictEqual(f.text, 'OOK');
+    assert.match(f.title, /not sure which signal/);
+    const n = V.badge({ status: 'ready', history: [named({ say: 'nothing' })] }, 'usb');
+    assert.strictEqual(n.text, 'NOISE');
+    assert.match(n.title, /No particular signal recognised \(closest: Morse Code \(CW\) 92%\)/);
+});
+
+t('in CW a name or a kind shows, but never VOICE / MUSIC / NOISE', () => {
+    assert.strictEqual(V.badge({ status: 'ready', history: [named()] }, 'cwu').text, 'CW');
+    assert.strictEqual(V.badge({ status: 'ready', history: [named({ say: 'nothing' })] }, 'cwu'), null);
+    assert.strictEqual(V.badge({ status: 'ready', history: [r('noise')] }, 'cwl'), null);
+});
+
+t('the committed signal references parse, and name what the live tests named', () => {
+    const b = fs.readFileSync(path.join(V2, 'audioclass', 'signals.bin'));
+    const ref = S.parseSignals(b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength));
+    assert.strictEqual(ref.D, 640);
+    assert.ok(ref.S > 400 && ref.N > 1500, `${ref.S} signals, ${ref.N} references`);
+    const short = Object.fromEntries(ref.header.signals.map((x) => [x.name, x.short]));
+    assert.deepStrictEqual([short.FT8, short.FT4, short['Morse Code (CW)'], short['Radio Teletype (RTTY)']], ['FT8', 'FT4', 'CW', 'RTTY']);
+    // Every reference, scored on its own, comes back as a probability over all signals.
+    const tr = S.createSignalTracker(ref);
+    const e = new Float32Array(640);
+    for (let i = 0; i < 640; i++) e[i] = ref.mean[i] + ref.refs[i];
+    for (let k = 0; k < S.MIN_WINDOWS; k++) tr.add(e, { label: 'noise', confidence: 0.9 });
+    const s = tr.score();
+    assert.strictEqual(s.name, ref.header.signals[ref.refSig[0]].name);
+    assert.throws(() => S.parseSignals(new ArrayBuffer(16)), /signals file/);
 });
 
 // ── the engine, with a fake worker, network, clock and player ────────────────
@@ -157,13 +267,15 @@ t('on but not listening (stopped, hidden, or a CW/IQ mode): still nothing fetche
     assert.strictEqual(x.c.getState().status, 'idle');
 });
 
-t('listening: loads the module and model from the receiver, then taps the audio', async () => {
+t('listening: loads the model from the receiver, then taps the audio', async () => {
     const x = rig();
     x.c.configure({ enabled: true, listening: true, player: x.player, mode: 'usb', freq: 14200000 });
     assert.strictEqual(x.c.getState().status, 'loading');
     await flush(); await flush();
-    assert.deepStrictEqual(x.fetched.sort(), [C.MODEL_URL, C.WASM_URL].sort());
-    // Both relative to the page: nothing comes from anywhere but the receiver.
+    // The weights and the signal references: the module is inside the
+    // worker's bundle.
+    assert.deepStrictEqual(x.fetched.sort(), [C.MODEL_URL, C.SIGNALS_URL].sort());
+    // Relative to the page: nothing comes from anywhere but the receiver.
     for (const u of x.fetched) assert.ok(!/^[a-z]+:\/\//i.test(u) && !u.startsWith('/'), u);
     assert.deepStrictEqual(x.types(), ['init']);
     assert.strictEqual(x.posted[0].transfer.length, 2, 'both buffers transferred, not copied');
@@ -364,54 +476,120 @@ t('on by default', () => {
     assert.strictEqual(A.DEFAULTS.audioClass, true);
 });
 
+// Keyed Morse at `rate`: random letters at 20 WPM on 600 Hz with 5 ms edges,
+// a little noise, `secs` long. Deterministic.
+function morse(rate, secs) {
+    const CODE = ['.-', '-...', '-.-.', '-..', '.', '..-.', '--.', '....', '..', '.---', '-.-', '.-..', '--',
+        '-.', '---', '.--.', '--.-', '.-.', '...', '-', '..-', '...-', '.--', '-..-', '-.--', '--..'];
+    let seed = 3;
+    const rnd = () => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; };
+    const n = Math.round(rate * secs);
+    const key = new Float32Array(n);
+    const dot = Math.round(rate * 1.2 / 20);
+    let i = 0;
+    while (i < n) {
+        for (const s of CODE[Math.floor(rnd() * 26)]) {
+            const on = s === '.' ? dot : 3 * dot;
+            key.fill(1, i, Math.min(n, i + on));
+            i += on + dot;
+        }
+        i += (rnd() < 0.2 ? 7 : 3) * dot - dot;
+    }
+    const edge = Math.round(rate * 0.005);
+    const x = new Float32Array(n);
+    let k = 0;
+    for (let j = 0; j < n; j++) {
+        k = key[j] ? Math.min(edge, k + 1) : Math.max(0, k - 1);
+        x[j] = 0.3 * (k / edge) * Math.sin(2 * Math.PI * 600 * j / rate) + 0.01 * (rnd() - 0.5);
+    }
+    return x;
+}
+
 // ── the committed module and model, for real ─────────────────────────────────
 
-t('the committed module loads the committed model and classifies', async () => {
-    const wasm = fs.readFileSync(path.join(V2, 'audioclass', 'audioclass.wasm'));
-    const model = fs.readFileSync(path.join(V2, 'audioclass', 'mn05_as_mAP_443.pt'));
-    const out = [];
-    // The module puts its functions on the global scope: node's here, the
-    // worker's in a browser.
-    const host = A.createWorkerHost(globalThis.Go, (m) => out.push(m), globalThis);
-    await host({ type: 'init', wasm: wasm.buffer.slice(wasm.byteOffset, wasm.byteOffset + wasm.byteLength), model: model.buffer.slice(model.byteOffset, model.byteOffset + model.byteLength) });
-    assert.deepStrictEqual(out.pop(), { type: 'ready' });
+// Through the same message handling the worker runs, both builds of the module
+// (static/v2/native/audioclass has its own tests of the numbers).
+for (const simd of [true, false]) {
+    const build = simd ? 'SIMD' : 'scalar';
 
-    const rate = 12000;
-    host({ type: 'reset', rate });
-    // Too little audio yet: no answer, not a guess.
-    host({ type: 'push', samples: new Float32Array(rate) });
-    host({ type: 'classify', seconds: 5, epoch: 1 });
-    assert.deepStrictEqual(out.pop(), { type: 'result', epoch: 1, result: null });
+    t(`the committed module (${build}) loads the committed model and classifies`, async () => {
+        const model = fs.readFileSync(path.join(V2, 'audioclass', 'mn05_as_mAP_443.pt'));
+        const sigs = fs.readFileSync(path.join(V2, 'audioclass', 'signals.bin'));
+        const out = [];
+        const host = A.createWorkerHost((m) => out.push(m), { simd });
+        await host({
+            type: 'init',
+            model: model.buffer.slice(model.byteOffset, model.byteOffset + model.byteLength),
+            signals: sigs.buffer.slice(sigs.byteOffset, sigs.byteOffset + sigs.byteLength),
+        });
+        const ready = out.pop();
+        assert.deepStrictEqual(ready, { type: 'ready', backend: simd ? 'wasm-simd' : 'wasm-scalar', signals: ready.signals });
+        assert.ok(ready.signals > 400, `${ready.signals} signals can be named`);
 
-    // Five seconds of digital silence: a closed squelch, not run through the model.
-    for (let i = 0; i < 5; i++) host({ type: 'push', samples: new Float32Array(rate) });
-    host({ type: 'classify', seconds: 5, epoch: 2 });
-    const quiet = out.pop().result;
-    assert.strictEqual(quiet.label, 'silent');
+        const rate = 12000;
+        host({ type: 'reset', rate });
+        // Too little audio yet: no answer, not a guess.
+        host({ type: 'push', samples: new Float32Array(rate) });
+        host({ type: 'classify', seconds: 5, epoch: 1 });
+        assert.deepStrictEqual(out.pop(), { type: 'result', epoch: 1, result: null });
 
-    // Five seconds of white noise: hiss, which is what an empty channel is.
-    let seed = 1;
-    const rnd = () => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff - 0.5; };
-    for (let i = 0; i < 6; i++) host({ type: 'push', samples: Float32Array.from({ length: rate }, () => 0.2 * rnd()) });
-    host({ type: 'classify', seconds: 5, epoch: 3 });
-    const hiss = out.pop().result;
-    assert.strictEqual(hiss.label, 'noise', JSON.stringify(hiss));
-    assert.ok(hiss.ms > 0 && hiss.seconds === 5, JSON.stringify(hiss));
-    console.log(`      white noise: ${hiss.label} ${hiss.confidence}, ${hiss.ms} ms for 5 s`);
-});
+        // Five seconds of digital silence: a closed squelch, not run through the model.
+        for (let i = 0; i < 5; i++) host({ type: 'push', samples: new Float32Array(rate) });
+        host({ type: 'classify', seconds: 5, epoch: 2 });
+        const quiet = out.pop().result;
+        assert.strictEqual(quiet.label, 'silent');
+        assert.strictEqual(quiet.ms, 0);
 
-t('a module given a bad model says so', async () => {
-    const wasm = fs.readFileSync(path.join(V2, 'audioclass', 'audioclass.wasm'));
-    const out = [];
-    const host = A.createWorkerHost(globalThis.Go, (m) => out.push(m), globalThis);
-    await host({ type: 'init', wasm: wasm.buffer.slice(wasm.byteOffset, wasm.byteOffset + wasm.byteLength), model: new ArrayBuffer(16) });
-    const m = out.pop();
-    assert.strictEqual(m.type, 'error');
-    assert.match(m.error, /pt|zip/);
-});
+        // Five seconds of white noise: hiss, which is what an empty channel is.
+        let seed = 1;
+        const rnd = () => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff - 0.5; };
+        for (let i = 0; i < 6; i++) host({ type: 'push', samples: Float32Array.from({ length: rate }, () => 0.2 * rnd()) });
+        host({ type: 'classify', seconds: 5, epoch: 3 });
+        const hiss = out.pop().result;
+        assert.strictEqual(hiss.label, 'noise', JSON.stringify(hiss));
+        assert.ok(hiss.ms > 0 && hiss.seconds === 5, JSON.stringify(hiss));
+        assert.ok(hiss.tags.length > 0 && hiss.tags.every((g) => typeof g.label === 'string' && g.score > 0), JSON.stringify(hiss));
+        console.log(`      white noise: ${hiss.label} ${hiss.confidence}, ${hiss.ms} ms for 5 s (${build})`);
+
+        // Morse, keyed at 20 WPM on a 600 Hz tone in a little noise, as a CW
+        // receiver plays it: named CW once a few looks have been averaged.
+        host({ type: 'reset', rate });
+        const cw = morse(rate, 40);
+        let named = null;
+        for (let off = 0, k = 0; off + rate / 10 <= cw.length; off += rate / 10, k++) {
+            host({ type: 'push', samples: cw.subarray(off, off + rate / 10) });
+            if (k >= 50 && k % 25 === 0) {
+                host({ type: 'classify', seconds: 5, epoch: 10 + k });
+                const res = out.pop().result;
+                if (res && res.signal) named = res.signal;
+            }
+        }
+        assert.ok(named, 'no signal verdict');
+        console.log(`      synthetic CW: ${named.say} ${named.short} ${Math.round(named.p * 100)}%, top ${named.top.map((x) => x.name).join(' / ')} (${build})`);
+        assert.strictEqual(named.say, 'name', JSON.stringify(named));
+        assert.strictEqual(named.short, 'CW');
+
+        // A packet bigger than the module's input buffer is taken whole.
+        host({ type: 'reset', rate: 48000 });
+        host({ type: 'push', samples: new Float32Array(48000 * 6).fill(0.01) });
+        host({ type: 'classify', seconds: 5, epoch: 4 });
+        assert.ok(out.pop().result, 'six seconds pushed at once is enough for a five-second verdict');
+    });
+
+    t(`a module (${build}) given a bad model says so`, async () => {
+        const out = [];
+        const host = A.createWorkerHost((m) => out.push(m), { simd });
+        await host({ type: 'init', model: new ArrayBuffer(16) });
+        const m = out.pop();
+        assert.strictEqual(m.type, 'error');
+        assert.match(m.error, /pt|zip/);
+        // And nothing else is answered until a model loads.
+        host({ type: 'classify', seconds: 5, epoch: 1 });
+        assert.strictEqual(out.length, 0);
+    });
+}
 
 chain.then(() => {
     console.log(`\n${pass} passed`);
-    // The Go runtime parks in select{} for the life of the process.
     process.exit(process.exitCode || 0);
 });

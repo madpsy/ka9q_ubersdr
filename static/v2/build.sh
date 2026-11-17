@@ -96,8 +96,9 @@ WHISPER=(
 )
 
 # The audio classifier's worker (src/lib/audioClass/), for the same reason. It
-# loads audioclass/audioclass.wasm and the model beside it, both committed —
-# see native/audioclass/build.sh.
+# carries the WebAssembly module (src/lib/audioClass/audioclass-wasm.generated.js,
+# from native/audioclass/build.sh) and fetches the model, which is
+# committed in audioclass/.
 AUDIOCLASS=(
     src/lib/audioClass/worker.entry.js
     --bundle

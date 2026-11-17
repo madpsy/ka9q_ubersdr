@@ -1,28 +1,33 @@
 // The audio classifier: is what the listener is hearing voice, music or noise?
 //
-// An AudioSet tagger (EfficientAT mn05, the Go port in
-// static/v2/native/audioclass) compiled to WebAssembly and run in a worker. It
-// hears the receiver's demodulated audio through the player's tap — what is
-// coming out of the speakers, before volume and mute — and every 2.5 s gives a
-// verdict on the last 5 s. The spectrum's tag row shows the result
+// An AudioSet tagger (EfficientAT mn05) compiled to WebAssembly and run in a
+// worker: the C in static/v2/native/audioclass, built with and without
+// WebAssembly SIMD and carried inside the worker's bundle. It hears the
+// receiver's demodulated audio through the player's tap — what is coming out
+// of the speakers, before volume and mute — and every 2.5 s gives a verdict on
+// the last 5 s. The spectrum's tag row shows the result
 // (components/AudioClassTag.jsx); components/AudioClassWatch.jsx drives this
 // from the radio's state.
 //
-// Costs, measured on a desktop: about 0.17 s of one core per 5 s window, so
-// about 7% of a core with windows overlapping by half. Nothing is fetched and
-// nothing runs until audio is playing in a mode that carries some (SSB, AM,
-// FM), and the tap, the timer and the worker's work stop whenever that stops
-// being true. The first time, the page fetches the module (3.6 MB) and the
-// weights (5.9 MB) from the receiver, where both are committed
-// (static/v2/audioclass/) — nothing comes from anywhere else. Both are then in
-// the browser's cache.
+// Costs, measured as CPU time under node on a desktop: about 35 ms of one core
+// per 5 s window with SIMD (about 65 ms without), so about 1.5% of a core with
+// windows overlapping by half. Nothing is fetched and nothing runs until audio
+// is playing in a mode that carries some (SSB, AM, FM), and the tap, the timer
+// and the worker's work stop whenever that stops being true. The first time,
+// the page fetches the worker (dist/audioclass-worker.js, 155 kB with both
+// builds of the module in it, 64 kB compressed), the weights (5.9 MB) and the
+// signal references (3 MB), both committed in static/v2/audioclass/, from the
+// receiver — nothing comes from anywhere else. All are then in the browser's
+// cache.
 
 import { HISTORY, HOP_MS, WINDOW_SEC } from './verdict.js';
 
 // Relative to the page (/v2/), as the browser Whisper's worker is.
 export const WORKER_URL = 'dist/audioclass-worker.js';
-export const WASM_URL = 'audioclass/audioclass.wasm';
 export const MODEL_URL = 'audioclass/mn05_as_mAP_443.pt';
+// The signal references (./signals.js). Optional: without them the badge says
+// VOICE / MUSIC / NOISE only.
+export const SIGNALS_URL = 'audioclass/signals.bin';
 
 // Audio is posted to the worker in pieces this long: the tap fires every
 // packet (20 ms), and a message per packet would be fifty a second for nothing.
@@ -77,9 +82,12 @@ export function createAudioClassifier(deps = {}) {
             if (!r.ok) throw new Error(`the receiver could not supply the ${what} (HTTP ${r.status})`);
             return r.arrayBuffer();
         });
-        Promise.all([get(WASM_URL, 'classifier'), get(MODEL_URL, 'model')]).then(([wasm, model]) => {
+        const signals = env.fetch(SIGNALS_URL)
+            .then((r) => (r.ok ? r.arrayBuffer() : null))
+            .catch(() => null);
+        Promise.all([get(MODEL_URL, 'model'), signals]).then(([model, sig]) => {
             if (worker !== w) return; // switched off while fetching
-            w.postMessage({ type: 'init', wasm, model }, [wasm, model]);
+            w.postMessage({ type: 'init', model, signals: sig }, sig ? [model, sig] : [model]);
         }).catch((e) => {
             if (worker === w) fail(String((e && e.message) || e));
         });

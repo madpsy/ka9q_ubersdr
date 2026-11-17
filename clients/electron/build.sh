@@ -444,7 +444,7 @@ if [[ "$SKIP_UI" -eq 0 ]]; then
         exit 1
     fi
 
-    # audioclass/ is the audio classifier's module and model (static/v2/
+    # audioclass/ is the audio classifier's model and signal references (static/v2/
     # audioclass/README.md): fetched by the page, so it has to be beside it.
     cp -r "$V2/dist" "$V2/fonts" "$V2/vendor" "$V2/audioclass" ui/v2/
 

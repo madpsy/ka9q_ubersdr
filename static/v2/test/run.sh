@@ -634,6 +634,7 @@ node whisperengines.test.js
 node whisperpanel.test.js
 node whisperwasm.test.js
 node audioclass.test.js
+node ../native/audioclass/test.js
 node waterfall.test.js
 node waterfalltimes.test.js
 node timeconstant.test.js

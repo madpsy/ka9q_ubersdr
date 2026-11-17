@@ -133,8 +133,12 @@ func TestPSKRoundTripsThroughDB(t *testing.T) {
 	if len(got) != 1 {
 		t.Fatalf("ReadPSK returned %d snapshots, want 1", len(got))
 	}
-	if !reflect.DeepEqual(got[0], *want) {
-		t.Errorf("round-trip mismatch:\n got %+v\nwant %+v", got[0], *want)
+	// The range read carries the leaderboards only; the software map is read
+	// back by LoadLatestPSK / ReadPSKAt (see readPSKFromDB).
+	wantRange := *want
+	wantRange.SoftwareInUse = nil
+	if !reflect.DeepEqual(got[0], wantRange) {
+		t.Errorf("round-trip mismatch:\n got %+v\nwant %+v", got[0], wantRange)
 	}
 
 	// Band ordering must survive: rank is derived from array position.

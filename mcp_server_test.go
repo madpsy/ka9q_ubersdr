@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -166,6 +167,7 @@ var allMCPTools = []string{
 	"get_space_weather",
 	"get_spectrogram",
 	"get_spectrogram_data",
+	"get_spot_activity",
 	"get_ssb_predictions",
 	"get_station_rankings",
 	"get_sun_times",
@@ -538,5 +540,23 @@ func TestMCPArgumentValidationIsWired(t *testing.T) {
 	}
 	if !strings.Contains(string(out), "Invalid arguments for get_cw_spots") || !strings.Contains(string(out), "finite") {
 		t.Errorf("tools/call with hours=NaN through the server: %s", out)
+	}
+}
+
+// A panic in a tool handler is an error for that call, not a crash.
+func TestMCPToolPanicIsRecovered(t *testing.T) {
+	m := newTestMCPServer(t, nil, nil, nil)
+	m.mcpServer.AddTool(mcp.NewTool("zz_panics", mcpReadOnlyTool), func(ctx context.Context, r mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		var nilMap map[string]*int
+		return mcp.NewToolResultText(fmt.Sprint(*nilMap["x"])), nil
+	})
+	ctx := context.WithValue(context.Background(), mcpClientIPKey{}, "127.0.0.1")
+	out, err := json.Marshal(m.mcpServer.HandleMessage(ctx, json.RawMessage(
+		`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"zz_panics","arguments":{}}}`)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(out), "panic recovered") {
+		t.Errorf("panicking tool: %s", out)
 	}
 }

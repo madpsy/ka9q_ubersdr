@@ -18,7 +18,7 @@ const statsMaxDays = 30
 // Tables (see db_manager.go initSchema for full column lists):
 //
 //	wspr_rank_windows / wspr_rank_rows                    — one WSPRRankResponse per hourly fetch
-//	psk_rank_snapshots / psk_rank_entries / psk_software  — one PSKRankData per hourly fetch
+//	psk_snapshots                                         — one PSKRankData per hourly fetch
 //	rbn_skew / rbn_stats                                  — one snapshot per UTC day
 //
 // The read/write SQL lives in stats_logger_db.go; this file holds the public
@@ -282,7 +282,8 @@ func (sl *StatsLogger) ReadWSPR(p StatsQueryParams) ([]WSPRRankResponse, error) 
 }
 
 // ReadPSK returns every PSKRankData snapshot in the given date range,
-// oldest first.
+// oldest first, with both leaderboards but no SoftwareInUse (no history
+// reader uses it; see readPSKFromDB). ReadPSKAt and LoadLatestPSK include it.
 func (sl *StatsLogger) ReadPSK(p StatsQueryParams) ([]PSKRankData, error) {
 	if sl == nil || sl.readDB == nil {
 		return nil, fmt.Errorf("stats database is not available")

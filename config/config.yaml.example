@@ -672,8 +672,7 @@ server:
   # Number of days to retain session history in the SQLite database (default: 30)
   # Sessions that ended more than this many days ago are pruned by the DB retention
   # loop, taking their band and mode rows with them. Sessions still running are
-  # never pruned.
-  # Set to 0 to keep data forever (no automatic pruning).
+  # never pruned. 0 or unset means the default, 30.
   session_activity_log_retention_days: 30
 
   # Public session statistics endpoint (default: true)
@@ -1086,6 +1085,49 @@ database:
   # Set to 0 to keep all notification history forever (unbounded growth).
   # Default: 30
   notification_log_retention_days: 30
+
+  # Days of per-minute noise floor measurements to keep (noise_floor table,
+  # about 17,000 rows a day). Set to 0 to keep forever. Default: 90
+  noise_floor_retention_days: 90
+
+  # Days of CW skimmer spots to keep (cw_spots table). Set to 0 to keep
+  # forever. Default: 90, the same as decoder spots.
+  cw_spots_retention_days: 90
+
+  # Days of space weather readings to keep (space_weather table, a few rows
+  # an hour). Set to 0 to keep forever. Default: 365
+  space_weather_retention_days: 365
+
+  # Days of chat messages and moderation actions to keep. Set to 0 to keep
+  # forever. Default: 365
+  chat_retention_days: 365
+
+  # Days of decoder and CW skimmer metrics snapshots to keep (decoder_metrics,
+  # cw_metrics: one row per band every 5 minutes), and of the daily summaries
+  # built from them. The metrics history views read at most 7 days at a time.
+  # Set to 0 to keep forever. Default: 90
+  metrics_retention_days: 90
+
+  # Days of weekly, monthly and yearly metrics summaries to keep
+  # (decoder_metrics_summary, cw_metrics_summary). These are a few hundred
+  # small rows even over years; the default keeps last year's, so the
+  # summary views can compare this year with last. Set to 0 to keep forever.
+  # Default: 730
+  metrics_summary_retention_days: 730
+
+# Database upkeep needs no configuration:
+#   - Hourly, rows past their retention period are deleted in bounded batches
+#     and the freed space is returned to the filesystem.
+#   - Nightly at 03:30 in admin.timezone, SQLite's query planner statistics
+#     are refreshed a table at a time and the WAL is checkpointed without
+#     waiting on readers.
+#   - Once per database, if it was created before space could be returned
+#     incrementally and a quarter or more of it is free, it is rebuilt
+#     (VACUUM) at startup, before the receiver comes up. That start takes a
+#     few minutes longer; the log says so. Needs free disk space of about
+#     twice the data's size, or it is skipped and logged.
+# Every table has a retention period above; user agents nobody uses any more,
+# and the bands and modes of pruned sessions, are removed with them.
 
 # DX Cluster settings
 dxcluster:
@@ -2376,6 +2418,7 @@ mcp:
   #         time at chosen frequencies, a spectrum at any minute, a time x
   #         frequency grid, and detected gaps, bursts and carriers
   #       * get_decoder_spots - Recent digital mode spots (FT8, FT4, WSPR...)
+  #       * get_spot_activity - Decoder or CW spot counts per band/mode over time, or per grid square
   #       * get_decoder_analytics - Digital spots by country/continent
   #       * get_decoder_analytics_hourly - Digital spots by hour
   #       * get_cw_spots - Recent CW skimmer spots

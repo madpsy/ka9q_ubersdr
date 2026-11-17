@@ -228,7 +228,6 @@ func writeMigratedSessions(db *sql.DB, sessions []*migratedSession, geoIPService
 	task.SetProgressStep(50, "writing session records")
 
 	parser := uaparser.NewFromSaved()
-	uaIDs := make(map[string]int64)
 	geoCache := make(map[string]*GeoIPResult)
 
 	for start := 0; start < len(sessions); start += migrationBatchSize {
@@ -236,7 +235,7 @@ func writeMigratedSessions(db *sql.DB, sessions []*migratedSession, geoIPService
 		if end > len(sessions) {
 			end = len(sessions)
 		}
-		if err := writeMigratedSessionBatch(db, sessions[start:end], geoIPService, parser, uaIDs, geoCache); err != nil {
+		if err := writeMigratedSessionBatch(db, sessions[start:end], geoIPService, parser, geoCache); err != nil {
 			return err
 		}
 		if len(sessions) > 0 {
@@ -249,7 +248,7 @@ func writeMigratedSessions(db *sql.DB, sessions []*migratedSession, geoIPService
 
 // writeMigratedSessionBatch writes one batch inside a single transaction.
 func writeMigratedSessionBatch(db *sql.DB, sessions []*migratedSession, geoIPService *GeoIPService,
-	parser *uaparser.Parser, uaIDs map[string]int64, geoCache map[string]*GeoIPResult) error {
+	parser *uaparser.Parser, geoCache map[string]*GeoIPResult) error {
 
 	tx, err := db.Begin()
 	if err != nil {
@@ -290,7 +289,7 @@ func writeMigratedSessionBatch(db *sql.DB, sessions []*migratedSession, geoIPSer
 	defer insertMode.Close()
 
 	for _, rec := range sessions {
-		uaID, err := userAgentIDTx(tx, parser, uaIDs, rec.userAgent)
+		uaID, err := userAgentIDTx(tx, parser, rec.userAgent)
 		if err != nil {
 			return err
 		}
@@ -386,24 +385,33 @@ func migratedSessionID(res sql.Result, lookup *sql.Stmt, userSessionID string) (
 	return id, nil
 }
 
-// userAgentIDTx interns a user agent string, parsing it once per distinct value.
-func userAgentIDTx(tx *sql.Tx, parser *uaparser.Parser, cache map[string]int64, ua string) (int64, error) {
+// userAgentIDTx interns a user agent string within tx and returns its row id.
+//
+// The id is looked up in the transaction every time rather than cached across
+// transactions: the retention loop deletes user agents no session references
+// any more, so an id remembered from an earlier transaction may name a row that
+// is gone, and a session written with it would fail its foreign key. Looking up
+// by the unique ua column is an index probe; parsing, the expensive part, still
+// happens only for a string the table does not hold.
+func userAgentIDTx(tx *sql.Tx, parser *uaparser.Parser, ua string) (int64, error) {
 	if ua == "" {
 		return 0, nil
 	}
-	if id, ok := cache[ua]; ok {
+	var id int64
+	switch err := tx.QueryRow(`SELECT id FROM user_agent WHERE ua = ?`, ua).Scan(&id); err {
+	case nil:
 		return id, nil
+	case sql.ErrNoRows:
+	default:
+		return 0, err
 	}
-
 	browser, os := parseUserAgent(parser, ua)
 	if _, err := tx.Exec(`INSERT OR IGNORE INTO user_agent (ua, browser, os) VALUES (?, ?, ?)`, ua, browser, os); err != nil {
 		return 0, err
 	}
-	var id int64
 	if err := tx.QueryRow(`SELECT id FROM user_agent WHERE ua = ?`, ua).Scan(&id); err != nil {
 		return 0, err
 	}
-	cache[ua] = id
 	return id, nil
 }
 

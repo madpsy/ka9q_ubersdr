@@ -180,12 +180,31 @@ func (sl *CWSkimmerSpotsLogger) GetCWHistoricalSpotsRange(band, name string, cal
 		}
 	}
 
+	// Deduplication without a direction filter is grouped by SQLite (one row
+	// per callsign, band and UTC day; with a single MAX() the other columns
+	// come from the newest spot), so a busy day is not read row by row into
+	// Go. The direction filter must see each raw spot first, so it keeps the
+	// Go path. Either way the newest-first limit can then be applied in SQL.
+	sqlDedup := deduplicate && direction == ""
 	query := `SELECT ts, dx_call, snr, frequency, band, wpm, comment,
 	                 country, cq_zone, itu_zone, continent,
-	                 latitude, longitude, distance_km, bearing_deg
+	                 latitude, longitude, distance_km, bearing_deg, 1
 	          FROM cw_spots
 	          WHERE ` + strings.Join(conditions, " AND ") + `
 	          ORDER BY ts DESC`
+	if sqlDedup {
+		query = `SELECT MAX(ts) AS last_ts, dx_call, snr, frequency, band, wpm, comment,
+		                country, cq_zone, itu_zone, continent,
+		                latitude, longitude, distance_km, bearing_deg, COUNT(*)
+		         FROM cw_spots
+		         WHERE ` + strings.Join(conditions, " AND ") + `
+		         GROUP BY dx_call, band, ts / 86400
+		         ORDER BY last_ts DESC`
+	}
+	if limit > 0 && direction == "" {
+		query += ` LIMIT ?`
+		args = append(args, limit)
+	}
 
 	rows, err := sl.readDB.Query(query, args...)
 	if err != nil {
@@ -215,10 +234,11 @@ func (sl *CWSkimmerSpotsLogger) GetCWHistoricalSpotsRange(band, name string, cal
 			lon       sql.NullFloat64
 			dist      sql.NullFloat64
 			bearing   sql.NullFloat64
+			seen      int
 		)
 		if err := rows.Scan(&ts, &dxCall, &snr, &frequency, &bandCol, &wpm, &comment,
 			&country, &cqZone, &ituZone, &cont,
-			&lat, &lon, &dist, &bearing); err != nil {
+			&lat, &lon, &dist, &bearing, &seen); err != nil {
 			return nil, fmt.Errorf("cw_spots scan failed: %w", err)
 		}
 
@@ -275,6 +295,11 @@ func (sl *CWSkimmerSpotsLogger) GetCWHistoricalSpotsRange(band, name string, cal
 			}
 		}
 
+		if sqlDedup {
+			spot.SeenCount = seen // grouped by SQLite already
+			allSpots = append(allSpots, spot)
+			continue
+		}
 		if deduplicate {
 			// Dedup key: callsign+band+date (UTC day). The same callsign on a
 			// different band or day stays distinct. Keep the later timestamp.
@@ -298,8 +323,8 @@ func (sl *CWSkimmerSpotsLogger) GetCWHistoricalSpotsRange(band, name string, cal
 		return nil, fmt.Errorf("cw_spots row iteration failed: %w", err)
 	}
 
-	// If deduplication was enabled, collect the deduplicated spots.
-	if deduplicate {
+	// If deduplication was done here, collect the deduplicated spots.
+	if deduplicate && !sqlDedup {
 		for key, spot := range seenSpots {
 			spot.SeenCount = seenCounts[key]
 			allSpots = append(allSpots, spot)

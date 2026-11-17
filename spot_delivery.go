@@ -19,7 +19,11 @@ package main
 
 import (
 	"log"
+	"os"
+	"path/filepath"
 	"strings"
+
+	"gopkg.in/yaml.v3"
 )
 
 // DigitalSpotsEnabled reports whether this receiver has digital spots: from
@@ -53,13 +57,22 @@ func resolveConfigPath(configDir, path, def string) string {
 // stores get decoder.yaml.example's settings (spots and metrics logged,
 // spots kept 90 days), since otherwise the feed's spots would go nowhere.
 func prepareDecoderStoreConfig(cfg *Config, configDir string, decoderYAMLLoaded bool) {
+	// A decoder.yaml without spots_log_max_age_days left it at 0, which the
+	// retention loop reads as "keep forever", so the spots table grew without
+	// bound on any install whose decoder.yaml predates the key. Only a 0 that
+	// is actually written in the file means forever. Before the return below:
+	// spots already stored should still age out with the decoder switched off.
+	if decoderYAMLLoaded && cfg.Decoder.SpotsLogMaxAgeDays == 0 &&
+		!yamlSetsKey(filepath.Join(configDir, "decoder.yaml"), "decoder", "spots_log_max_age_days") {
+		cfg.Decoder.SpotsLogMaxAgeDays = defaultSpotsLogMaxAgeDays
+	}
 	if !cfg.DigitalSpotsEnabled() {
 		return
 	}
 	d := &cfg.Decoder
 	if !d.Enabled && !decoderYAMLLoaded {
 		d.SpotsLogEnabled = true
-		d.SpotsLogMaxAgeDays = 90
+		d.SpotsLogMaxAgeDays = defaultSpotsLogMaxAgeDays
 		d.MetricsLogEnabled = true
 		d.MetricsLogIntervalSecs = 300
 	}
@@ -152,4 +165,32 @@ func startSkimmerFeed(cfg *Config, cw *CWSkimmerConfig, md *MultiDecoder, cwc *C
 	feed.OnCWSpot(cwc.IngestSpot)       // nil-safe
 	feed.Start()
 	return feed
+}
+
+// defaultSpotsLogMaxAgeDays is decoder.yaml's documented default for
+// spots_log_max_age_days.
+const defaultSpotsLogMaxAgeDays = 90
+
+// yamlSetsKey reports whether the YAML file at path sets keys (a path of
+// nested mapping keys, e.g. "decoder", "spots_log_max_age_days"), whatever
+// its value. A file that cannot be read or parsed counts as not setting it.
+func yamlSetsKey(path string, keys ...string) bool {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return false
+	}
+	var node interface{}
+	if err := yaml.Unmarshal(data, &node); err != nil {
+		return false
+	}
+	for _, k := range keys {
+		m, ok := node.(map[string]interface{})
+		if !ok {
+			return false
+		}
+		if node, ok = m[k]; !ok {
+			return false
+		}
+	}
+	return true
 }

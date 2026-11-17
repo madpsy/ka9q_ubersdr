@@ -1056,7 +1056,7 @@ func (nfm *NoiseFloorMonitor) GetHistoricalData(date string, band string) ([]*Ba
 	          WHERE ts >= ? AND ts < ?`
 	args := []interface{}{startTS, endTS}
 	if band != "" {
-		query += " AND band = ?"
+		query += " AND +band = ?" // unary + keeps SQLite on the ts index; see noiseFloorBandFilterNote
 		args = append(args, band)
 	}
 	query += " ORDER BY ts ASC"
@@ -1107,7 +1107,7 @@ func (nfm *NoiseFloorMonitor) GetRecentData(band string) ([]*BandMeasurement, er
 	          WHERE ts >= ? AND ts <= ?`
 	args := []interface{}{startTS, endTS}
 	if band != "" {
-		query += " AND band = ?"
+		query += " AND +band = ?" // unary + keeps SQLite on the ts index; see noiseFloorBandFilterNote
 		args = append(args, band)
 	}
 	query += " ORDER BY ts ASC"
@@ -1158,7 +1158,7 @@ func (nfm *NoiseFloorMonitor) GetTrendData(date string, band string) ([]*BandMea
 		          FROM noise_floor WHERE ts >= ? AND ts <= ?`
 		args := []interface{}{startTS, endTS}
 		if band != "" {
-			query += " AND band = ?"
+			query += " AND +band = ?" // unary + keeps SQLite on the ts index; see noiseFloorBandFilterNote
 			args = append(args, band)
 		}
 		query += " ORDER BY ts ASC"
@@ -1261,6 +1261,14 @@ func (nfm *NoiseFloorMonitor) GetTrendData(date string, band string) ([]*BandMea
 	return averaged, nil
 }
 
+// noiseFloorBandFilterNote: every query here bounds ts, and must use the ts
+// index to do it. With a plain "band = ?" or "band IN (...)" SQLite picks the
+// band index instead and reads every row ever recorded for those bands, so a
+// ten-band trend took 4.5 s against 0.2 s for all bands. Writing +band makes the
+// band test unindexable, so the planner bounds ts with its index and filters
+// the bands from the rows in the window.
+const noiseFloorBandFilterNote = ""
+
 // GetTrendDataAllBands returns 24 hours of data for all bands averaged in 10-minute chunks from the SQLite database.
 func (nfm *NoiseFloorMonitor) GetTrendDataAllBands() (map[string][]*BandMeasurement, error) {
 	now := time.Now().UTC()
@@ -1288,7 +1296,8 @@ func (nfm *NoiseFloorMonitor) QueryTrend(from, to time.Time, bands []string, ste
 	          FROM noise_floor WHERE ts >= ? AND ts <= ?`
 	args := []interface{}{from.Unix(), to.Unix()}
 	if len(bands) > 0 {
-		query += " AND band IN (?" + strings.Repeat(",?", len(bands)-1) + ")"
+		// See noiseFloorBandFilterNote.
+		query += " AND +band IN (?" + strings.Repeat(",?", len(bands)-1) + ")"
 		for _, b := range bands {
 			args = append(args, b)
 		}

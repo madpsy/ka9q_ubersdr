@@ -26,7 +26,6 @@ package main
 //	decoder_metrics← <decoderMetricsDir>/YYYY/MM/DD/<MODE>-<BAND>.jsonl
 //	cw_metrics     ← <cwMetricsDir>/YYYY/MM/DD/<BAND>.jsonl
 //	wspr_rank_*    ← <statsDir>/wspr/YYYY/MM/DD/rolling_24h.jsonl
-//	psk_rank_*     ← <statsDir>/psk/YYYY/MM/DD/report_result.jsonl
 //	rbn_skew/_stats← <statsDir>/rbn/YYYY/MM/DD/{skew,statistics}.jsonl
 
 import (
@@ -54,7 +53,7 @@ const importBatchSize = 100000
 // retention loop anyway and importing them wastes time and disk space.
 const importSpotsDays = 30
 
-// importStatsDays limits how far back the WSPR/PSK/RBN stats backfill reaches.
+// importStatsDays limits how far back the WSPR/RBN stats backfill reaches.
 //
 // Unlike the spots directories, the stats tree was never pruned on disk — the
 // old file-based StatsLogger had no cleanup loop — so it holds every snapshot
@@ -163,10 +162,9 @@ func dbImportOrder(imp *DBImporter) []tableImport {
 			root := filepath.Join(imp.StatsDir, "rbn")
 			return countImportFiles(root, statsCutoff(), matchBase("skew.jsonl", "statistics.jsonl"))
 		}},
-		{"psk_rank_snapshots", imp.StatsDir, imp.importPSKRank, 6, func() int {
-			root := filepath.Join(imp.StatsDir, "psk")
-			return countImportFiles(root, statsCutoff(), matchBase("report_result.jsonl"))
-		}},
+		// stats/psk is no longer imported: every instance has already been
+		// migrated, and PSK history now lives in psk_snapshots
+		// (stats_psk_store.go), which starts empty.
 		{"wspr_rank_windows", imp.StatsDir, imp.importWSPRRank, 10, func() int {
 			root := filepath.Join(imp.StatsDir, "wspr")
 			return countImportFiles(root, statsCutoff(), matchBase("rolling_24h.jsonl"))
@@ -347,7 +345,7 @@ func (imp *DBImporter) RunImportIfEmpty(ctx context.Context) {
 		// Track, per source directory, whether every import that reads from it
 		// succeeded. A directory is only deleted once ALL of its imports
 		// finished without error and the context was never cancelled — a
-		// directory shared by several importers (e.g. StatsDir feeds rbn/psk/
+		// directory shared by several importers (e.g. StatsDir feeds rbn/
 		// wspr) must not be removed until the last of them is done. This is why
 		// deletion is deferred to the very end rather than done per-table.
 		dirOK := make(map[string]bool)   // dir → all imports so far succeeded
@@ -1319,105 +1317,6 @@ func (imp *DBImporter) importWSPRRank(ctx context.Context) error {
 		return err
 	}
 	log.Printf("[DB import] wspr_rank_rows: inserted %d rows total", total)
-	return nil
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// psk_rank_snapshots / psk_rank_entries / psk_software
-//   ← <StatsDir>/psk/YYYY/MM/DD/report_result.jsonl
-//
-// Each line is a full JSON PSKRankData holding both result maps, so only
-// report_result.jsonl is read — country_result.jsonl is an identical copy
-// (see StatsLogger.WritePSK).
-// ─────────────────────────────────────────────────────────────────────────────
-
-func (imp *DBImporter) importPSKRank(ctx context.Context) error {
-	const snapStmt = `INSERT OR IGNORE INTO psk_rank_snapshots (ts, fetched_ms, error) VALUES (?,?,?)`
-	const entStmt = `INSERT OR IGNORE INTO psk_rank_entries (
-		ts, result_type, band, rank_pos, callsign, day_count, week_count
-	) VALUES (?,?,?,?,?,?,?)`
-	const swStmt = `INSERT OR IGNORE INTO psk_software (ts, callsign, name, version) VALUES (?,?,?,?)`
-
-	// Directory structure: <StatsDir>/psk/YYYY/MM/DD/report_result.jsonl
-	// Day directories older than the cutoff are skipped wholesale.
-	root := filepath.Join(imp.StatsDir, "psk")
-	cutoffDate := importCutoff(importStatsDays)
-
-	tx, err := imp.beginBatch(ctx)
-	if err != nil {
-		return err
-	}
-	count, total := 0, 0
-
-	err = filepath.WalkDir(root, func(path string, d os.DirEntry, werr error) error {
-		if werr != nil {
-			log.Printf("[DB import] walk error at %s: %v (skipping)", path, werr)
-			return nil
-		}
-		if ctx.Err() != nil {
-			return nil
-		}
-		if d.IsDir() {
-			if dayDirBefore(root, path, cutoffDate) {
-				return filepath.SkipDir // skip entire day subtree
-			}
-			return nil
-		}
-		if filepath.Base(path) != "report_result.jsonl" {
-			return nil
-		}
-		imp.progFile()
-
-		if ferr := readJSONLMax(path, statsMaxJSONLine, func(line []byte) error {
-			var data PSKRankData
-			if err := json.Unmarshal(line, &data); err != nil {
-				return nil
-			}
-			if data.FetchedAt.IsZero() {
-				return nil
-			}
-			ts := data.FetchedAt.UTC().Unix()
-
-			if _, err := tx.ExecContext(ctx, snapStmt, ts, data.FetchedMs, data.Error); err != nil {
-				return err
-			}
-			for resultType, byBand := range pskResultTypes(&data) {
-				for band, entries := range byBand {
-					for i, e := range entries {
-						if _, err := tx.ExecContext(ctx, entStmt,
-							ts, resultType, band, i, e.Callsign, e.Day, e.Week); err != nil {
-							return err
-						}
-						var txErr error
-						tx, txErr = imp.commitAndMaybeBegin(ctx, tx, &count, &total, "psk_rank_entries")
-						if txErr != nil {
-							return txErr
-						}
-					}
-				}
-			}
-			for callsign, list := range data.SoftwareInUse {
-				for _, sw := range list {
-					if _, err := tx.ExecContext(ctx, swStmt, ts, callsign, sw.Name, sw.Version); err != nil {
-						return err
-					}
-				}
-			}
-			return nil
-		}); ferr != nil {
-			log.Printf("[DB import] error processing %s: %v (skipping file)", path, ferr)
-		}
-		return nil
-	})
-
-	if err != nil {
-		_ = tx.Rollback()
-		return err
-	}
-	if err := tx.Commit(); err != nil {
-		return err
-	}
-	log.Printf("[DB import] psk_rank_entries: inserted %d rows total", total)
 	return nil
 }
 

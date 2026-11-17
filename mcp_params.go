@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"math"
 	"regexp"
@@ -608,5 +609,121 @@ func mcpSinceProp() mcp.ToolOption {
 	return mcp.WithString("since",
 		mcp.MaxLength(40),
 		mcp.Description("Only spots at or after this RFC 3339 time (within hours). For a live view, pass the previous reply's until_utc; the boundary second can come back twice, so de-duplicate on timestamp, callsign and frequency."),
+	)
+}
+
+// mcpSpotWindow resolves a spot tool's time window: the last 'hours' (def
+// when absent), narrowed by 'since' and by absolute 'from_utc' / 'to_utc'
+// (RFC 3339). The result never reaches back past maxHours or forward past now.
+func mcpSpotWindow(request mcp.CallToolRequest, def, maxHours int, now time.Time) (time.Time, time.Time, string) {
+	hours := int(request.GetFloat("hours", float64(def)))
+	if hours < 1 {
+		hours = def
+	}
+	if hours > maxHours {
+		hours = maxHours
+	}
+	from, to := now.Add(-time.Duration(hours)*time.Hour), now
+	if s := strings.TrimSpace(request.GetString("from_utc", "")); s != "" {
+		t, err := time.Parse(time.RFC3339, s)
+		if err != nil {
+			return from, to, "from_utc must be an RFC 3339 time such as 2026-11-17T17:40:00Z"
+		}
+		if t.Before(now.Add(-time.Duration(maxHours) * time.Hour)) {
+			return from, to, fmt.Sprintf("from_utc must be within the last %d hours", maxHours)
+		}
+		from = t.UTC() // an explicit start replaces hours
+	}
+	if s := strings.TrimSpace(request.GetString("to_utc", "")); s != "" {
+		t, err := time.Parse(time.RFC3339, s)
+		if err != nil {
+			return from, to, "to_utc must be an RFC 3339 time such as 2026-11-17T18:10:00Z"
+		}
+		if t.Before(to) {
+			to = t.UTC()
+		}
+	}
+	from, msg := mcpSinceParam(request, from, now)
+	if msg != "" {
+		return from, to, msg
+	}
+	if !to.After(from) {
+		return from, to, "the window is empty: to_utc must be after from_utc (and since)"
+	}
+	return from, to, ""
+}
+
+// mcpWindowProps are the window arguments mcpSpotWindow reads, besides hours
+// and since.
+func mcpWindowProps() []mcp.ToolOption {
+	return []mcp.ToolOption{
+		mcp.WithString("from_utc", mcp.MaxLength(40),
+			mcp.Description("Start of an absolute window, RFC 3339 (replaces hours; must be within the history the tool keeps)")),
+		mcp.WithString("to_utc", mcp.MaxLength(40),
+			mcp.Description("End of an absolute window, RFC 3339 (default: now)")),
+	}
+}
+
+// mcpShapeRecords returns records (a slice of structs) keeping only the named
+// JSON fields (all when fields is empty), either as objects or, with columns,
+// as {"fields": [...], "rows": [[...], ...]}: the field names once instead
+// of on every record, which for thousands of spots is most of the size.
+func mcpShapeRecords(records interface{}, fields []string, columns bool) (interface{}, error) {
+	data, err := json.Marshal(records)
+	if err != nil {
+		return nil, err
+	}
+	var objs []map[string]interface{}
+	if err := json.Unmarshal(data, &objs); err != nil {
+		return nil, err
+	}
+	if len(fields) == 0 && !columns {
+		return objs, nil
+	}
+	if len(fields) == 0 && len(objs) > 0 {
+		for k := range objs[0] {
+			fields = append(fields, k)
+		}
+		sort.Strings(fields)
+	}
+	if columns {
+		rows := make([][]interface{}, len(objs))
+		for i, o := range objs {
+			row := make([]interface{}, len(fields))
+			for j, f := range fields {
+				row[j] = o[f]
+			}
+			rows[i] = row
+		}
+		return map[string]interface{}{"fields": fields, "rows": rows}, nil
+	}
+	out := make([]map[string]interface{}, len(objs))
+	for i, o := range objs {
+		m := make(map[string]interface{}, len(fields))
+		for _, f := range fields {
+			if v, ok := o[f]; ok {
+				m[f] = v
+			}
+		}
+		out[i] = m
+	}
+	return out, nil
+}
+
+// mcpFieldsProp is a 'fields' argument restricted to the given names.
+func mcpFieldsProp(names []string, what string) mcp.ToolOption {
+	return mcp.WithArray("fields",
+		mcp.Description("Only these fields of each "+what+" (default: all): "+strings.Join(names, ", ")),
+		mcp.Items(map[string]interface{}{"type": "string", "enum": names}),
+		mcp.MaxItems(len(names)),
+	)
+}
+
+// mcpCollapseProp is the spot tools' choice between one row per station per
+// day and every individual decode.
+func mcpCollapseProp() mcp.ToolOption {
+	return mcp.WithString("collapse",
+		mcp.Enum("day", "none"),
+		mcp.Description("'day' (default): one row per station per band and UTC day, the newest decode, with seen_count. 'none': every decode, for when each one's time matters (e.g. who was heard in a 30-minute window); use with a short window and fields."),
 	)
 }

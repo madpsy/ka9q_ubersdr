@@ -25,9 +25,8 @@ type sessionHistoryWriter struct {
 	geo    *GeoIPService
 	parser *uaparser.Parser
 
-	mu    sync.Mutex
-	uaIDs map[string]int64 // interned user agents, so each is parsed once per process
-	ids   map[string]int64 // user_session_id -> session.id, for the open sessions
+	mu  sync.Mutex
+	ids map[string]int64 // user_session_id -> session.id, for the open sessions
 }
 
 func newSessionHistoryWriter(db *sql.DB, geo *GeoIPService) *sessionHistoryWriter {
@@ -35,7 +34,6 @@ func newSessionHistoryWriter(db *sql.DB, geo *GeoIPService) *sessionHistoryWrite
 		db:     db,
 		geo:    geo,
 		parser: uaparser.NewFromSaved(),
-		uaIDs:  make(map[string]int64),
 		ids:    make(map[string]int64),
 	}
 }
@@ -70,11 +68,6 @@ func (w *sessionHistoryWriter) recordActive(entry SessionActivityEntry, now int6
 		}
 	}
 
-	uaID, err := w.userAgentID(entry.UserAgent)
-	if err != nil {
-		log.Printf("[session history] interning user agent: %v", err)
-	}
-
 	country, countryCode := entry.Country, entry.CountryCode
 	var lat, lon interface{}
 	if w.geo != nil && w.geo.IsEnabled() && entry.ClientIP != "" {
@@ -98,10 +91,25 @@ func (w *sessionHistoryWriter) recordActive(entry SessionActivityEntry, now int6
 		}
 	}
 
+	// The user agent is interned in the same transaction as the session that
+	// uses it. The write side is a single connection, so the retention loop's
+	// sweep of unreferenced user agents cannot run in between and delete it.
+	tx, err := w.db.Begin()
+	if err != nil {
+		log.Printf("[session history] recording session %s: %v", entry.UserSessionID, err)
+		return
+	}
+	defer tx.Rollback()
+	uaID, err := userAgentIDTx(tx, w.parser, entry.UserAgent)
+	if err != nil {
+		log.Printf("[session history] interning user agent: %v", err)
+		uaID = 0
+	}
+
 	// Attributes are refreshed rather than replaced: a later snapshot may carry a
 	// blank where the first one had a value (e.g. GeoIP not yet resolved), and the
 	// type flags only ever accumulate.
-	if _, err := w.db.Exec(`
+	if _, err := tx.Exec(`
 		INSERT INTO session
 			(user_session_id, started_at, last_seen, client_ip, source_ip, auth_method,
 			 protocol, user_agent_id, country, country_code, latitude, longitude,
@@ -126,6 +134,10 @@ func (w *sessionHistoryWriter) recordActive(entry SessionActivityEntry, now int6
 		entry.AuthMethod, entry.Protocol, nullableID(uaID), country, countryCode,
 		lat, lon, hasAudio, hasSpectrum,
 	); err != nil {
+		log.Printf("[session history] recording session %s: %v", entry.UserSessionID, err)
+		return
+	}
+	if err := tx.Commit(); err != nil {
 		log.Printf("[session history] recording session %s: %v", entry.UserSessionID, err)
 		return
 	}
@@ -217,36 +229,6 @@ func (w *sessionHistoryWriter) sessionID(userSessionID string) (int64, error) {
 
 	w.mu.Lock()
 	w.ids[userSessionID] = id
-	w.mu.Unlock()
-	return id, nil
-}
-
-// userAgentID interns a user agent, so it is parsed once per distinct string
-// rather than once per session — a real receiver sees a few hundred distinct
-// agents across thousands of sessions.
-func (w *sessionHistoryWriter) userAgentID(ua string) (int64, error) {
-	if ua == "" {
-		return 0, nil
-	}
-
-	w.mu.Lock()
-	if id, ok := w.uaIDs[ua]; ok {
-		w.mu.Unlock()
-		return id, nil
-	}
-	w.mu.Unlock()
-
-	browser, os := parseUserAgent(w.parser, ua)
-	if _, err := w.db.Exec(`INSERT OR IGNORE INTO user_agent (ua, browser, os) VALUES (?, ?, ?)`, ua, browser, os); err != nil {
-		return 0, err
-	}
-	var id int64
-	if err := w.db.QueryRow(`SELECT id FROM user_agent WHERE ua = ?`, ua).Scan(&id); err != nil {
-		return 0, err
-	}
-
-	w.mu.Lock()
-	w.uaIDs[ua] = id
 	w.mu.Unlock()
 	return id, nil
 }

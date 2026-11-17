@@ -53,14 +53,6 @@ func TestStatsBackfillFromJSONL(t *testing.T) {
 		// A window whose fetch failed: zero rows, but an error the API must keep.
 		Yesterday: WSPRRankWindow{FetchedAt: ts, Error: "boom"},
 	})
-	writeLegacyJSONL(t, statsDir, "psk", "report_result.jsonl", ts, &PSKRankData{
-		FetchedAt:    ts,
-		FetchedMs:    99,
-		ReportResult: PSKMonitorsByBand{"20m": {{Callsign: "G0ABC", Day: 5, Week: 30}}},
-		SoftwareInUse: map[string][]PSKSoftwareEntry{
-			"G0ABC": {{Name: "UberSDR", Version: "0.1.58"}},
-		},
-	})
 	writeLegacyJSONL(t, statsDir, "rbn", "skew.jsonl", ts, rbnSkewRecord{
 		FetchedAt:     ts,
 		SourceComment: "# calc",
@@ -82,7 +74,6 @@ func TestStatsBackfillFromJSONL(t *testing.T) {
 	imp := &DBImporter{db: mgr.DB(), StatsDir: statsDir}
 	for name, fn := range map[string]func(context.Context) error{
 		"wspr": imp.importWSPRRank,
-		"psk":  imp.importPSKRank,
 		"rbn":  imp.importRBN,
 	} {
 		if err := fn(context.Background()); err != nil {
@@ -110,20 +101,6 @@ func TestStatsBackfillFromJSONL(t *testing.T) {
 	}
 	if gotWSPR[0].Yesterday.Error != "boom" {
 		t.Errorf("yesterday.error = %q, want boom — the failed window was dropped", gotWSPR[0].Yesterday.Error)
-	}
-
-	gotPSK, err := sl.ReadPSK(p)
-	if err != nil {
-		t.Fatalf("ReadPSK: %v", err)
-	}
-	if len(gotPSK) != 1 {
-		t.Fatalf("ReadPSK: got %d snapshots, want 1", len(gotPSK))
-	}
-	if e := gotPSK[0].ReportResult["20m"]; len(e) != 1 || e[0].Callsign != "G0ABC" || e[0].Week != 30 {
-		t.Errorf("report_result not backfilled correctly: %+v", e)
-	}
-	if sw := gotPSK[0].SoftwareInUse["G0ABC"]; len(sw) != 1 || sw[0].Version != "0.1.58" {
-		t.Errorf("software_in_use not backfilled correctly: %+v", sw)
 	}
 
 	gotRBN, err := sl.ReadRBN(p)
@@ -171,10 +148,6 @@ func TestStatsBackfillSkipsOldDays(t *testing.T) {
 				Data: []WSPRRankRow{{RxSign: "G0ABC", RxLoc: "IO91", Unique: 9}},
 			},
 		})
-		writeLegacyJSONL(t, statsDir, "psk", "report_result.jsonl", ts, &PSKRankData{
-			FetchedAt:    ts,
-			ReportResult: PSKMonitorsByBand{"20m": {{Callsign: "G0ABC", Day: 5, Week: 30}}},
-		})
 		writeLegacyJSONL(t, statsDir, "rbn", "skew.jsonl", ts, rbnSkewRecord{
 			FetchedAt: ts,
 			Entries:   []RBNSkewEntry{{Callsign: "G0ABC", Skew: -1.5}},
@@ -190,7 +163,6 @@ func TestStatsBackfillSkipsOldDays(t *testing.T) {
 	imp := &DBImporter{db: mgr.DB(), StatsDir: statsDir}
 	for name, fn := range map[string]func(context.Context) error{
 		"wspr": imp.importWSPRRank,
-		"psk":  imp.importPSKRank,
 		"rbn":  imp.importRBN,
 	} {
 		if err := fn(context.Background()); err != nil {
@@ -201,7 +173,6 @@ func TestStatsBackfillSkipsOldDays(t *testing.T) {
 	// Each table must hold exactly the recent snapshot and nothing older.
 	for _, c := range []struct{ table, tsCol string }{
 		{"wspr_rank_rows", "ts"},
-		{"psk_rank_entries", "ts"},
 		{"rbn_skew", "ts"},
 	} {
 		var n int
@@ -261,7 +232,7 @@ func TestStatsImportsOrderedBeforeSpots(t *testing.T) {
 		pos[t.table] = i
 	}
 
-	for _, stats := range []string{"rbn_skew", "psk_rank_snapshots", "wspr_rank_windows"} {
+	for _, stats := range []string{"rbn_skew", "wspr_rank_windows"} {
 		i, ok := pos[stats]
 		if !ok {
 			t.Fatalf("%s is not registered for import", stats)
@@ -270,6 +241,14 @@ func TestStatsImportsOrderedBeforeSpots(t *testing.T) {
 			if j := pos[spots]; i > j {
 				t.Errorf("%s (position %d) runs after %s (position %d)", stats, i, spots, j)
 			}
+		}
+	}
+	// PSK history is not imported, and the legacy table names must never come
+	// back as import targets: a queued import of an emptied psk table would
+	// trigger a migration restart and delete the shared stats directory.
+	for _, table := range append([]string{"psk_snapshots"}, legacyPSKTables...) {
+		if _, ok := pos[table]; ok {
+			t.Errorf("%s is registered for import; PSK history is deliberately not imported", table)
 		}
 	}
 }

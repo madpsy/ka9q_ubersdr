@@ -142,6 +142,10 @@ func NewMCPServer(sessions *SessionManager, swm *SpaceWeatherMonitor,
 		"UberSDR",
 		"1.0.0",
 		server.WithToolCapabilities(true),
+		// Outermost, so a panic anywhere in a tool call, argument
+		// validation included, becomes an error for that call instead of
+		// taking the receiver down.
+		server.WithRecovery(),
 		server.WithToolHandlerMiddleware(m.validateToolArgs),
 	)
 
@@ -239,13 +243,30 @@ func (m *MCPServer) registerTools() {
 
 	// Tool: get_decoder_spots
 	m.mcpServer.AddTool(
-		mcp.NewTool("get_decoder_spots",
+		mcp.NewTool("get_decoder_spots", append([]mcp.ToolOption{
 			mcpReadOnlyTool,
-			mcp.WithDescription("Get recent individual digital mode spots (FT8, FT4, WSPR, JS8, FT2) decoded from the radio. Use this for RAW spot data with callsigns, locators, SNR, frequencies, and messages. For questions about specific callsigns, locators, or individual decodes, use this tool. For aggregated statistics by country/band/time, use get_decoder_analytics or get_decoder_analytics_hourly instead."),
+			mcp.WithDescription("Get individual digital mode spots (FT8, FT4, WSPR, JS8, FT2) decoded by the radio: callsign, locator, SNR, frequency, band, message, country and distance, collapsed to one row per callsign, locator, band, mode and day (seen_count says how many raw decodes each row stands for). Newest first. " +
+				"A busy receiver decodes tens of thousands of stations a day, so filter (mode, band, callsign, min_snr, a time window) and ask for only the fields you need; format 'columns' sends the field names once instead of on every spot. limit caps the result (truncated says when it did). " +
+				"For counts per band or mode over time, or per grid square, use get_spot_activity; for statistics by country, get_decoder_analytics."),
 			mcp.WithString("mode",
 				mcp.Pattern(`^[A-Za-z0-9]+$`),
 				mcp.MaxLength(32),
 				mcp.Description("Mode filter: 'FT8', 'FT4', 'WSPR', 'JS8', 'FT2', or empty for all modes"),
+			),
+			mcp.WithString("band",
+				mcp.Pattern(`^[A-Za-z0-9.\-]+$`),
+				mcp.MaxLength(32),
+				mcp.Description("Band filter, e.g. '20m' (default: all)"),
+			),
+			mcp.WithString("callsign",
+				mcp.Pattern(`^[A-Za-z0-9/]+$`),
+				mcp.MaxLength(20),
+				mcp.Description("Only this callsign"),
+			),
+			mcp.WithNumber("min_snr",
+				mcp.Min(-60),
+				mcp.Max(60),
+				mcp.Description("Minimum SNR in dB (default: no filter)"),
 			),
 			mcp.WithNumber("hours",
 				mcp.Min(1),
@@ -254,12 +275,19 @@ func (m *MCPServer) registerTools() {
 				mcp.DefaultNumber(1.0),
 			),
 			mcpSinceProp(),
+			mcp.WithNumber("limit",
+				mcp.Min(1),
+				mcp.Max(mcpMaxDecoderSpots),
+				mcp.Description(fmt.Sprintf("Most spots to return, newest first (default %d, max %d)", mcpDefaultDecoderSpots, mcpMaxDecoderSpots)),
+			),
+			mcpFieldsProp(decoderSpotFields, "spot"),
+			mcpCollapseProp(),
 			mcp.WithString("format",
-				mcp.Enum("json", "text"),
-				mcp.Description("Output format: 'json' for structured data or 'text' for human-readable summary"),
+				mcp.Enum("json", "columns", "text"),
+				mcp.Description("'json' (one object per spot, default), 'columns' (field names once, then one array per spot) or 'text' (a human-readable summary)"),
 				mcp.DefaultString("json"),
 			),
-		),
+		}, mcpWindowProps()...)...),
 		m.handleGetDecoderSpots,
 	)
 
@@ -473,6 +501,7 @@ func (m *MCPServer) registerTools() {
 	m.registerStationTools()
 	m.registerSpectrogramTool()
 	m.registerSpectrogramDataTool()
+	m.registerSpotActivityTool()
 }
 
 // HandleMCP handles MCP protocol requests over HTTP
@@ -626,40 +655,76 @@ func (m *MCPServer) handleGetNoiseFloor(ctx context.Context, request mcp.CallToo
 	return mcp.NewToolResultText(string(jsonData)), nil
 }
 
+// Decoder spot limits: a full day of every mode on a busy receiver is tens of
+// thousands of rows, so the default answers "what was heard" without paging
+// through megabytes.
+const (
+	mcpDefaultDecoderSpots = 1000
+	mcpMaxDecoderSpots     = 10000
+)
+
+var decoderSpotFields = []string{"timestamp", "callsign", "locator", "snr", "frequency", "band", "message",
+	"country", "cq_zone", "itu_zone", "continent", "distance_km", "bearing_deg", "dbm", "mode", "name", "seen_count"}
+
 func (m *MCPServer) handleGetDecoderSpots(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	mode := request.GetString("mode", "")
-	hoursFloat := request.GetFloat("hours", 1.0)
 	format := request.GetString("format", "json")
-
-	hours := int(hoursFloat)
-	if hours == 0 {
-		hours = 1
-	}
-	if hours > 48 {
-		hours = 48
-	}
+	hours := int(request.GetFloat("hours", 1))
 
 	if m.multiDecoder == nil || m.multiDecoder.spotsLogger == nil {
 		return mcp.NewToolResultError("Decoder spots logging is not enabled"), nil
 	}
+	a := newMCPArgs(request)
+	fields := []string(nil)
+	if a.has("fields") {
+		fields = a.stringList("fields", len(decoderSpotFields), decoderSpotFields, nil)
+	}
+	if a.Err() != nil {
+		return mcp.NewToolResultError(a.Err().Error()), nil
+	}
+	limit := int(request.GetFloat("limit", mcpDefaultDecoderSpots))
+	minSNR := -999 // the spot logger's "no filter"
+	if a.has("min_snr") {
+		minSNR = int(math.Floor(request.GetFloat("min_snr", -999)))
+	}
 
-	// The window is absolute: the date range picks the day files and
-	// fromTS/toTS trim them, so 'hours' means the last N hours rather than
-	// every spot since midnight on the first day it touches.
-	toTime := time.Now().UTC()
-	fromTime, msg := mcpSinceParam(request, toTime.Add(-time.Duration(hours)*time.Hour), toTime)
+	// An absolute window: the date range picks the days and fromTS/toTS trim
+	// them, so 'hours' means the last N hours rather than every spot since
+	// midnight on the first day it touches.
+	fromTime, toTime, msg := mcpSpotWindow(request, 1, 48, time.Now().UTC())
 	if msg != "" {
 		return mcp.NewToolResultError(msg), nil
 	}
 
+	// One past the limit, so a cut-off result can say so.
 	spots, err := m.multiDecoder.spotsLogger.GetHistoricalSpotsRange(
-		mode, "", "", "", "", "", "", "",
+		mode, request.GetString("band", ""), "", strings.ToUpper(request.GetString("callsign", "")), "", "", "", "",
 		fromTime.Format("2006-01-02"), toTime.Format("2006-01-02"), "", "",
-		true, true, 0, -999,
-		fromTime.Unix(), toTime.Unix()+1, 0,
+		request.GetString("collapse", "day") != "none", true, 0, minSNR,
+		fromTime.Unix(), toTime.Unix()+1, limit+1,
 	)
 	if err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("Failed to get spots: %v", err)), nil
+	}
+	truncated := len(spots) > limit
+	if truncated {
+		spots = spots[:limit]
+	}
+
+	if format == "json" || format == "columns" {
+		shaped, err := mcpShapeRecords(spots, fields, format == "columns")
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("Failed to shape spots: %v", err)), nil
+		}
+		return mcpCompactJSON(map[string]interface{}{
+			"spots":     shaped,
+			"count":     len(spots),
+			"truncated": truncated,
+			"hours":     hours,
+			"mode":      mode,
+			"from_utc":  fromTime.Format(time.RFC3339),
+			"until_utc": toTime.Format(time.RFC3339),
+		})
 	}
 
 	result := map[string]interface{}{
@@ -936,25 +1001,15 @@ func (m *MCPServer) handleGetBandConditions(ctx context.Context, request mcp.Cal
 
 	// Add decoder activity summary if available
 	if m.multiDecoder != nil && m.multiDecoder.spotsLogger != nil {
+		// An exact hour. The time-of-day filter this used before applied
+		// "HH:MM between start and end" within each day, so an hour across
+		// midnight (23:30-00:30) matched nothing.
 		toTime := time.Now().UTC()
-		fromTime := toTime.Add(-1 * time.Hour)
-		fromDate := fromTime.Format("2006-01-02")
-		toDate := toTime.Format("2006-01-02")
-		startTime := fromTime.Format("15:04")
-		endTime := toTime.Format("15:04")
-
-		spots, err := m.multiDecoder.spotsLogger.GetHistoricalSpots(
-			"", "", "", "", "", "", "", "",
-			fromDate, toDate, startTime, endTime,
-			true, true, 0, -999,
-		)
+		modeCounts, total, err := m.multiDecoder.spotsLogger.CountSpotsByMode(
+			toTime.Add(-time.Hour).Unix(), toTime.Unix()+1)
 		if err == nil {
-			modeCounts := make(map[string]int)
-			for _, spot := range spots {
-				modeCounts[spot.Mode]++
-			}
 			result["decoder_activity"] = map[string]interface{}{
-				"last_hour_spots": len(spots),
+				"last_hour_spots": total,
 				"by_mode":         modeCounts,
 			}
 		}

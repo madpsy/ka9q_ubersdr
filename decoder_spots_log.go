@@ -308,12 +308,26 @@ func (sl *SpotsLogger) GetHistoricalSpotsRange(mode, band, name, callsign, locat
 		}
 	}
 
+	// Deduplicating without a direction filter is done by SQLite: grouping
+	// tens of thousands of raw decodes down to one row per station in Go cost
+	// half a second for a day of FT8 alone. The direction filter has to see
+	// each raw row before grouping, so it keeps the Go path below.
+	if deduplicate && direction == "" {
+		return sl.historicalSpotsDedupSQL(conditions, args, limit)
+	}
+
 	query := `SELECT ts, mode, decoder_name, callsign, locator, snr, frequency, band,
 	                 message, country, cq_zone, itu_zone, continent,
 	                 distance_km, bearing_deg, dbm
 	          FROM spots
 	          WHERE ` + strings.Join(conditions, " AND ") + `
 	          ORDER BY ts DESC`
+	// Without deduplication or a direction filter every row read is a row
+	// returned, newest first, so the limit can stop the read in SQL.
+	if limit > 0 && !deduplicate && direction == "" {
+		query += ` LIMIT ?`
+		args = append(args, limit)
+	}
 
 	rows, err := sl.readDB.Query(query, args...)
 	if err != nil {
@@ -434,6 +448,101 @@ func (sl *SpotsLogger) GetHistoricalSpotsRange(mode, band, name, callsign, locat
 	}
 
 	return allSpots, nil
+}
+
+// historicalSpotsDedupSQL is GetHistoricalSpotsRange's deduplication done in
+// SQL, with the same result as the Go path: one row per callsign, locator,
+// band, mode and UTC day, carrying the newest decode's columns and the number
+// of raw decodes as SeenCount, newest first. With a single MAX() aggregate,
+// SQLite takes the other selected columns from the row holding that maximum,
+// which is what keeps the newest decode's details. The ORDER BY matches the
+// final order, so a limit can be applied in SQL too.
+func (sl *SpotsLogger) historicalSpotsDedupSQL(conditions []string, args []interface{}, limit int) ([]SpotRecord, error) {
+	query := `SELECT MAX(ts) AS last_ts, mode, decoder_name, callsign, locator, snr, frequency, band,
+	                 message, country, cq_zone, itu_zone, continent,
+	                 distance_km, bearing_deg, dbm, COUNT(*)
+	          FROM spots
+	          WHERE ` + strings.Join(conditions, " AND ") + `
+	          GROUP BY callsign, locator, band, mode, ts / 86400
+	          ORDER BY last_ts DESC`
+	if limit > 0 {
+		query += ` LIMIT ?`
+		args = append(args, limit)
+	}
+	rows, err := sl.readDB.Query(query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("spots query failed: %w", err)
+	}
+	defer rows.Close()
+
+	spots := make([]SpotRecord, 0)
+	for rows.Next() {
+		var (
+			ts          int64
+			decoderName sql.NullString
+			dist        sql.NullFloat64
+			bearing     sql.NullFloat64
+			dbm         sql.NullInt64
+			spot        SpotRecord
+		)
+		if err := rows.Scan(&ts, &spot.Mode, &decoderName, &spot.Callsign, &spot.Locator, &spot.SNR,
+			&spot.Frequency, &spot.Band, &spot.Message, &spot.Country, &spot.CQZone, &spot.ITUZone,
+			&spot.Continent, &dist, &bearing, &dbm, &spot.SeenCount); err != nil {
+			return nil, fmt.Errorf("spots scan failed: %w", err)
+		}
+		spot.Timestamp = time.Unix(ts, 0).UTC().Format(time.RFC3339)
+		spot.Name = decoderName.String
+		if dist.Valid {
+			v := dist.Float64
+			spot.DistanceKm = &v
+		}
+		if bearing.Valid {
+			v := bearing.Float64
+			spot.BearingDeg = &v
+		}
+		if dbm.Valid {
+			v := int(dbm.Int64)
+			spot.DBm = &v
+		}
+		spots = append(spots, spot)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("spots row iteration failed: %w", err)
+	}
+	return spots, nil
+}
+
+// CountSpotsByMode counts spots in [fromTS, toTS), deduplicated as
+// GetHistoricalSpotsRange counts them (one per callsign, locator, band, mode
+// and UTC day, locators only), per mode. It is a grouped count in SQL rather
+// than loading every spot to count them in Go, which for an hour of busy FT8
+// took 0.4 s.
+func (sl *SpotsLogger) CountSpotsByMode(fromTS, toTS int64) (map[string]int, int, error) {
+	if sl.readDB == nil {
+		return nil, 0, fmt.Errorf("spots database is not available")
+	}
+	rows, err := sl.readDB.Query(`
+		SELECT mode, COUNT(*) FROM (
+			SELECT mode FROM spots
+			WHERE ts >= ? AND ts < ? AND locator != ''
+			GROUP BY callsign, locator, band, mode, ts / 86400
+		) GROUP BY mode`, fromTS, toTS)
+	if err != nil {
+		return nil, 0, fmt.Errorf("spots count failed: %w", err)
+	}
+	defer rows.Close()
+	counts := map[string]int{}
+	total := 0
+	for rows.Next() {
+		var mode string
+		var n int
+		if err := rows.Scan(&mode, &n); err != nil {
+			return nil, 0, err
+		}
+		counts[mode] = n
+		total += n
+	}
+	return counts, total, rows.Err()
 }
 
 // GetAvailableDates returns a list of dates for which spot data is available

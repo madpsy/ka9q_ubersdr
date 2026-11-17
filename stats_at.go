@@ -17,7 +17,7 @@ import (
 // summary, so the state of any leaderboard at a past instant can be replayed
 // exactly by loading the snapshot nearest that instant:
 //
-//	psk-rank   — psk_rank_snapshots/_entries/psk_software, one per hourly scrape
+//	psk-rank   — psk_snapshots, one row per hourly scrape
 //	wspr-rank  — wspr_rank_windows/_rows, one per hourly fetch (three windows)
 //	rbn        — rbn_skew/rbn_stats, one per UTC day
 //

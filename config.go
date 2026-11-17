@@ -418,7 +418,7 @@ type ServerConfig struct {
 	SessionActivityLogEnabled       bool              `yaml:"session_activity_log_enabled"`        // Enable session activity logging to disk
 	SessionActivityLogDir           string            `yaml:"session_activity_log_dir"`            // Directory for session activity logs (default: data/session_activity)
 	SessionActivityLogIntervalSec   int               `yaml:"session_activity_log_interval_sec"`   // Interval for periodic snapshots in seconds (default: 300)
-	SessionActivityLogRetentionDays int               `yaml:"session_activity_log_retention_days"` // Number of days to retain session activity logs (default: 30, 0 = keep forever)
+	SessionActivityLogRetentionDays int               `yaml:"session_activity_log_retention_days"` // Number of days to retain session history (default: 30; 0 is replaced by the default at load)
 	SessionsGeoJSONEnabled          bool              `yaml:"sessions_geojson_enabled"`            // Expose a public /api/sessions.geojson feed of active listeners (approx GeoIP location) for e.g. Home Assistant maps (default: false)
 	PublicSessionStatsEnabled       *bool             `yaml:"public_session_stats_enabled"`        // Serve the public /api/session-stats endpoint (*bool so nil = key absent = enabled; default: true)
 	NearbyReceiversEnabled          *bool             `yaml:"nearby_receivers_enabled"`            // Fetch the public receiver directory every 15 min and show other receivers on v2's start map; only when instance_reporting.enabled is also set (*bool so nil = key absent = enabled; default: true)
@@ -603,6 +603,100 @@ type DatabaseConfig struct {
 	// field being absent, which selects the default.
 	// Default: 30. Set to 0 to keep forever.
 	NotificationLogRetentionDays *int `yaml:"notification_log_retention_days"`
+
+	// NoiseFloorRetentionDays is how many days of per-minute noise floor
+	// measurements to keep (noise_floor table, about 17,000 rows a day).
+	// Default: 90. Set to 0 to keep forever.
+	NoiseFloorRetentionDays *int `yaml:"noise_floor_retention_days"`
+
+	// CWSpotsRetentionDays is how many days of CW skimmer spots to keep
+	// (cw_spots table). Default: 90, matching decoder spots. 0 = keep forever.
+	CWSpotsRetentionDays *int `yaml:"cw_spots_retention_days"`
+
+	// SpaceWeatherRetentionDays is how many days of space weather readings to
+	// keep (space_weather table, a few rows an hour). Default: 365.
+	// 0 = keep forever.
+	SpaceWeatherRetentionDays *int `yaml:"space_weather_retention_days"`
+
+	// ChatRetentionDays is how many days of chat messages and moderation
+	// actions to keep. Default: 365. 0 = keep forever.
+	ChatRetentionDays *int `yaml:"chat_retention_days"`
+
+	// MetricsRetentionDays is how many days of decoder and CW skimmer metrics
+	// snapshots to keep (decoder_metrics, cw_metrics: one row per band every
+	// 5 minutes), and of the daily summaries built from them.
+	// Default: 90. 0 = keep forever.
+	MetricsRetentionDays *int `yaml:"metrics_retention_days"`
+
+	// MetricsSummaryRetentionDays is how many days of weekly, monthly and
+	// yearly metrics summaries to keep (decoder_metrics_summary,
+	// cw_metrics_summary; a few hundred rows over years). Default: 730, so
+	// this year can still be compared with last. 0 = keep forever.
+	MetricsSummaryRetentionDays *int `yaml:"metrics_summary_retention_days"`
+}
+
+// retentionConfigFrom is the retention loop's settings for a loaded config:
+// each table's configured period, or its default. Every table has a default
+// above zero except where noted, so nothing grows forever unless an operator
+// sets 0 on purpose; a test holds it to that.
+func retentionConfigFrom(config *Config) RetentionConfig {
+	db := config.Database
+	return RetentionConfig{
+		// Defaulted to 30 at config load; 0 there is replaced, not kept.
+		SessionsDays: config.Server.SessionActivityLogRetentionDays,
+		// decoder.yaml's spots_log_max_age_days; 90 when it does not say
+		// (prepareDecoderStoreConfig).
+		SpotsDays: config.Decoder.SpotsLogMaxAgeDays,
+		// Stats tables carry ~150k rows/day and the /api/stats/* endpoints
+		// refuse ranges longer than statsMaxDays, so rows past the retention
+		// window are unreachable anyway.
+		StatsDays:                 db.GetStatsRetentionDays(),
+		NotificationLogDays:       db.GetNotificationLogRetentionDays(),
+		NoiseFloorDays:            db.GetNoiseFloorRetentionDays(),
+		CWSpotsDays:               db.GetCWSpotsRetentionDays(),
+		SpaceWeatherDays:          db.GetSpaceWeatherRetentionDays(),
+		ChatDays:                  db.GetChatRetentionDays(),
+		DecoderMetricsDays:        db.GetMetricsRetentionDays(),
+		CWMetricsDays:             db.GetMetricsRetentionDays(),
+		DecoderMetricsSummaryDays: db.GetMetricsSummaryRetentionDays(),
+		CWMetricsSummaryDays:      db.GetMetricsSummaryRetentionDays(),
+	}
+}
+
+// retentionOr returns *v, or def when the option is absent.
+func retentionOr(v *int, def int) int {
+	if v == nil {
+		return def
+	}
+	return *v
+}
+
+// GetNoiseFloorRetentionDays: default 90, 0 = keep forever.
+func (dc DatabaseConfig) GetNoiseFloorRetentionDays() int {
+	return retentionOr(dc.NoiseFloorRetentionDays, 90)
+}
+
+// GetCWSpotsRetentionDays: default 90, 0 = keep forever.
+func (dc DatabaseConfig) GetCWSpotsRetentionDays() int {
+	return retentionOr(dc.CWSpotsRetentionDays, 90)
+}
+
+// GetSpaceWeatherRetentionDays: default 365, 0 = keep forever.
+func (dc DatabaseConfig) GetSpaceWeatherRetentionDays() int {
+	return retentionOr(dc.SpaceWeatherRetentionDays, 365)
+}
+
+// GetChatRetentionDays: default 365, 0 = keep forever.
+func (dc DatabaseConfig) GetChatRetentionDays() int { return retentionOr(dc.ChatRetentionDays, 365) }
+
+// GetMetricsRetentionDays: default 90, 0 = keep forever.
+func (dc DatabaseConfig) GetMetricsRetentionDays() int {
+	return retentionOr(dc.MetricsRetentionDays, 90)
+}
+
+// GetMetricsSummaryRetentionDays: default 730, 0 = keep forever.
+func (dc DatabaseConfig) GetMetricsSummaryRetentionDays() int {
+	return retentionOr(dc.MetricsSummaryRetentionDays, 730)
 }
 
 // GetStatsRetentionDays returns the configured stats retention in days,

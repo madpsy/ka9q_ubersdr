@@ -15,12 +15,12 @@ import (
 
 const (
 	mcpDefaultSpotLimit = 100
-	mcpMaxSpotLimit     = 500
+	mcpMaxSpotLimit     = 5000
 )
 
 func (m *MCPServer) registerSpotTools() {
 	m.mcpServer.AddTool(
-		mcp.NewTool("get_cw_spots",
+		mcp.NewTool("get_cw_spots", append([]mcp.ToolOption{
 			mcpReadOnlyTool,
 			mcp.WithDescription("Get recent CW (Morse) signals decoded by this receiver's CW skimmer: callsign, frequency (Hz), band, SNR, speed in WPM, country, continent and distance. Spots are collapsed to one row per callsign, band and day by default (seen_count says how many raw spots each row stands for). Newest first. For aggregated CW activity by country, continent or hour, use get_cw_analytics."),
 			mcp.WithNumber("hours",
@@ -55,11 +55,17 @@ func (m *MCPServer) registerSpotTools() {
 			mcpSinceProp(),
 			mcp.WithNumber("limit",
 				mcp.Min(1),
-				mcp.Max(500),
-				mcp.Description("Most spots to return (default: 100, max: 500)"),
+				mcp.Max(mcpMaxSpotLimit),
+				mcp.Description(fmt.Sprintf("Most spots to return (default: %d, max: %d)", mcpDefaultSpotLimit, mcpMaxSpotLimit)),
 				mcp.DefaultNumber(mcpDefaultSpotLimit),
 			),
-		),
+			mcpFieldsProp(cwSpotFields, "spot"),
+			mcpCollapseProp(),
+			mcp.WithString("format",
+				mcp.Enum("json", "columns"),
+				mcp.Description("'json' (one object per spot, default) or 'columns' (field names once, then one array per spot)"),
+			),
+		}, mcpWindowProps()...)...),
 		m.handleGetCWSpots,
 	)
 
@@ -169,6 +175,9 @@ func (m *MCPServer) cwSpotsAvailable() bool {
 	return m.CWSkimmer != nil && m.CWSkimmer.spotsLogger != nil && m.CWSkimmer.spotsLogger.enabled
 }
 
+var cwSpotFields = []string{"timestamp", "callsign", "snr", "frequency", "band", "wpm", "comment", "country",
+	"cq_zone", "itu_zone", "continent", "latitude", "longitude", "distance_km", "bearing_deg", "name", "seen_count"}
+
 func (m *MCPServer) handleGetCWSpots(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	if !m.cwSpotsAvailable() {
 		return mcp.NewToolResultError("CW skimmer spot logging is not enabled on this receiver"), nil
@@ -197,10 +206,17 @@ func (m *MCPServer) handleGetCWSpots(ctx context.Context, request mcp.CallToolRe
 		return mcpRateLimited("get_cw_spots"), nil
 	}
 
-	to := time.Now().UTC()
-	from, msg := mcpSinceParam(request, to.Add(-time.Duration(hours)*time.Hour), to)
+	from, to, msg := mcpSpotWindow(request, 1, 48, time.Now().UTC())
 	if msg != "" {
 		return mcp.NewToolResultError(msg), nil
+	}
+	a := newMCPArgs(request)
+	var fields []string
+	if a.has("fields") {
+		fields = a.stringList("fields", len(cwSpotFields), cwSpotFields, nil)
+	}
+	if a.Err() != nil {
+		return mcp.NewToolResultError(a.Err().Error()), nil
 	}
 	band := request.GetString("band", "")
 	// One past the limit, so a cut-off result can say so.
@@ -208,7 +224,7 @@ func (m *MCPServer) handleGetCWSpots(ctx context.Context, request mcp.CallToolRe
 		band, "", callsigns,
 		strings.ToUpper(request.GetString("continent", "")), request.GetString("country", ""), "",
 		from.Format("2006-01-02"), to.Format("2006-01-02"), "", "",
-		true, 0, mcpMinSNRParam(request), m.CTY,
+		request.GetString("collapse", "day") != "none", 0, mcpMinSNRParam(request), m.CTY,
 		from.Unix(), to.Unix()+1, limit+1,
 	)
 	if err != nil {
@@ -220,13 +236,17 @@ func (m *MCPServer) handleGetCWSpots(ctx context.Context, request mcp.CallToolRe
 		spots = spots[:limit]
 	}
 
-	return mcpJSON(map[string]interface{}{
+	shaped, err := mcpShapeRecords(spots, fields, request.GetString("format", "json") == "columns")
+	if err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("Failed to shape spots: %v", err)), nil
+	}
+	return mcpCompactJSON(map[string]interface{}{
 		"hours":     hours,
 		"from_utc":  from.Format(time.RFC3339),
 		"until_utc": to.Format(time.RFC3339),
 		"count":     len(spots),
 		"truncated": truncated,
-		"spots":     spots,
+		"spots":     shaped,
 	})
 }
 

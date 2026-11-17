@@ -15,7 +15,7 @@ package main
 //	cw_spots      — replaces CW skimmer spots CSV (CWSkimmerSpot)
 //	noise_floor   — replaces noise floor CSV (BandMeasurement)
 //	wspr_rank_*   — replaces stats/wspr JSONL (WSPRRankResponse)
-//	psk_rank_*    — replaces stats/psk JSONL (PSKRankData)
+//	psk_snapshots — replaces stats/psk JSONL (PSKRankData)
 //	rbn_skew/_stats — replaces stats/rbn JSONL (RBNSkewEntry / RBNStatisticsEntry)
 //
 // WAL mode is enabled so concurrent readers never block the single writer.
@@ -27,6 +27,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	_ "modernc.org/sqlite" // pure-Go SQLite driver; registers as "sqlite"
@@ -70,12 +71,22 @@ func NewDBManager(dataDir string) (*DBManager, error) {
 	// SQLite is not safe for concurrent writers from multiple OS threads unless
 	// WAL mode is used. WAL allows one writer + many concurrent readers.
 	pragmas := []string{
+		// auto_vacuum must come first: it only takes effect on a database that
+		// has never been written, and switching to WAL writes the header. Set
+		// after journal_mode it was silently ignored, so every database was
+		// created in mode NONE and incremental_vacuum never released a page.
+		// Databases created that way stay in NONE (converting needs a full
+		// VACUUM); their freed pages are reused by later inserts instead.
+		"PRAGMA auto_vacuum=INCREMENTAL",
 		"PRAGMA journal_mode=WAL",
 		"PRAGMA synchronous=NORMAL", // safe with WAL; faster than FULL
 		"PRAGMA foreign_keys=ON",
-		"PRAGMA busy_timeout=5000",       // ms — retry on locked DB instead of failing immediately
-		"PRAGMA cache_size=-131072",      // 128 MiB page cache (negative value = KiB)
-		"PRAGMA auto_vacuum=INCREMENTAL", // enables incremental_vacuum; must be set before first write
+		"PRAGMA busy_timeout=5000",  // ms — retry on locked DB instead of failing immediately
+		"PRAGMA cache_size=-131072", // 128 MiB page cache (negative value = KiB)
+		// After a checkpoint, trim the -wal file back to 64 MiB rather than
+		// leaving it at the size of the largest burst it ever held (the first
+		// big retention prune, say). Costs nothing and never blocks.
+		"PRAGMA journal_size_limit=67108864",
 	}
 	for _, p := range pragmas {
 		if _, err := db.Exec(p); err != nil {
@@ -172,15 +183,16 @@ func (m *DBManager) SizeStats() (*DBSizeStats, error) {
 type RetentionConfig struct {
 	// Sessions: config.Server.SessionActivityLogRetentionDays (default 30)
 	SessionsDays int
-	// Spots (decoder): decoder config spots_log_max_age_days (default 0 = unlimited)
+	// Spots (decoder): decoder config spots_log_max_age_days (default 90)
 	SpotsDays int
-	// CWSpots: no config field yet — 0 = unlimited
+	// CWSpots: database.cw_spots_retention_days (default 90)
 	CWSpotsDays int
-	// ChatMessages: no config field yet — 0 = unlimited
+	// Chat messages and moderation actions: database.chat_retention_days
+	// (default 0 = keep forever)
 	ChatDays int
-	// NoiseFloor: no config field yet — 0 = unlimited
+	// NoiseFloor: database.noise_floor_retention_days (default 90)
 	NoiseFloorDays int
-	// SpaceWeather: no config field yet — 0 = unlimited
+	// SpaceWeather: database.space_weather_retention_days (default 365)
 	SpaceWeatherDays int
 	// Stats (WSPR/PSK/RBN leaderboards): the history endpoints refuse ranges
 	// longer than statsMaxDays, so anything older is unreachable via the API.
@@ -188,10 +200,73 @@ type RetentionConfig struct {
 	// DecoderMetricsSummary: no config field yet — 0 = unlimited. Summaries are
 	// tiny (a handful of rows per band/period) so keeping them forever is cheap.
 	DecoderMetricsSummaryDays int
-	// CWMetricsSummary: no config field yet — 0 = unlimited.
+	// CWMetricsSummary: database.metrics_summary_retention_days (default 730)
 	CWMetricsSummaryDays int
 	// NotificationLog: config.Database.NotificationLogRetentionDays (default 30)
 	NotificationLogDays int
+	// Decoder and CW skimmer metrics snapshots (decoder_metrics, cw_metrics):
+	// database.metrics_retention_days (default 90)
+	DecoderMetricsDays int
+	CWMetricsDays      int
+}
+
+// retentionRule is one table the retention loop prunes: rows whose tsColumn is
+// older than days are deleted. days <= 0 keeps the table forever.
+type retentionRule struct {
+	table string
+	days  int
+	// tsColumn is the timestamp column retention is measured against. Most
+	// tables call it "ts"; the ones that do not have to say so, or the delete
+	// fails on every run and the table grows without bound.
+	tsColumn string
+	// filter, when set, is a fixed SQL condition restricting the rule to some
+	// of the table's rows, so different kinds of row can age differently. A
+	// table split this way needs rules whose filters together cover every row.
+	// Code constants only, never configuration or input.
+	filter string
+}
+
+// retentionRules lists every table that holds rows over time. Every table in
+// the schema must appear here or in retentionExempt; a test checks it, so a
+// new table cannot be added that grows forever without anyone deciding so.
+func retentionRules(cfg RetentionConfig) []retentionRule {
+	return []retentionRule{
+		// Sessions still running have no end yet, and "ended_at < cutoff" is
+		// never true for NULL, so they are left alone. Bands and modes go with
+		// the session via ON DELETE CASCADE.
+		{"session", cfg.SessionsDays, "ended_at", ""},
+		{"spots", cfg.SpotsDays, "ts", ""},
+		{"cw_spots", cfg.CWSpotsDays, "ts", ""},
+		{"chat_messages", cfg.ChatDays, "ts", ""},
+		{"chat_mod_actions", cfg.ChatDays, "ts", ""},
+		{"noise_floor", cfg.NoiseFloorDays, "ts", ""},
+		{"space_weather", cfg.SpaceWeatherDays, "ts", ""},
+		// Stats tables all carry ts, so each prunes independently.
+		{"wspr_rank_rows", cfg.StatsDays, "ts", ""},
+		{"wspr_rank_windows", cfg.StatsDays, "ts", ""},
+		{"psk_snapshots", cfg.StatsDays, "ts", ""},
+		{"rbn_skew", cfg.StatsDays, "ts", ""},
+		{"rbn_stats", cfg.StatsDays, "ts", ""},
+		{"decoder_metrics", cfg.DecoderMetricsDays, "ts", ""},
+		{"cw_metrics", cfg.CWMetricsDays, "ts", ""},
+		// Daily summaries are the bulk of the summary tables (a row per band
+		// and mode per day) and repeat what the raw metrics hold, so they age
+		// with them. Weeks, months and years are a few hundred rows over years
+		// and keep longer, so this year can still be compared with last.
+		{"decoder_metrics_summary", cfg.DecoderMetricsDays, "ts", "period = 'day'"},
+		{"decoder_metrics_summary", cfg.DecoderMetricsSummaryDays, "ts", "period != 'day'"},
+		{"cw_metrics_summary", cfg.CWMetricsDays, "ts", "period = 'day'"},
+		{"cw_metrics_summary", cfg.CWMetricsSummaryDays, "ts", "period != 'day'"},
+		{"notification_log", cfg.NotificationLogDays, "ts", ""},
+	}
+}
+
+// retentionExempt are the tables with no retention rule of their own, and why
+// they are still bounded.
+var retentionExempt = map[string]string{
+	"session_band": "deleted with its session (ON DELETE CASCADE)",
+	"session_mode": "deleted with its session (ON DELETE CASCADE)",
+	"user_agent":   "rows no session references are swept after each prune (sweepUnusedUserAgents)",
 }
 
 // retentionInterval is how often the retention loop runs after the initial
@@ -200,15 +275,26 @@ type RetentionConfig struct {
 // Most hourly runs will find 0 rows to delete (cheap no-op).
 const retentionInterval = 1 * time.Hour
 
+// retentionStartupDelay holds the first prune back until the server has come
+// up, rather than competing with everything it does at startup.
+var retentionStartupDelay = 2 * time.Minute
+
 // StartRetentionLoop starts a background goroutine that prunes old rows from
-// all DB tables once at startup and then every retentionInterval (6 hours).
-// It stops when ctx is cancelled (e.g. on graceful shutdown).
+// all DB tables shortly after startup and then every retentionInterval
+// (hourly). Hourly rather than nightly keeps each run small: it deletes only
+// what aged out in the last hour. A backlog (after downtime, or the first run
+// under a new retention setting) is bounded per run by pruneMaxBatches and
+// vacuumMaxChunks, so it is worked off over the following hours instead of in
+// one long burst. It stops when ctx is cancelled (e.g. on graceful shutdown).
 // Tables whose retention value is 0 are skipped (kept forever).
 func (m *DBManager) StartRetentionLoop(ctx context.Context, cfg RetentionConfig) {
 	go func() {
-		// Run immediately at startup so rows aged out while the process was
-		// down are removed without waiting for the first interval tick.
-		m.pruneAll(cfg)
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(retentionStartupDelay):
+		}
+		m.safePruneAll(cfg)
 
 		ticker := time.NewTicker(retentionInterval)
 		defer ticker.Stop()
@@ -217,99 +303,445 @@ func (m *DBManager) StartRetentionLoop(ctx context.Context, cfg RetentionConfig)
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				m.pruneAll(cfg)
+				m.safePruneAll(cfg)
 			}
 		}
 	}()
+}
+
+// Nightly maintenance runs at this local time in the receiver's timezone,
+// when listeners are fewest.
+const (
+	dbMaintenanceHour   = 3
+	dbMaintenanceMinute = 30
+	// dbAnalysisLimit bounds ANALYZE to roughly this many rows per index, so
+	// it samples a large table instead of reading all of it. SQLite applies a
+	// similar limit by itself from 3.46; setting it keeps that true whatever
+	// version the driver bundles.
+	dbAnalysisLimit = 1000
+	// dbMaintenanceTimeout cancels any one maintenance step that runs longer,
+	// so a slow disk can never hold the write connection for long.
+	dbMaintenanceTimeout = 2 * time.Minute
+)
+
+// StartMaintenanceLoop keeps the query planner's statistics current and the
+// WAL in check, nightly at dbMaintenanceHour:dbMaintenanceMinute in loc: a
+// sampled ANALYZE of every table, one at a time, then a PASSIVE checkpoint.
+//
+// Nightly only. ANALYZE's cost grows with the table even under analysis_limit
+// (it still walks the table), and on a 5.8 GB database one table took 26 s;
+// a pass shortly after startup held up every write for that long. Retention
+// keeps tables bounded, so the nightly pass stays short, and it runs when the
+// receiver is quietest.
+//
+// Everything here is chosen not to disturb a running receiver: a table at a
+// time with pauses between so queued writes get through, each step with a
+// timeout and cancelled at shutdown, the checkpoint PASSIVE (it never waits
+// for readers, so it cannot stall the write connection behind a long query),
+// a panic caught and logged, and a slow table named in the log. The write
+// connection is a single conn, so none of it overlaps the retention loop's
+// deletes; it queues behind them.
+func (m *DBManager) StartMaintenanceLoop(ctx context.Context, loc *time.Location) {
+	if loc == nil {
+		loc = time.UTC
+	}
+	go func() {
+		for {
+			next := nextDailyRun(time.Now(), loc, dbMaintenanceHour, dbMaintenanceMinute)
+			timer := time.NewTimer(time.Until(next))
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+				return
+			case <-timer.C:
+			}
+			m.runMaintenance(ctx, "nightly", true)
+		}
+	}()
+}
+
+// Space reclamation for databases created with auto_vacuum NONE (all of them,
+// until NewDBManager set it before WAL). In that mode deleted rows and dropped
+// tables only go to the freelist and the file never shrinks; only a full
+// VACUUM gives the space back. These guard it.
+var (
+	vacuumMinFreeFraction       = 0.25      // of the file
+	vacuumMinFreeBytes    int64 = 256 << 20 // and at least this much
+	// The startup VACUUM delays the receiver coming up, so it gives up after
+	// about three times the longest measured (3 min 20 s for 2.9 GB) and the
+	// server starts normally; it is tried again on the next start.
+	vacuumTimeout  = 10 * time.Minute
+	vacuumDiskFree = dbDiskFree // replaced in tests
+)
+
+// ReclaimSpaceAtStartup runs reclaimSpace before the rest of the server
+// starts. A VACUUM holds the only write connection for its whole run (3 min 20 s
+// for a 2.9 GB database on an SSD), and decoder spots are written on the live
+// decode delivery path, so while the server is up it would stall decodes to
+// listeners. Before startup nothing is waiting on it.
+func (m *DBManager) ReclaimSpaceAtStartup(ctx context.Context) bool {
+	return m.reclaimSpace(ctx, "startup")
+}
+
+// reclaimSpace runs a one-time VACUUM on a database still in auto_vacuum NONE
+// once enough of it is free space, switching it to INCREMENTAL as it does so
+// (VACUUM applies a pending auto_vacuum change): from then on the chunked
+// incremental_vacuum after each prune returns space as it is freed, and this
+// never runs again. It reports whether it vacuumed.
+//
+// It runs only when it is worth it, only with room on disk for the rebuilt
+// copy and its WAL, and under a timeout: an interrupted VACUUM rolls back
+// cleanly and is tried again on the next start.
+func (m *DBManager) reclaimSpace(ctx context.Context, when string) (vacuumed bool) {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("[DB] %s maintenance: reclaim recovered from panic: %v", when, r)
+			vacuumed = false
+		}
+	}()
+	var mode, pageSize, pages, free int64
+	if err := m.db.QueryRowContext(ctx, "PRAGMA auto_vacuum").Scan(&mode); err != nil || mode == 2 {
+		return false // INCREMENTAL: the prune loop's incremental_vacuum handles it
+	}
+	m.db.QueryRowContext(ctx, "PRAGMA page_size").Scan(&pageSize)
+	m.db.QueryRowContext(ctx, "PRAGMA page_count").Scan(&pages)
+	m.db.QueryRowContext(ctx, "PRAGMA freelist_count").Scan(&free)
+	if pages == 0 || free*pageSize < vacuumMinFreeBytes || float64(free) < vacuumMinFreeFraction*float64(pages) {
+		return false
+	}
+	used := (pages - free) * pageSize
+	need := 2*used + (256 << 20)
+	if m.path == "" {
+		return false
+	}
+	avail, err := vacuumDiskFree(m.path)
+	if err != nil {
+		log.Printf("[DB] %s maintenance: not reclaiming %d MB of free space: %v", when, free*pageSize>>20, err)
+		return false
+	}
+	if avail < need {
+		log.Printf("[DB] %s maintenance: not reclaiming %d MB of free space: VACUUM needs about %d MB of disk, %d MB available",
+			when, free*pageSize>>20, need>>20, avail>>20)
+		return false
+	}
+
+	vctx, cancel := context.WithTimeout(ctx, vacuumTimeout)
+	defer cancel()
+	conn, err := m.db.Conn(vctx)
+	if err != nil {
+		return false
+	}
+	defer conn.Close()
+	log.Printf("[DB] %s maintenance: VACUUM to reclaim %d MB of %d MB. One-time, switching the database to incremental "+
+		"auto_vacuum; this can take several minutes and the receiver starts when it finishes",
+		when, free*pageSize>>20, pages*pageSize>>20)
+	start := time.Now()
+	if _, err := conn.ExecContext(vctx, "PRAGMA auto_vacuum=INCREMENTAL"); err != nil {
+		log.Printf("[DB] %s maintenance: auto_vacuum: %v", when, err)
+		return false
+	}
+	if _, err := conn.ExecContext(vctx, "VACUUM"); err != nil {
+		log.Printf("[DB] %s maintenance: VACUUM failed after %v (rolled back; tried again on the next start): %v",
+			when, time.Since(start).Round(time.Millisecond), err)
+		return false
+	}
+	// In WAL mode the rebuilt database is in the WAL until checkpointed; fold
+	// it back now so the file shrinks and the WAL does not stay huge.
+	var busy, frames, done int
+	conn.QueryRowContext(vctx, "PRAGMA wal_checkpoint(TRUNCATE)").Scan(&busy, &frames, &done)
+	var after, newMode int64
+	conn.QueryRowContext(vctx, "PRAGMA page_count").Scan(&after)
+	conn.QueryRowContext(vctx, "PRAGMA auto_vacuum").Scan(&newMode)
+	log.Printf("[DB] %s maintenance: VACUUM took %v: %d MB -> %d MB, auto_vacuum now %d",
+		when, time.Since(start).Round(time.Millisecond), pages*pageSize>>20, after*pageSize>>20, newMode)
+	return true
+}
+
+// dbAnalyzePause is the gap between tables in a maintenance pass, so writes
+// queued behind one table's ANALYZE get the connection before the next.
+var dbAnalyzePause = 500 * time.Millisecond
+
+// runMaintenance analyses tables one at a time and, at night, checkpoints the
+// WAL. It returns the tables it analysed.
+//
+// One table per step, each on its own hold of the write connection with
+// analysis_limit set, rather than a single PRAGMA optimize: that held the
+// connection for 34 s on a 5.8 GB database, queueing every write behind it.
+// Per-table steps let writes through between tables, give each table its own
+// timeout, and log any table that is slow, so the cause shows in the log.
+// nightly=false analyses only tables with no statistics yet.
+func (m *DBManager) runMaintenance(ctx context.Context, when string, nightly bool) []string {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("[DB] %s maintenance: recovered from panic: %v", when, r)
+		}
+	}()
+
+	tables, err := m.analyzeCandidates(ctx, !nightly)
+	if err != nil {
+		log.Printf("[DB] %s maintenance: listing tables: %v", when, err)
+	}
+	var analysed []string
+	var total, slowest time.Duration
+	slowestTable := ""
+	for i, table := range tables {
+		if i > 0 {
+			select {
+			case <-ctx.Done():
+			case <-time.After(dbAnalyzePause):
+			}
+		}
+		if ctx.Err() != nil {
+			break
+		}
+		took, err := m.analyzeTable(ctx, table)
+		total += took
+		if err != nil {
+			log.Printf("[DB] %s maintenance: ANALYZE %s failed after %v: %v", when, table, took.Round(time.Millisecond), err)
+			continue
+		}
+		analysed = append(analysed, table)
+		if took > time.Second {
+			log.Printf("[DB] %s maintenance: ANALYZE %s took %v", when, table, took.Round(time.Millisecond))
+		}
+		if took > slowest {
+			slowest, slowestTable = took, table
+		}
+	}
+	if len(analysed) > 0 {
+		log.Printf("[DB] %s maintenance: analysed %d tables in %v (slowest %s, %v)",
+			when, len(analysed), total.Round(time.Millisecond), slowestTable, slowest.Round(time.Millisecond))
+	}
+
+	if nightly && ctx.Err() == nil {
+		cctx, cancel := context.WithTimeout(ctx, dbMaintenanceTimeout)
+		defer cancel()
+		start := time.Now()
+		var busy, frames, done int
+		if err := m.db.QueryRowContext(cctx, "PRAGMA wal_checkpoint(PASSIVE)").Scan(&busy, &frames, &done); err != nil {
+			log.Printf("[DB] %s maintenance: wal_checkpoint failed: %v", when, err)
+		} else {
+			log.Printf("[DB] %s maintenance: wal_checkpoint(PASSIVE) took %v (%d of %d frames checkpointed)",
+				when, time.Since(start).Round(time.Millisecond), done, frames)
+		}
+	}
+	return analysed
+}
+
+// analyzeCandidates lists the user tables, or with onlyNew just those that
+// have no statistics yet.
+func (m *DBManager) analyzeCandidates(ctx context.Context, onlyNew bool) ([]string, error) {
+	query := `SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'`
+	if onlyNew {
+		var hasStats int
+		if err := m.db.QueryRowContext(ctx,
+			`SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = 'sqlite_stat1'`).Scan(&hasStats); err != nil {
+			return nil, err
+		}
+		if hasStats > 0 {
+			query += ` AND name NOT IN (SELECT DISTINCT tbl FROM sqlite_stat1)`
+		}
+	}
+	rows, err := m.db.QueryContext(ctx, query+` ORDER BY name`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var tables []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, err
+		}
+		tables = append(tables, name)
+	}
+	return tables, rows.Err()
+}
+
+// analyzeTable runs a sampled ANALYZE of one table on a held connection, so
+// the analysis_limit it sets is the one ANALYZE sees.
+func (m *DBManager) analyzeTable(ctx context.Context, table string) (time.Duration, error) {
+	tctx, cancel := context.WithTimeout(ctx, dbMaintenanceTimeout)
+	defer cancel()
+	conn, err := m.db.Conn(tctx)
+	if err != nil {
+		return 0, err
+	}
+	defer conn.Close()
+	if _, err := conn.ExecContext(tctx, fmt.Sprintf("PRAGMA analysis_limit=%d", dbAnalysisLimit)); err != nil {
+		return 0, err
+	}
+	start := time.Now()
+	_, err = conn.ExecContext(tctx, `ANALYZE "`+strings.ReplaceAll(table, `"`, `""`)+`"`)
+	return time.Since(start), err
+}
+
+// nextDailyRun is the next hour:minute in loc strictly after now.
+func nextDailyRun(now time.Time, loc *time.Location, hour, minute int) time.Time {
+	l := now.In(loc)
+	next := time.Date(l.Year(), l.Month(), l.Day(), hour, minute, 0, 0, loc)
+	if !next.After(l) {
+		next = time.Date(l.Year(), l.Month(), l.Day()+1, hour, minute, 0, 0, loc)
+	}
+	return next
 }
 
 // pruneAll deletes rows older than the configured retention period from each table,
 // then reclaims freed pages via PRAGMA incremental_vacuum.
 // Deletes are batched (pruneChunkSize rows at a time) to keep WAL pressure low
 // and avoid blocking readers for extended periods on large tables.
+// safePruneAll is pruneAll for the background loop: a panic is logged rather
+// than taking the server down, and the next hourly run tries again.
+func (m *DBManager) safePruneAll(cfg RetentionConfig) {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("[DB] retention: recovered from panic: %v", r)
+		}
+	}()
+	m.pruneAll(cfg)
+}
+
 func (m *DBManager) pruneAll(cfg RetentionConfig) {
-	type tableRule struct {
-		table string
-		days  int
-		// tsColumn is the timestamp column retention is measured against. Most
-		// tables call it "ts"; the ones that do not have to say so, or the delete
-		// fails on every run and the table grows without bound.
-		tsColumn string
-	}
-	rules := []tableRule{
-		// Sessions still running have no end yet, and "ended_at < cutoff" is
-		// never true for NULL, so they are left alone. Bands and modes go with
-		// the session via ON DELETE CASCADE.
-		{"session", cfg.SessionsDays, "ended_at"},
-		{"spots", cfg.SpotsDays, "ts"},
-		{"cw_spots", cfg.CWSpotsDays, "ts"},
-		{"chat_messages", cfg.ChatDays, "ts"},
-		{"chat_mod_actions", cfg.ChatDays, "ts"},
-		{"noise_floor", cfg.NoiseFloorDays, "ts"},
-		{"space_weather", cfg.SpaceWeatherDays, "ts"},
-		// Stats tables all carry ts, so each prunes independently.
-		{"wspr_rank_rows", cfg.StatsDays, "ts"},
-		{"wspr_rank_windows", cfg.StatsDays, "ts"},
-		{"psk_rank_entries", cfg.StatsDays, "ts"},
-		{"psk_software", cfg.StatsDays, "ts"},
-		{"psk_rank_snapshots", cfg.StatsDays, "ts"},
-		{"rbn_skew", cfg.StatsDays, "ts"},
-		{"rbn_stats", cfg.StatsDays, "ts"},
-		{"decoder_metrics_summary", cfg.DecoderMetricsSummaryDays, "ts"},
-		{"cw_metrics_summary", cfg.CWMetricsSummaryDays, "ts"},
-		{"notification_log", cfg.NotificationLogDays, "ts"},
-	}
-	anyDeleted := false
-	for _, r := range rules {
+	for _, r := range retentionRules(cfg) {
 		if r.days <= 0 {
 			continue // 0 = keep forever
 		}
-		cutoff := time.Now().UTC().AddDate(0, 0, -r.days).Unix()
-		if m.pruneTable(r.table, r.tsColumn, cutoff, r.days) {
-			anyDeleted = true
-		}
+		m.pruneTable(r, time.Now().UTC().AddDate(0, 0, -r.days).Unix())
 	}
+	m.sweepUnusedUserAgents()
 
-	// Reclaim freed pages from the freelist. Requires auto_vacuum=INCREMENTAL
-	// (set at DB creation). This is a no-op when nothing was deleted.
-	if anyDeleted {
-		if _, err := m.db.Exec("PRAGMA incremental_vacuum"); err != nil {
-			log.Printf("[DB] incremental_vacuum: %v", err)
+	// Release free pages, whatever freed them: these deletes, or others such
+	// as the background drop of the old PSK tables. Requires
+	// auto_vacuum=INCREMENTAL, and returns at once when there is nothing free.
+	m.incrementalVacuum()
+}
+
+// sweepUnusedUserAgents deletes user agents no session refers to any more,
+// which once their sessions have been pruned is most of them. The session
+// writer interns an agent in the same transaction as the session that uses it,
+// and the write side is a single connection, so this can never remove an agent
+// between its insertion and its first use.
+func (m *DBManager) sweepUnusedUserAgents() bool {
+	res, err := m.db.Exec(`DELETE FROM user_agent WHERE NOT EXISTS
+		(SELECT 1 FROM session WHERE session.user_agent_id = user_agent.id)`)
+	if err != nil {
+		log.Printf("[DB] retention sweep user_agent: %v", err)
+		return false
+	}
+	n, _ := res.RowsAffected()
+	if n > 0 {
+		log.Printf("[DB] retention sweep user_agent: deleted %d agents no session uses", n)
+	}
+	return n > 0
+}
+
+// vacuumChunkPages is how many free pages one incremental_vacuum step
+// releases: 4096 pages is 16 MiB at the default page size.
+//
+// vacuumMaxChunks caps one run at 256 chunks, 1 GiB at the default page
+// size; the rest of the freelist is released on later runs (and its pages are
+// reused by inserts meanwhile).
+var (
+	vacuumChunkPages int64 = 4096
+	vacuumMaxChunks        = 256
+)
+
+// incrementalVacuum releases the freelist in chunks with a pause between
+// them. A bare "PRAGMA incremental_vacuum" frees every page in one write
+// transaction, which after a large prune (the first one under a new retention
+// setting can delete months of rows) holds the write connection for as long
+// as it takes to move gigabytes.
+//
+// A database created before auto_vacuum=INCREMENTAL was set stays in mode 0,
+// where incremental_vacuum does nothing; it is skipped there, and the loop
+// also stops as soon as a step fails to shrink the freelist, so it can never
+// spin.
+func (m *DBManager) incrementalVacuum() {
+	var mode int
+	if err := m.db.QueryRow("PRAGMA auto_vacuum").Scan(&mode); err != nil || mode != 2 {
+		return
+	}
+	var freed int64
+	last := int64(-1)
+	for i := 0; i < vacuumMaxChunks; i++ {
+		var free int64
+		if err := m.db.QueryRow("PRAGMA freelist_count").Scan(&free); err != nil {
+			log.Printf("[DB] incremental_vacuum: freelist_count: %v", err)
+			return
 		}
+		if free == 0 || free == last {
+			break
+		}
+		last = free
+		if _, err := m.db.Exec(fmt.Sprintf("PRAGMA incremental_vacuum(%d)", vacuumChunkPages)); err != nil {
+			log.Printf("[DB] incremental_vacuum: %v", err)
+			return
+		}
+		if free > vacuumChunkPages {
+			free = vacuumChunkPages
+		}
+		freed += free
+		time.Sleep(100 * time.Millisecond)
+	}
+	if freed > vacuumChunkPages {
+		log.Printf("[DB] incremental_vacuum: released %d pages", freed)
 	}
 }
 
 // pruneChunkSize is the maximum number of rows deleted per batch.
 // Keeping this small limits WAL growth and reader-blocking time.
-const pruneChunkSize = 10_000
+//
+// pruneMaxBatches caps the batches one table gets per run: 100 x 10,000 is a
+// million rows, about 10 s of deleting with the pauses between batches. What
+// is left is taken on the next hourly run.
+var (
+	pruneChunkSize  = 10_000
+	pruneMaxBatches = 100
+)
 
 // pruneTable deletes rows with ts < cutoff from the named table in chunks,
 // sleeping 100 ms between batches to yield to concurrent readers/writers.
 // Returns true if any rows were deleted.
-func (m *DBManager) pruneTable(table, tsColumn string, cutoff int64, days int) bool {
+func (m *DBManager) pruneTable(r retentionRule, cutoff int64) bool {
+	table, tsColumn, days := r.table, r.tsColumn, r.days
 	if tsColumn == "" {
 		tsColumn = "ts"
 	}
+	where := tsColumn + ` < ?`
+	label := table
+	if r.filter != "" {
+		where += ` AND (` + r.filter + `)`
+		label += " (" + r.filter + ")"
+	}
 	total := int64(0)
 	query := `DELETE FROM ` + table + ` WHERE id IN (
-		SELECT id FROM ` + table + ` WHERE ` + tsColumn + ` < ? LIMIT ?
+		SELECT id FROM ` + table + ` WHERE ` + where + ` LIMIT ?
 	)`
-	for {
+	backlog := false
+	for batch := 0; ; batch++ {
+		if batch == pruneMaxBatches {
+			backlog = true
+			break
+		}
 		res, err := m.db.Exec(query, cutoff, pruneChunkSize)
 		if err != nil {
-			log.Printf("[DB] retention prune %s: %v", table, err)
+			log.Printf("[DB] retention prune %s: %v", label, err)
 			return total > 0
 		}
 		n, _ := res.RowsAffected()
 		total += n
-		if n < pruneChunkSize {
+		if n < int64(pruneChunkSize) {
 			break // last (or only) batch
 		}
 		// Yield between batches so readers aren't starved.
 		time.Sleep(100 * time.Millisecond)
 	}
 	if total > 0 {
-		log.Printf("[DB] retention prune %s: deleted %d rows older than %d days", table, total, days)
+		more := ""
+		if backlog {
+			more = "; more remain, continuing next run"
+		}
+		log.Printf("[DB] retention prune %s: deleted %d rows older than %d days%s", label, total, days, more)
 	}
 	return total > 0
 }
@@ -480,6 +912,10 @@ func (m *DBManager) initSchema() error {
 		{"session_idx_ended", `CREATE INDEX IF NOT EXISTS session_idx_ended   ON session(ended_at)`},
 		{"session_idx_started", `CREATE INDEX IF NOT EXISTS session_idx_started ON session(started_at)`},
 		{"session_idx_open", `CREATE INDEX IF NOT EXISTS session_idx_open    ON session(last_seen) WHERE ended_at IS NULL`},
+		// For the retention sweep of unused user agents, and for SQLite's own
+		// foreign key check when one is deleted: without it each costs a scan
+		// of every session.
+		{"session_idx_user_agent", `CREATE INDEX IF NOT EXISTS session_idx_user_agent ON session(user_agent_id)`},
 		{
 			"session_band",
 			`CREATE TABLE IF NOT EXISTS session_band (
@@ -879,60 +1315,27 @@ func (m *DBManager) initSchema() error {
 		},
 
 		// ----------------------------------------------------------------
-		// psk_rank_snapshots / psk_rank_entries / psk_software
+		// psk_snapshots
 		//
-		// Replaces: <statsDir>/psk/YYYY/MM/DD/report_result.jsonl
-		// Source struct: PSKRankData (psk_rank.go)
+		// Source struct: PSKRankData (psk_rank.go), one row per hourly scrape
+		// of pskreporter.info. The two leaderboards and the software map are
+		// zstd-compressed blobs; stats_psk_store.go explains why (every reader
+		// wants whole snapshots). This replaced the row-per-entry
+		// psk_rank_snapshots / psk_rank_entries / psk_software tables, which
+		// dropLegacyPSKTables removes in the background.
 		//
-		// PSKRankData holds two band→[]PSKMonitorEntry maps (reportResult and
-		// countryResult) plus a callsign→software map, all from one hourly
-		// scrape of pskreporter.info. The two maps are flattened into
-		// psk_rank_entries with result_type distinguishing them; the software
-		// map becomes psk_software.
-		//
-		// As with WSPR, the snapshot envelope is its own table so a failed
-		// fetch (zero entries, non-empty error) still round-trips.
-		// ts is PSKRankData.FetchedAt on all three tables.
-		//
-		// Indexes: none beyond the UNIQUE constraints, for the same reasons as
-		// the WSPR tables. UNIQUE(ts, result_type, band, rank_pos) satisfies
-		// loadPSKSnapshots' `ORDER BY ts, result_type, band, rank_pos` without
-		// a sort, and UNIQUE(ts, callsign, name, version) covers psk_software's
-		// `ORDER BY ts, callsign, name`. The callsign filter is applied in Go
-		// (stats_psk_history.go), so a callsign index is never consulted.
+		// UNIQUE(ts) serves the range, nearest-ts and latest lookups.
 		// ----------------------------------------------------------------
 		{
-			"psk_rank_snapshots",
-			`CREATE TABLE IF NOT EXISTS psk_rank_snapshots (
+			"psk_snapshots",
+			`CREATE TABLE IF NOT EXISTS psk_snapshots (
 				id         INTEGER PRIMARY KEY AUTOINCREMENT,
 				ts         INTEGER NOT NULL UNIQUE,  -- Unix seconds UTC (PSKRankData.FetchedAt)
 				fetched_ms INTEGER,                  -- scrape duration in milliseconds
-				error      TEXT                      -- non-empty when the scrape failed
-			)`,
-		},
-		{
-			"psk_rank_entries",
-			`CREATE TABLE IF NOT EXISTS psk_rank_entries (
-				id          INTEGER PRIMARY KEY AUTOINCREMENT,
-				ts          INTEGER NOT NULL,  -- Unix seconds UTC — matches psk_rank_snapshots.ts
-				result_type TEXT    NOT NULL,  -- "report" (reportResult) | "country" (countryResult)
-				band        TEXT    NOT NULL,  -- e.g. "20m", "All"
-				rank_pos    INTEGER NOT NULL,  -- 0-based position within the band array; preserves order
-				callsign    TEXT    NOT NULL,
-				day_count   INTEGER,           -- last 24 h count (PSKMonitorEntry.Day)
-				week_count  INTEGER,           -- last 7 days count (PSKMonitorEntry.Week)
-				UNIQUE(ts, result_type, band, rank_pos)
-			)`,
-		},
-		{
-			"psk_software",
-			`CREATE TABLE IF NOT EXISTS psk_software (
-				id       INTEGER PRIMARY KEY AUTOINCREMENT,
-				ts       INTEGER NOT NULL,  -- Unix seconds UTC — matches psk_rank_snapshots.ts
-				callsign TEXT    NOT NULL,  -- UPPER-cased, as stored in PSKRankData.SoftwareInUse
-				name     TEXT    NOT NULL,  -- canonical software name, e.g. "UberSDR"
-				version  TEXT,              -- version suffix; empty when the detail row had none
-				UNIQUE(ts, callsign, name, version)
+				error      TEXT,                     -- non-empty when the scrape failed
+				encoding   INTEGER NOT NULL,         -- blob format; 1 = zstd(binary), see stats_psk_store.go
+				boards     BLOB,                     -- report + country leaderboards (~16 KB)
+				software   BLOB                      -- callsign -> software map (~180 KB)
 			)`,
 		},
 

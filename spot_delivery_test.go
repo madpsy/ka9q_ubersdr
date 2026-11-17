@@ -59,8 +59,11 @@ func TestPrepareDecoderStoreConfig(t *testing.T) {
 	if d.SpotsLogLocatorsOnly == nil || !*d.SpotsLogLocatorsOnly {
 		t.Error("spots_log_locators_only not defaulted to true")
 	}
-	if d.SpotsLogMaxAgeDays != 0 {
-		t.Errorf("retention forced to %d", d.SpotsLogMaxAgeDays)
+	// No decoder.yaml under /etc/ubersdr here, so it does not set
+	// spots_log_max_age_days: the documented 90, not 0 = keep forever. An
+	// explicit 0 in the file is kept (TestDecoderSpotsRetentionDefault).
+	if d.SpotsLogMaxAgeDays != defaultSpotsLogMaxAgeDays {
+		t.Errorf("retention %d, want the default %d", d.SpotsLogMaxAgeDays, defaultSpotsLogMaxAgeDays)
 	}
 
 	// Decoders off and no feed: untouched.
@@ -95,7 +98,7 @@ func TestPrepareDecoderStoreConfig(t *testing.T) {
 	cfg.SkimmerFeed.Enabled = true
 	cfg.Decoder = DecoderConfig{SpotsLogEnabled: false, MetricsLogEnabled: true}
 	prepareDecoderStoreConfig(cfg, "/etc/ubersdr", true)
-	if cfg.Decoder.SpotsLogEnabled || cfg.Decoder.SpotsLogMaxAgeDays != 0 || cfg.Decoder.MetricsLogDataDir != "/etc/ubersdr/decoder_metrics" {
+	if cfg.Decoder.SpotsLogEnabled || cfg.Decoder.SpotsLogMaxAgeDays != defaultSpotsLogMaxAgeDays || cfg.Decoder.MetricsLogDataDir != "/etc/ubersdr/decoder_metrics" {
 		t.Errorf("decoder.yaml's settings not kept: %+v", cfg.Decoder)
 	}
 }

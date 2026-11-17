@@ -497,6 +497,26 @@ func main() {
 	}
 	defer dbManager.Close()
 
+	// A database created before auto_vacuum was set correctly never shrinks
+	// on its own. When enough of it is free space, it is rebuilt once here,
+	// before anything else starts: the receiver comes up a few minutes later
+	// on that one start, rather than stalling decodes while running.
+	//
+	// The server's own signal handling starts much later, so a stop request
+	// (docker stop, Ctrl-C) during this is caught here: it cancels the
+	// VACUUM, which SQLite rolls back, and the process exits cleanly. It is
+	// tried again on the next start. Whatever happens, a problem here is
+	// logged and startup carries on; it never stops the receiver starting.
+	reclaimCtx, stopReclaim := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	dbManager.ReclaimSpaceAtStartup(reclaimCtx)
+	stopRequested := reclaimCtx.Err() != nil
+	stopReclaim()
+	if stopRequested {
+		log.Printf("[DB] stop requested during startup database maintenance; exiting")
+		dbManager.Close()
+		os.Exit(0)
+	}
+
 	// Set global config for tunnel server IP checking
 	globalConfig = config
 
@@ -614,19 +634,25 @@ func main() {
 	loadBlockedClips(blockedAudioDir)
 	rebuildBlockedRanges(config.Bands)
 
-	// Start DB retention pruning loop — runs once at startup then daily at midnight UTC.
+	// Start DB retention pruning loop — runs once at startup then hourly.
 	// Uses each subsystem's configured retention period; 0 = keep forever.
-	dbManager.StartRetentionLoop(mainCtx, RetentionConfig{
-		SessionsDays: config.Server.SessionActivityLogRetentionDays,
-		SpotsDays:    config.Decoder.SpotsLogMaxAgeDays,
-		// Stats tables carry ~150k rows/day and the /api/stats/* endpoints
-		// refuse ranges longer than statsMaxDays, so rows past the retention
-		// window are unreachable anyway. Defaults to 30 days; 0 keeps forever.
-		StatsDays: config.Database.GetStatsRetentionDays(),
-		// CWSpotsDays, ChatDays, NoiseFloorDays, SpaceWeatherDays: no config
-		// field yet — 0 = unlimited.
-		NotificationLogDays: config.Database.GetNotificationLogRetentionDays(),
-	})
+	dbManager.StartRetentionLoop(mainCtx, retentionConfigFrom(config))
+
+	// The PSK leaderboard used to be stored one row per entry; those tables
+	// (psk_rank_*) can be gigabytes, so they are emptied in small batches in
+	// the background rather than dropped in one write-locking statement.
+	StartLegacyPSKTableDrop(mainCtx, dbManager.DB())
+
+	// Planner statistics and WAL upkeep, nightly in the receiver's own timezone.
+	maintenanceLoc := time.UTC
+	if tz := strings.TrimSpace(config.Admin.Timezone); tz != "" {
+		if loc, err := time.LoadLocation(tz); err == nil {
+			maintenanceLoc = loc
+		} else {
+			log.Printf("[DB] maintenance: unknown timezone %q, scheduling in UTC: %v", tz, err)
+		}
+	}
+	dbManager.StartMaintenanceLoop(mainCtx, maintenanceLoc)
 
 	// Load notifications configuration from notifications.yaml if it exists
 	notificationsPath := "notifications.yaml"

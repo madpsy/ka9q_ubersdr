@@ -437,6 +437,298 @@
             padding: 8px 16px;
         }
 
+        /* ── SNR Monitor section ───────────────────────────────────────────── */
+        .snr-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 10px;
+            flex-wrap: wrap;
+            margin-bottom: 10px;
+        }
+
+        .snr-header h2 { margin: 0; }
+
+        .snr-intro {
+            font-size: 0.9em;
+            opacity: 0.85;
+            margin-bottom: 12px;
+        }
+
+        .snr-controls {
+            display: flex;
+            gap: 15px;
+            flex-wrap: wrap;
+            align-items: flex-end;
+            padding: 15px;
+            background: rgba(0, 0, 0, 0.2);
+            border-radius: 8px;
+            margin-bottom: 12px;
+        }
+
+        .snr-controls .control-group select,
+        .snr-controls .control-group input {
+            padding: 8px 10px;
+            font-size: 0.95em;
+        }
+
+        .snr-controls input[type="number"],
+        .snr-controls input[type="text"] {
+            border-radius: 8px;
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            background: rgba(255, 255, 255, 0.9);
+            color: #333;
+        }
+
+        .snr-controls input[type="number"] { width: 110px; }
+        .snr-controls input[type="text"] { width: 150px; }
+
+        .snr-custom {
+            display: none;
+            gap: 8px;
+            align-items: flex-end;
+        }
+
+        .snr-controls button {
+            padding: 8px 14px;
+            font-size: 0.95em;
+        }
+
+        .snr-btn-secondary { background: #2196F3; }
+        .snr-btn-secondary:hover { background: #1976D2; }
+        .snr-btn-mark { background: #9C27B0; }
+        .snr-btn-mark:hover { background: #7B1FA2; }
+        .snr-btn-help { background: rgba(255, 255, 255, 0.2); }
+        .snr-btn-help:hover { background: rgba(255, 255, 255, 0.3); }
+
+        .snr-readout {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(95px, 1fr));
+            gap: 10px;
+            margin-bottom: 8px;
+        }
+
+        .snr-stat {
+            background: rgba(0, 0, 0, 0.2);
+            border-radius: 8px;
+            padding: 8px 10px;
+            text-align: center;
+        }
+
+        .snr-stat .label {
+            font-size: 0.8em;
+            opacity: 0.75;
+        }
+
+        .snr-stat .value {
+            font-size: 1.35em;
+            font-weight: bold;
+        }
+
+        .snr-stat.primary .value { color: #FFEB3B; font-size: 1.7em; }
+
+        .snr-meta-row {
+            display: flex;
+            justify-content: space-between;
+            gap: 10px;
+            flex-wrap: wrap;
+            font-size: 0.85em;
+            opacity: 0.85;
+            margin-bottom: 10px;
+        }
+
+        .snr-status {
+            padding: 4px 10px;
+            border-radius: 6px;
+            background: rgba(255, 255, 255, 0.15);
+        }
+
+        .snr-status.ok { background: rgba(76, 175, 80, 0.3); }
+        .snr-status.warn { background: rgba(255, 152, 0, 0.35); }
+        .snr-status.error { background: rgba(244, 67, 54, 0.35); }
+
+        .snr-capture {
+            margin-top: 16px;
+            padding: 15px;
+            background: rgba(0, 0, 0, 0.2);
+            border-radius: 8px;
+        }
+
+        .snr-capture h3 { font-size: 1.15em; margin-bottom: 6px; }
+        .snr-capture p { font-size: 0.88em; opacity: 0.85; margin-bottom: 10px; }
+
+        .snr-capture-controls {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+            align-items: flex-end;
+            margin-bottom: 10px;
+        }
+
+        .snr-capture-controls input[type="text"] {
+            padding: 8px 10px;
+            border-radius: 8px;
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            background: rgba(255, 255, 255, 0.9);
+            color: #333;
+            width: 180px;
+        }
+
+        .snr-capture-controls select { padding: 8px 10px; font-size: 0.95em; }
+        .snr-capture-controls button { padding: 8px 14px; font-size: 0.95em; }
+        .snr-btn-capture { background: #F44336; }
+        .snr-btn-capture:hover { background: #D32F2F; }
+
+        .snr-controls :disabled,
+        .snr-capture-controls :disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .snr-compare-table-wrap { overflow-x: auto; margin: 10px 0; }
+
+        .snr-compare table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.9em;
+        }
+
+        .snr-compare th, .snr-compare td {
+            text-align: left;
+            padding: 6px 8px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.15);
+            vertical-align: top;
+            white-space: nowrap;
+        }
+
+        .snr-compare th { opacity: 0.8; font-weight: 600; }
+        .snr-compare tr.baseline td { background: rgba(255, 235, 59, 0.08); }
+        .snr-compare-sub { font-size: 0.8em; opacity: 0.7; }
+        .snr-compare-warn { font-size: 0.85em; color: #FFB74D; }
+        .snr-delta { font-size: 0.85em; opacity: 0.85; }
+        .snr-delta.up { color: #81C784; opacity: 1; }
+        .snr-delta.down { color: #E57373; opacity: 1; }
+
+        .snr-del {
+            background: rgba(255, 255, 255, 0.15);
+            padding: 2px 8px;
+            font-size: 0.85em;
+        }
+
+        .snr-del:hover { background: rgba(244, 67, 54, 0.6); }
+
+        @media (max-width: 768px) {
+            .snr-capture-controls { flex-direction: column; align-items: stretch; }
+            .snr-capture-controls input[type="text"] { width: 100%; }
+        }
+
+        /* Help modal */
+        .snr-help-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.7);
+            display: none;
+            z-index: 10000;
+            align-items: center;
+            justify-content: center;
+            padding: 16px;
+        }
+
+        .snr-help-overlay.active { display: flex; }
+
+        .snr-help {
+            background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
+            border-radius: 15px;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
+            max-width: 900px;
+            width: 100%;
+            max-height: 90vh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .snr-help-head {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 16px 20px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.2);
+        }
+
+        .snr-help-head h3 { margin: 0; font-size: 1.3em; }
+
+        .snr-help-head button {
+            background: transparent;
+            font-size: 1.3em;
+            padding: 4px 10px;
+        }
+
+        .snr-help-body {
+            padding: 16px 20px 20px;
+            overflow-y: auto;
+            line-height: 1.5;
+        }
+
+        .snr-help-body h4 { margin: 16px 0 6px; font-size: 1.05em; }
+        .snr-help-body p { margin: 4px 0 8px; opacity: 0.9; }
+        .snr-help-body ul { margin: 4px 0 8px 20px; }
+
+        .snr-help-body code {
+            background: rgba(0, 0, 0, 0.3);
+            padding: 1px 5px;
+            border-radius: 4px;
+            font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+            font-size: 0.9em;
+        }
+
+        .snr-help-body table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.9em;
+            margin: 6px 0 10px;
+        }
+
+        .snr-help-body th, .snr-help-body td {
+            text-align: left;
+            padding: 5px 8px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.15);
+            vertical-align: top;
+        }
+
+        .snr-example h4 { margin-top: 14px; }
+
+        .snr-code-wrap {
+            position: relative;
+        }
+
+        .snr-code-wrap pre {
+            background: rgba(0, 0, 0, 0.45);
+            border-radius: 8px;
+            padding: 10px 70px 10px 12px;
+            overflow-x: auto;
+            font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+            font-size: 0.85em;
+            white-space: pre;
+        }
+
+        .snr-copy {
+            position: absolute;
+            top: 6px;
+            right: 6px;
+            padding: 4px 10px;
+            font-size: 0.8em;
+            background: rgba(255, 255, 255, 0.2);
+        }
+
+        .snr-copy:hover { background: rgba(255, 255, 255, 0.35); }
+
+        @media (max-width: 768px) {
+            .snr-controls { flex-direction: column; align-items: stretch; }
+            .snr-custom { flex-wrap: wrap; }
+            .snr-controls input[type="number"],
+            .snr-controls input[type="text"] { width: 100%; }
+        }
+
         /* Warning Modal Styles */
         .warning-modal-overlay {
             position: fixed;
@@ -712,6 +1004,178 @@
                 </div>
             </div>
             
+            <!-- SNR Monitor: polls /api/snr for one range (snr-monitor.js) -->
+            <div class="chart-container" id="snrSection">
+                <div class="snr-header">
+                    <h2>📶 SNR Monitor</h2>
+                    <button type="button" id="snr-help-btn" class="snr-btn-help" title="How to use the SNR API">❓ API help</button>
+                </div>
+                <p class="snr-intro">
+                    Live noise and signal statistics for one band or a custom range, measured every few seconds from
+                    spectrum the receiver already collects. Readings are kept in your browser only: add markers when you
+                    change something (an antenna, a preamp) and download the session as CSV.
+                </p>
+
+                <div class="snr-controls">
+                    <div class="control-group">
+                        <label for="snr-range">Range</label>
+                        <select id="snr-range"><option>Loading…</option></select>
+                    </div>
+                    <div class="snr-custom" id="snr-custom">
+                        <div class="control-group">
+                            <label for="snr-lo">Low (kHz)</label>
+                            <input type="number" id="snr-lo" min="0" step="any" inputmode="decimal">
+                        </div>
+                        <div class="control-group">
+                            <label for="snr-hi">High (kHz)</label>
+                            <input type="number" id="snr-hi" min="0" step="any" inputmode="decimal">
+                        </div>
+                        <div class="control-group">
+                            <label>&nbsp;</label>
+                            <button type="button" id="snr-apply">Apply</button>
+                        </div>
+                    </div>
+                    <div class="control-group">
+                        <label for="snr-avg">Averaging</label>
+                        <select id="snr-avg">
+                            <option value="0" selected>Latest sweep</option>
+                            <option value="2">2 s</option>
+                            <option value="5">5 s</option>
+                            <option value="10">10 s</option>
+                            <option value="30">30 s</option>
+                            <option value="60">60 s</option>
+                        </select>
+                    </div>
+                    <div class="control-group">
+                        <label for="snr-interval">Poll every</label>
+                        <select id="snr-interval">
+                            <option value="1" selected>1 s</option>
+                            <option value="2">2 s</option>
+                            <option value="5">5 s</option>
+                            <option value="10">10 s</option>
+                            <option value="30">30 s</option>
+                            <option value="60">60 s</option>
+                        </select>
+                    </div>
+                    <div class="control-group">
+                        <label for="snr-window">Chart shows</label>
+                        <select id="snr-window">
+                            <option value="5">5 min</option>
+                            <option value="15" selected>15 min</option>
+                            <option value="60">1 hour</option>
+                            <option value="360">6 hours</option>
+                        </select>
+                    </div>
+                    <div class="control-group">
+                        <label>&nbsp;</label>
+                        <button type="button" id="snr-toggle">⏸ Pause</button>
+                    </div>
+                    <div class="control-group">
+                        <label for="snr-marker-text">Marker</label>
+                        <div style="display: flex; gap: 6px;">
+                            <input type="text" id="snr-marker-text" maxlength="40" placeholder="e.g. Antenna B">
+                            <button type="button" id="snr-mark" class="snr-btn-mark">📍 Mark</button>
+                        </div>
+                    </div>
+                    <div class="control-group">
+                        <label>&nbsp;</label>
+                        <button type="button" id="snr-csv" class="snr-btn-secondary">💾 CSV</button>
+                    </div>
+                    <div class="control-group">
+                        <label>&nbsp;</label>
+                        <button type="button" id="snr-clear" class="snr-btn-secondary">🗑 Clear</button>
+                    </div>
+                </div>
+
+                <div class="snr-readout">
+                    <div class="snr-stat primary"><div class="label">SNR (p95−p5)</div><div class="value" id="snr-v-snr">--</div></div>
+                    <div class="snr-stat"><div class="label">p5 (noise)</div><div class="value noise-floor" id="snr-v-p5">--</div></div>
+                    <div class="snr-stat"><div class="label">p10</div><div class="value" id="snr-v-p10">--</div></div>
+                    <div class="snr-stat"><div class="label">p50</div><div class="value" id="snr-v-p50">--</div></div>
+                    <div class="snr-stat"><div class="label">p95</div><div class="value signal-peak" id="snr-v-p95">--</div></div>
+                    <div class="snr-stat"><div class="label">Min</div><div class="value" id="snr-v-min">--</div></div>
+                    <div class="snr-stat"><div class="label">Max</div><div class="value" id="snr-v-max">--</div></div>
+                    <div class="snr-stat"><div class="label">Mean</div><div class="value" id="snr-v-mean">--</div></div>
+                    <div class="snr-stat"><div class="label">Occupancy</div><div class="value" id="snr-v-occ">--</div></div>
+                </div>
+                <div class="snr-meta-row">
+                    <span id="snr-meta">Waiting for the first reading…</span>
+                    <span><span id="snr-count">0 readings recorded</span> · <span id="snr-status" class="snr-status">Starting</span></span>
+                </div>
+
+                <div style="height: 320px; position: relative;">
+                    <canvas id="snr-chart"></canvas>
+                </div>
+
+                <div class="snr-capture">
+                    <h3>🔬 Compare antennas</h3>
+                    <p>
+                        Name a capture and record it for a while: its readings are averaged into one data set. Swap the
+                        antenna (or anything else) and capture again, then compare. Captures are kept in this browser, so
+                        they survive a reload. Conditions change over time, so take captures close together, or go
+                        A, B, A to check that the baseline hasn't drifted.
+                    </p>
+                    <div class="snr-capture-controls">
+                        <div class="control-group">
+                            <label for="snr-cap-name">Capture name</label>
+                            <input type="text" id="snr-cap-name" maxlength="40" placeholder="e.g. 20m vertical">
+                        </div>
+                        <div class="control-group">
+                            <label for="snr-cap-duration">Duration</label>
+                            <select id="snr-cap-duration">
+                                <option value="30">30 s</option>
+                                <option value="60" selected>1 min</option>
+                                <option value="120">2 min</option>
+                                <option value="300">5 min</option>
+                                <option value="600">10 min</option>
+                                <option value="0">Until stopped</option>
+                            </select>
+                        </div>
+                        <div class="control-group">
+                            <label>&nbsp;</label>
+                            <button type="button" id="snr-cap-start" class="snr-btn-capture">⏺ Capture</button>
+                        </div>
+                        <div class="control-group">
+                            <label>&nbsp;</label>
+                            <button type="button" id="snr-cap-cancel" class="snr-btn-help" style="display: none;">Cancel</button>
+                        </div>
+                        <div class="control-group">
+                            <label>&nbsp;</label>
+                            <span id="snr-cap-status" class="snr-status">No capture running</span>
+                        </div>
+                    </div>
+
+                    <div class="snr-compare" id="snr-compare" style="display: none;">
+                        <div class="snr-compare-table-wrap">
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th title="Baseline">Base</th>
+                                        <th>Capture</th>
+                                        <th>Measured</th>
+                                        <th>SNR (dB)</th>
+                                        <th>p5 (dB)</th>
+                                        <th>p50 (dB)</th>
+                                        <th>p95 (dB)</th>
+                                        <th>Occupancy (%)</th>
+                                        <th></th>
+                                    </tr>
+                                </thead>
+                                <tbody id="snr-compare-body"></tbody>
+                            </table>
+                        </div>
+                        <p style="margin: 0 0 8px;">Values are mean ± standard deviation over the capture. Δ is the difference from the baseline.</p>
+                        <div style="height: 260px; position: relative;">
+                            <canvas id="snr-compare-chart"></canvas>
+                        </div>
+                        <div style="display: flex; gap: 10px; margin-top: 10px; flex-wrap: wrap;">
+                            <button type="button" id="snr-cap-csv" class="snr-btn-secondary">💾 Comparison CSV</button>
+                            <button type="button" id="snr-cap-clear" class="snr-btn-secondary">🗑 Delete all captures</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
             <div class="dashboard" id="dashboard">
                 <div class="loading">
                     <div class="spinner"></div>
@@ -800,6 +1264,72 @@
         </div>
     </div>
 
+    <!-- SNR API help -->
+    <div id="snrHelpModal" class="snr-help-overlay" role="dialog" aria-modal="true" aria-labelledby="snr-help-title">
+        <div class="snr-help">
+            <div class="snr-help-head">
+                <h3 id="snr-help-title">📶 SNR API</h3>
+                <button type="button" id="snr-help-close" aria-label="Close">✕</button>
+            </div>
+            <div class="snr-help-body">
+                <p>
+                    Everything in the SNR Monitor comes from one endpoint you can call yourself, from a script, a
+                    spreadsheet or a logging tool. The examples below use this receiver's address
+                    (<code id="snr-help-origin"></code>) and your current selection, so they work as pasted.
+                </p>
+
+                <h4>Endpoints</h4>
+                <table>
+                    <tr><th>Request</th><th>Returns</th></tr>
+                    <tr><td><code>GET /api/snr?range=&lt;name&gt;</code></td><td>One reading for a named range.</td></tr>
+                    <tr><td><code>GET /api/snr?lo=&lt;kHz&gt;&amp;hi=&lt;kHz&gt;</code></td><td>One reading for a custom range.</td></tr>
+                    <tr><td><code>GET /api/snr/ranges</code></td><td>Every named range, with its span, source and bin width.</td></tr>
+                </table>
+
+                <h4>Parameters</h4>
+                <table>
+                    <tr><th>Name</th><th>Meaning</th></tr>
+                    <tr><td><code>range</code></td><td>An amateur band configured on this receiver (e.g. <code>20m</code>, <code>6m</code> if enabled), a broadcast band (<code>bc-lw</code>, <code>bc-mw</code>, <code>bc120m</code> … <code>bc11m</code>), <code>all</code> (0–30 MHz) or <code>hf</code> (1.8–30 MHz). Not case-sensitive.</td></tr>
+                    <tr><td><code>lo</code>, <code>hi</code></td><td>Custom edges in kHz, decimals allowed. Use instead of <code>range</code>, not with it. Must lie within the receiver's coverage, which can extend above 30 MHz.</td></tr>
+                    <tr><td><code>avg</code></td><td>Optional. Seconds to average (0–60, whole numbers). 0 or omitted uses the latest sweep only. Averaging smooths p95 at the cost of reacting slower.</td></tr>
+                </table>
+
+                <h4>Response fields</h4>
+                <table>
+                    <tr><th>Field</th><th>Meaning</th></tr>
+                    <tr><td><code>snr_db</code></td><td>p95 − p5, the same measure the KiwiSDR SNR page uses.</td></tr>
+                    <tr><td><code>p5_db</code>, <code>p10_db</code>, <code>p50_db</code>, <code>p95_db</code></td><td>Percentiles of the bins in range. p5 is the noise floor estimate, p95 the signal peaks.</td></tr>
+                    <tr><td><code>min_db</code>, <code>max_db</code>, <code>mean_db</code></td><td>Extremes and mean of the bins.</td></tr>
+                    <tr><td><code>occupancy_pct</code></td><td>Share of bins more than 10 dB above p5.</td></tr>
+                    <tr><td><code>source</code>, <code>bin_width_hz</code>, <code>bins</code></td><td>What the reading was measured from: a band's own channel (fine bins) or <code>wideband</code> (coarse bins).</td></tr>
+                    <tr><td><code>avg_sec</code>, <code>samples</code></td><td>The averaging window asked for, and how many sweeps it held.</td></tr>
+                    <tr><td><code>timestamp</code></td><td>When the newest sweep was taken (UTC). Unchanged between two polls means no new sweep yet.</td></tr>
+                    <tr><td><code>range</code>, <code>lo_khz</code>, <code>hi_khz</code></td><td>What was asked for.</td></tr>
+                </table>
+
+                <h4>Good to know</h4>
+                <ul>
+                    <li>New sweeps arrive about once a second, so polling faster than that returns the same reading.</li>
+                    <li>Requests are limited to 4 a second per address, across all ranges.</li>
+                    <li>Only compare readings with the same <code>source</code> and <code>bin_width_hz</code>. Percentiles depend on bin width, so 20m from its own channel won't match 20m sliced from the wideband spectrum. A range that fits inside a band always uses that band's channel.</li>
+                    <li>A range must cover at least 10 bins; narrower ranges are refused.</li>
+                    <li>Nothing is stored on the server. Keep a script running, or use the CSV button, to record a session.</li>
+                </ul>
+
+                <h4>Comparing antennas from a script</h4>
+                <p>
+                    The page's capture tool runs in the browser. To do the same from a script, log readings for each
+                    antenna to its own file (the CSV example below), then compare the averages of <code>snr_db</code>,
+                    <code>p5_db</code> and <code>p95_db</code> between files. Use the same range and <code>avg</code>
+                    for both, or the numbers won't be comparable.
+                </p>
+
+                <h4>Examples</h4>
+                <div id="snr-help-examples"></div>
+            </div>
+        </div>
+    </div>
+
     <!-- Footer -->
     <footer class="site-footer">
         <p>Download <a href="https://ubersdr.org" target="_blank">UberSDR</a> • Powered by <a href="https://github.com/ka9q/ka9q-radio" target="_blank">ka9q-radio</a> • Admin <a href="/admin.html" target="_blank">Login</a> • <a href="/" target="_blank">SDR Interface</a> <span id="footer-version"></span></p>
@@ -814,6 +1344,7 @@
     <script src="minimal-radio.js"></script>
     <script src="noise-analysis-overlay.js"></script>
     <script src="noisefloor.js"></script>
+    <script src="snr-monitor.js"></script>
     <script>
         // Function to close the noise analysis warning modal
         window.closeNoiseAnalysisWarning = function(proceed) {

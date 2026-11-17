@@ -40,7 +40,7 @@
 #  timetravel.js, minimal-radio.js, server-nr.js, noise-analysis-overlay.js,
 #  maidenhead-grid.js, psk_rank.js, wspr_rank.js, wspr_phone_prediction.js,
 #  pskreporter_analytics.js, decode_metrics.js, decode_rates.js, date-picker.js,
-#  cw_metrics.js, languages.js, noisefloor_aggregate.js,
+#  cw_metrics.js, languages.js, noisefloor_aggregate.js, snr-monitor.js,
 #  chart.umd.min.js, chartjs-*.min.js, leaflet*.js, L.Terminator.js,
 #  codemirror-bundle.min.js, d3*.min.js (other pages)
 

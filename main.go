@@ -3057,6 +3057,14 @@ func main() {
 		handleNoiseFloorWideBandFFT(w, r, noiseFloorMonitor, ipBanManager, fftRateLimiter)
 	}))
 
+	// On-demand SNR for a band or custom range, from the existing noise-floor buffers
+	http.HandleFunc("/api/snr", func(w http.ResponseWriter, r *http.Request) {
+		handleSNR(w, r, noiseFloorMonitor, ipBanManager, fftRateLimiter)
+	})
+	http.HandleFunc("/api/snr/ranges", func(w http.ResponseWriter, r *http.Request) {
+		handleSNRRanges(w, r, noiseFloorMonitor, ipBanManager)
+	})
+
 	// Spectrogram endpoints (rate limited: 1 req/10s per IP for PNG, no limit for list/meta)
 	// All endpoints accept an optional ?band= query param to select a per-band recorder.
 	http.HandleFunc("/api/spectrogram", func(w http.ResponseWriter, r *http.Request) {

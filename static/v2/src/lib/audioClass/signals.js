@@ -2,14 +2,14 @@
 //
 // The network that says VOICE / MUSIC / NOISE also computes, for every 5 s
 // window, a 640-number embedding of what it heard. audioclass/signals.bin holds
-// the same embedding for some 1,600 recordings from the Signal Identification
-// Wiki (sigidwiki.com) of about 500 signals, plus synthetic CW, FT8, FT4 and
-// RTTY, made by the ubersdr-classifier repository (train/export_signals.py).
+// the same embedding for some 1,600 reference recordings of about 500 signals,
+// plus synthetic CW, FT8, FT4 and RTTY, made by the ubersdr-classifier
+// repository (train/export_signals.py).
 // What is heard is named after the recording it is closest to, averaged over
 // the windows since the last retune: one window is too little to tell FT8 from
 // its neighbours, a minute of them is plenty.
 //
-// The rule is the one measured on the wiki recordings and on a receiver's live
+// The rule is the one measured on the reference recordings and on a receiver's live
 // audio (ubersdr-classifier, train/live_test.py): a name only when the closest
 // signal has at least 70% of the probability, else a family (FSK, PSK...) when
 // that has 70%, else nothing. Voice is AudioSet's speech tag: windows heard as

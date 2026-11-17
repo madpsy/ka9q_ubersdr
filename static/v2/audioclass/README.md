@@ -7,7 +7,7 @@ voice, music or noise.
 | File | What it is | Made by |
 |---|---|---|
 | `mn05_as_mAP_443.pt` | EfficientAT mn05 weights, the official release file | Not built: committed as published |
-| `signals.bin` | Signal references: what mn05 makes of ~1,600 Signal Identification Wiki recordings of ~500 signals, plus synthetic CW, FT8, FT4 and RTTY; how the badge names FT8, CW, RTTY... (`src/lib/audioClass/signals.js` says how) | `train/export_signals.py` in the ubersdr-classifier repository |
+| `signals.bin` | Signal references: what mn05 makes of ~1,600 reference recordings of ~500 signals, plus synthetic CW, FT8, FT4 and RTTY; how the badge names FT8, CW, RTTY... (`src/lib/audioClass/signals.js` says how) | `train/export_signals.py` in the ubersdr-classifier repository |
 
 The classifier itself is WebAssembly built from C
 (`../native/audioclass/`), carried inside the classifier's worker bundle
@@ -57,8 +57,3 @@ the MIT licence:
 
 **The voice / music / noise rules** are NightDX's
 (<https://github.com/marcozennaro/nightdx>, MIT, © Marco Zennaro).
-
-**The signal references** (`signals.bin`) are derived from the audio samples
-on the Signal Identification Wiki (<https://www.sigidwiki.com>): one
-640-number mn05 embedding per recording, not the audio itself. The wiki
-declares no licence for its uploads.

@@ -173,7 +173,7 @@ t('the badge: a name first, then a kind, then VOICE / MUSIC / NOISE', () => {
     assert.strictEqual(b.tone, 'accent');
     assert.match(b.title, /Morse Code \(CW\) — 92% likely, over the last 33 s/);
     assert.match(b.title, /Next closest: ICV 5%/);
-    assert.match(b.title, /sigidwiki/);
+    assert.match(b.title, /reference recordings/);
     const f = V.badge({ status: 'ready', history: [named({ say: 'family', p: 0.4 })] }, 'usb');
     assert.strictEqual(f.text, 'OOK');
     assert.match(f.title, /not sure which signal/);

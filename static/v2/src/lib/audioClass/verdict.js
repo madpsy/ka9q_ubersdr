@@ -105,7 +105,7 @@ function signalTitle(sig, latest, state, named) {
     const others = sig.top.slice(named ? 1 : 0).filter((t) => t.p >= 0.01);
     if (others.length) lines.push(`${named ? 'Next closest' : 'Closest'}: ${others.map((t) => `${t.name} ${pct(t.p)}`).join(', ')}`);
     if (latest && latest.label) lines.push(`Also heard as: ${NAME[latest.label] || latest.label}`);
-    lines.push('Named in this browser by comparing with the Signal Identification Wiki\'s recordings (sigidwiki.com)');
+    lines.push('Named in this browser by comparing with reference recordings of known signals');
     lines.push('Click to switch it off (Display panel)');
     return lines.join('\n');
 }

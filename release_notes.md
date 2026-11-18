@@ -1,4 +1,17 @@
-# Latest Stable - 0.1.68
+# Latest Stable - 0.1.69
+
+## Version 0.1.69 - 18th November 2026
+
+### New Features
+- Added **TX Mute Hangtime** for Rig Control - delays how longer after PTT releases for audio to unmute
+- Added **Per Second SNR** which is a new endpoint (consumed  by noisefloor.html with a ? for API examples)
+- Added **MCP Endpoints** for additional data available via agents etc. Note MCP now has IP allow list and auth token (enabled by default)
+- Added **Chat Moderation** in Admin -> Chat -> Moderation to help with bad actors
+- Added **Signal Classifier** which attempts to identity a signal by the audio - this is just an experiment but you will see a new pill above the spectrum/waterfall with a best guess of the type of signal. Accuracy is work in progress. Click the pill to disable
+- Added **On-load map shows other instances** which shows all instances on the 'on-load' map. Clicking on an instance shows info/connect button. Can disable in Admin -> Config -> Server -> Nearby Receivers Enabled (only useful with web UI not the desktop client)
+
+### Bug Fixes
+- Fixed **Ban IP** which should have worked with CIDR ranges but did not
 
 ## Version 0.1.68 - 5th November 2026
 

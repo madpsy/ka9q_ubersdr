@@ -1139,6 +1139,11 @@ export default function SpectrumView() {
     // The draw loop's paint, for the frame handler to call while the tab is
     // hidden — see the data effect. Null while the loop is not running.
     const paintRef = useRef(null);
+    // When the draw loop last ran, and how long it may legitimately sleep
+    // between runs: what the frame handler uses to tell that animation frames
+    // have stopped — see the data effect.
+    const loopAtRef = useRef(0);
+    const loopStallRef = useRef(Infinity);
 
     const [hoverInfo, setHoverInfo] = useState(null);
     const hovering = hoverInfo != null;
@@ -1409,8 +1414,18 @@ export default function SpectrumView() {
             // background" on, the frame itself is the clock instead: socket
             // messages are not throttled the way timers are. paint() applies
             // the waterfall speed cap exactly as the loop would.
-            if (document.hidden && dispRef.current.backgroundWaterfall && paintRef.current) {
-                paintRef.current(performance.now());
+            //
+            // "Hidden" is also the draw loop having stopped, not document.hidden
+            // alone. The two agree in a browser tab, but nothing promises they
+            // agree in a desktop window: on Linux whether a minimised, covered or
+            // other-workspace window reports itself hidden is up to the window
+            // manager, and one that stops animation frames without saying so
+            // would bring the waterfall back with the gap despite the setting.
+            if (dispRef.current.backgroundWaterfall && paintRef.current) {
+                const now = performance.now();
+                if (document.hidden || now - loopAtRef.current > loopStallRef.current) {
+                    paintRef.current(now);
+                }
             }
         });
         return off;
@@ -1523,6 +1538,7 @@ export default function SpectrumView() {
         // be the pipeline this cap exists to stop.
         const stamps = [];
         const calibrate = (ts) => {
+            loopAtRef.current = performance.now();
             stamps.push(ts);
             if (stamps.length < 10) { raf = requestAnimationFrame(calibrate); return; }
             const gaps = stamps.slice(1).map((t, i) => t - stamps[i]).sort((a, b) => a - b);
@@ -1534,7 +1550,7 @@ export default function SpectrumView() {
         // Armed, then painted. The two were one function, and separating
         // them is what lets a resize paint out of band without also asking for
         // a second frame — see `repaint` and the sizing effect.
-        const loop = (ts) => { arm(ts); paint(ts); };
+        const loop = (ts) => { loopAtRef.current = performance.now(); arm(ts); paint(ts); };
 
         const paint = (ts) => {
             const g = gfx.current;
@@ -1636,6 +1652,11 @@ export default function SpectrumView() {
         // which is what a splitter drag is — still paints on each of them.
         paint(performance.now());
         paintRef.current = paint;
+        // A capped loop sleeps a whole period between frames by design, so
+        // "stopped" is a few of those, and never less than a quarter second —
+        // a busy main thread can hold a frame back by more than one vsync.
+        loopAtRef.current = performance.now();
+        loopStallRef.current = Math.max(250, 2 * capMs + 50);
 
         // Straight in uncapped; through the measurement burst when capped, and
         // only when the interval is not already known. The burst draws nothing

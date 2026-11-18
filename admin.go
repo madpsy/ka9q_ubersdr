@@ -3335,15 +3335,20 @@ func (ah *AdminHandler) HandleBanUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	req.IP = strings.TrimSpace(req.IP)
 	if req.IP == "" {
 		http.Error(w, "IP address is required", http.StatusBadRequest)
 		return
 	}
 
-	if net.ParseIP(req.IP) == nil {
-		http.Error(w, "Invalid IP address", http.StatusBadRequest)
+	// A single address or a CIDR range: the ban list, the session kick and the
+	// chat cleanup all take either.
+	ip, err := normalizeBanTarget(req.IP)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+	req.IP = ip
 
 	if req.Reason == "" {
 		req.Reason = "Banned by admin"

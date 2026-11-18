@@ -110,6 +110,26 @@ func parseBanEntry(ban BannedIP) *bannedEntry {
 	return e
 }
 
+// normalizeBanTarget validates an IP address or CIDR range for the ban list
+// and returns it in canonical form. A range is reduced to its network address
+// (192.0.2.5/24 -> 192.0.2.0/24) so the stored entry matches what the
+// list shows and what an unban of the same range sends.
+func normalizeBanTarget(s string) (string, error) {
+	s = strings.TrimSpace(s)
+	if strings.Contains(s, "/") {
+		_, network, err := net.ParseCIDR(s)
+		if err != nil {
+			return "", fmt.Errorf("invalid CIDR range %q", s)
+		}
+		return network.String(), nil
+	}
+	ip := net.ParseIP(s)
+	if ip == nil {
+		return "", fmt.Errorf("invalid IP address %q", s)
+	}
+	return ip.String(), nil
+}
+
 // ipMatchesEntry reports whether the given (real) IP address matches a ban entry,
 // handling both exact-IP and CIDR-range entries.
 func ipMatchesEntry(ip string, e *bannedEntry) bool {

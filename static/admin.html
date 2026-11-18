@@ -6270,7 +6270,7 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
                         input.type = 'number';
                         input.value = value;
                         input.step = value % 1 === 0 ? '1' : '0.01';
-                    } else if (typeof value === 'string' && (key === 'custom_head_html' || key === 'custom_body_html' || key === 'custom_ads_txt' || value.includes('\n') || value.length > 100)) {
+                    } else if (typeof value === 'string' && fullPath !== 'mcp.auth_token' && (key === 'custom_head_html' || key === 'custom_body_html' || key === 'custom_ads_txt' || value.includes('\n') || value.length > 100)) {
                         // Use textarea for multiline strings or long strings
                         input = document.createElement('textarea');
                         input.style.width = '100%';
@@ -6434,6 +6434,90 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
                         uuidRow.appendChild(revealBtn);
 
                         field.appendChild(uuidRow);
+                        container.appendChild(field);
+                        continue;
+                    }
+
+                    // Special handling for mcp.auth_token — masked, with reveal,
+                    // copy and generate, validated with the same rules as the server
+                    // (32-256 chars of A-Z a-z 0-9 - . _ ~).
+                    if (fullPath === 'mcp.auth_token') {
+                        input.type = 'password';
+                        input.autocomplete = 'off';
+                        input.spellcheck = false;
+                        input.maxLength = 256;
+                        input.style.flex = '1';
+                        input.style.fontFamily = 'monospace';
+                        input.dataset.path = fullPath;
+
+                        const tokRow = document.createElement('div');
+                        tokRow.style.cssText = 'display:flex;gap:8px;align-items:center;flex-wrap:wrap;';
+                        tokRow.appendChild(input);
+
+                        const tokHint = document.createElement('small');
+                        tokHint.style.cssText = 'display:block;margin-top:5px;font-size:12px;color:#666;';
+                        const defaultHint = 'Clients send this as "Authorization: Bearer <token>" or ?token=<token>. 32-256 characters: letters, digits and - . _ ~ only. Leave blank to keep the current token. Applies on Save, no restart needed.';
+                        tokHint.textContent = defaultHint;
+
+                        const validTok = (v) => /^[A-Za-z0-9._~-]{32,256}$/.test(v);
+                        const applyTok = () => {
+                            const v = input.value.trim();
+                            input.value = v;
+                            if (v !== '' && !validTok(v)) {
+                                tokHint.textContent = 'Invalid token: must be 32-256 characters of letters, digits and - . _ ~ only. Not saved.';
+                                tokHint.style.color = '#dc3545';
+                                input.style.borderColor = '#dc3545';
+                                return;
+                            }
+                            tokHint.textContent = defaultHint;
+                            tokHint.style.color = '#666';
+                            input.style.borderColor = '';
+                            updateConfigValue(fullPath, v);
+                        };
+                        input.addEventListener('input', () => {
+                            const v = input.value.trim();
+                            const bad = v !== '' && !validTok(v);
+                            input.style.borderColor = bad ? '#dc3545' : '';
+                        });
+                        input.addEventListener('change', applyTok);
+
+                        const mkBtn = (label, title) => {
+                            const b = document.createElement('button');
+                            b.type = 'button';
+                            b.textContent = label;
+                            b.title = title;
+                            b.style.cssText = 'padding:6px 12px;font-size:13px;border:1px solid #ccc;border-radius:5px;background:#f5f5f5;cursor:pointer;white-space:nowrap;flex-shrink:0;';
+                            tokRow.appendChild(b);
+                            return b;
+                        };
+                        const revealBtn = mkBtn('👁 Reveal', 'Show or hide the token');
+                        revealBtn.addEventListener('click', () => {
+                            const hidden = input.type === 'password';
+                            input.type = hidden ? 'text' : 'password';
+                            revealBtn.textContent = hidden ? '🙈 Hide' : '👁 Reveal';
+                        });
+                        const copyBtn = mkBtn('📋 Copy', 'Copy the token to the clipboard');
+                        copyBtn.addEventListener('click', async () => {
+                            try {
+                                await navigator.clipboard.writeText(input.value);
+                                showAlert('MCP auth token copied to clipboard', 'success');
+                            } catch (e) {
+                                showAlert('Could not copy token: ' + e.message, 'error');
+                            }
+                        });
+                        const genBtn = mkBtn('🎲 Generate', 'Generate a new random token (click Save to apply; existing clients will need the new token)');
+                        genBtn.addEventListener('click', () => {
+                            const bytes = new Uint8Array(32);
+                            crypto.getRandomValues(bytes);
+                            input.value = Array.from(bytes, b => b.toString(16).padStart(2, '0')).join('');
+                            input.type = 'text';
+                            revealBtn.textContent = '🙈 Hide';
+                            applyTok();
+                            showAlert('New MCP auth token generated. Click Save to apply it; existing MCP clients will need the new token.', 'info');
+                        });
+
+                        field.appendChild(tokRow);
+                        field.appendChild(tokHint);
                         container.appendChild(field);
                         continue;
                     }

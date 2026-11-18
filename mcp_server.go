@@ -522,6 +522,11 @@ func (m *MCPServer) HandleMCP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Then the auth token, when mcp.require_auth is on (the default).
+	if !checkMCPAuth(w, r) {
+		return
+	}
+
 	// Log MCP requests if it's a POST with JSON body
 	if r.Method == http.MethodPost && globalMCPRequestLogger != nil {
 		// Read and log the request body

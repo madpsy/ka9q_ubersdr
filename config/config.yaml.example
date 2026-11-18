@@ -2372,9 +2372,9 @@ mcp:
   enabled: false
 
   # List of IP addresses or CIDR ranges allowed to use the MCP endpoint
-  # The endpoint has no authentication, and some tools describe the receiver's
-  # listeners (where they are, what they tune to), so by default it only
-  # answers clients on private networks and the local machine.
+  # Some tools describe the receiver's listeners (where they are, what they
+  # tune to), so by default it only answers clients on private networks and
+  # the local machine. This applies on top of the auth token below.
   # Leave empty (or remove) to use the default:
   #   10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16 (RFC 1918 private ranges),
   #   127.0.0.0/8 and ::1 (loopback)
@@ -2402,6 +2402,22 @@ mcp:
   #     - get_active_sessions
   #     - get_session_history
   disabled_tools: []
+
+  # Require clients to present auth_token (default: true)
+  # Clients send it as an HTTP header:
+  #   Authorization: Bearer <token>
+  # or, for clients that can only be given a URL, as a query parameter:
+  #   https://your-receiver/api/mcp?token=<token>
+  # (the header is preferred: a URL can end up in proxy logs and history)
+  # Set to false to rely on allowed_ips alone.
+  require_auth: true
+
+  # Shared secret for require_auth. Leave empty to have a random 64-character
+  # token generated at startup and saved here. Can also be changed or
+  # regenerated in admin.html -> Config -> MCP, which applies without a restart.
+  # 32-256 characters of letters, digits and - . _ ~ only; an invalid token
+  # refuses every MCP client until it is fixed.
+  auth_token: ""
 
   # MCP Endpoint:
   #   POST /api/mcp

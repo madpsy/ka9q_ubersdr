@@ -488,6 +488,10 @@ func main() {
 		log.Fatalf("Invalid configuration: %v", err)
 	}
 
+	// MCP token auth defaults: require_auth on and a generated auth_token,
+	// saved back to config.yaml when they were missing.
+	ensureMCPAuthForStartup(config, configPath)
+
 	// Initialize SQLite database early so all subsystems can use it.
 	// The database file lives at <configDir>/db/ubersdr.db — alongside all
 	// other data directories so it is covered by the same volume mount in Docker.

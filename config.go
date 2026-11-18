@@ -1051,6 +1051,15 @@ type MCPConfig struct {
 	// DisabledTools names tools that are not offered at all.
 	DisabledTools []string `yaml:"disabled_tools"`
 
+	// RequireAuth makes clients present AuthToken, as an
+	// "Authorization: Bearer" header or a ?token= query parameter. nil (key
+	// absent) means true; see mcp_auth.go.
+	RequireAuth *bool `yaml:"require_auth"`
+
+	// AuthToken is the shared secret clients must send when RequireAuth is on.
+	// Empty means one is generated at startup and written back to config.yaml.
+	AuthToken string `yaml:"auth_token"`
+
 	allowedNets []*net.IPNet // Parsed AllowedIPs (internal use)
 }
 

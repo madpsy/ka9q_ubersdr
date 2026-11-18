@@ -7,9 +7,9 @@ import (
 )
 
 // mcpDefaultAllowedIPs is the MCP allowlist when mcp.allowed_ips is empty or
-// unset: the RFC 1918 private ranges plus loopback. The endpoint has no
-// authentication, and some of its tools describe the receiver's listeners, so
-// it is closed to the internet unless the operator opens it deliberately.
+// unset: the RFC 1918 private ranges plus loopback. Some of its tools describe
+// the receiver's listeners, so it is closed to the internet unless the operator
+// opens it deliberately, on top of the token check in mcp_auth.go.
 //
 // 172.16.0.0/12 also covers the Docker networks (172.20.0.0/16 and friends), so
 // a client in a container next to UberSDR is allowed out of the box.

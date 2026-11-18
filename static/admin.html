@@ -5905,8 +5905,19 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
             const height = 700;
             const left = (screen.width - width) / 2;
             const top = (screen.height - height) / 2;
-            window.open(url, 'manage_addons_' + Date.now(),
+            const win = window.open(url, 'manage_addons_' + Date.now(),
                 `width=${width},height=${height},left=${left},top=${top},resizable=yes,scrollbars=yes,status=no,toolbar=no,menubar=no,location=no`);
+            if (!win) return;
+
+            // Refresh the addon proxy list once the manager window is closed,
+            // so addons installed/removed there show up without a manual reload.
+            const watch = setInterval(() => {
+                if (!win.closed) return;
+                clearInterval(watch);
+                if (document.getElementById('proxyTab')?.classList.contains('active')) {
+                    loadAddonProxies();
+                }
+            }, 1000);
         }
 
         // Open Start Support script in popup terminal window

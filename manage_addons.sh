@@ -470,12 +470,16 @@ api_update_addon_proxy() {
         return 1
     fi
 
-    # Preserve the allowed_ips currently set on the live proxy so updating an
-    # addon never clobbers IPs added since installation. Fall back to the
-    # addons.json defaults only if the live proxy can't be read.
-    local live_ips=""
-    live_ips=$(_api_curl GET "/admin/addon-proxies" \
-        | jq -c --arg name "$name" '.[] | select(.name == $name) | .allowed_ips // empty') || live_ips=""
+    # Preserve the settings an operator may have changed on the live proxy
+    # (enabled, require_admin, rate_limit, allowed_ips) so updating an addon
+    # never clobbers them. host/port/strip_prefix/rewrite_origin still come
+    # from addons.json. Fall back to the addons.json defaults only if the
+    # live proxy can't be read.
+    local live=""
+    live=$(_api_curl GET "/admin/addon-proxies" \
+        | jq -c --arg name "$name" '.[] | select(.name == $name)
+            | {enabled, require_admin, rate_limit, allowed_ips}
+            | with_entries(select(.value != null))') || live=""
 
     local payload
     payload=$(echo "$addon" | jq '{
@@ -489,8 +493,8 @@ api_update_addon_proxy() {
         rate_limit:     .rate_limit,
         allowed_ips:    .allowed_ips
     }')
-    if [[ -n "$live_ips" ]]; then
-        payload=$(echo "$payload" | jq --argjson ips "$live_ips" '.allowed_ips = $ips')
+    if [[ -n "$live" ]]; then
+        payload=$(echo "$payload" | jq --argjson live "$live" '. + $live')
     fi
     # If the allow list opens up all of IPv4, open up IPv6 too.
     payload=$(echo "$payload" | jq '.allowed_ips |=

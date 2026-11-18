@@ -73,6 +73,7 @@ func TestCheckMCPAuth(t *testing.T) {
 		{"basic scheme", "Basic " + tok, "", false},
 		{"query", "", tok, true},
 		{"wrong query", "", "nope", false},
+		{"wrong header beats right query", "Bearer nope", tok, false},
 	}
 	for _, c := range cases {
 		u := "/api/mcp"

@@ -2406,9 +2406,9 @@ mcp:
   # Require clients to present auth_token (default: true)
   # Clients send it as an HTTP header:
   #   Authorization: Bearer <token>
-  # or, for clients that can only be given a URL, as a query parameter:
+  # or, for clients that only take a URL (e.g. a claude.ai connector), in it:
   #   https://your-receiver/api/mcp?token=<token>
-  # (the header is preferred: a URL can end up in proxy logs and history)
+  # (a URL can end up in proxy logs, so prefer the header where possible)
   # Set to false to rely on allowed_ips alone.
   require_auth: true
 

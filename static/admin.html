@@ -6456,7 +6456,7 @@ frame.contentWindow.postMessage({ command: 'getState', params: {} }, SDR_ORIGIN)
 
                         const tokHint = document.createElement('small');
                         tokHint.style.cssText = 'display:block;margin-top:5px;font-size:12px;color:#666;';
-                        const defaultHint = 'Clients send this as "Authorization: Bearer <token>" or ?token=<token>. 32-256 characters: letters, digits and - . _ ~ only. Leave blank to keep the current token. Applies on Save, no restart needed.';
+                        const defaultHint = 'To connect, add ' + window.location.origin + '/api/mcp to your MCP client with the header "Authorization: Bearer <this token>". For claude.ai (or any client that only takes a URL) use ' + window.location.origin + '/api/mcp?token=<this token> instead, and keep that URL private. Leave blank to keep the current token; changes apply on Save.';
                         tokHint.textContent = defaultHint;
 
                         const validTok = (v) => /^[A-Za-z0-9._~-]{32,256}$/.test(v);

@@ -87,14 +87,16 @@ func validateMCPToken(token string) error {
 	return nil
 }
 
-// mcpRequestToken returns the token a request carries, from the Authorization
-// header or, for clients that can only be given a URL, the token query
-// parameter.
+// mcpRequestToken returns the token a request carries: the Bearer token from
+// the Authorization header, or else the token query parameter.
+//
+// The MCP spec says tokens go in the header only, but hosted connectors such
+// as claude.ai take nothing but a URL (their auth is OAuth, which UberSDR does
+// not run), so the query parameter is how they get in. A header, when sent,
+// wins; a URL token can end up in proxy logs, which the admin UI warns about.
 func mcpRequestToken(r *http.Request) string {
-	if h := r.Header.Get("Authorization"); h != "" {
-		if scheme, rest, ok := strings.Cut(h, " "); ok && strings.EqualFold(scheme, "Bearer") {
-			return strings.TrimSpace(rest)
-		}
+	if scheme, rest, ok := strings.Cut(r.Header.Get("Authorization"), " "); ok && strings.EqualFold(scheme, "Bearer") {
+		return strings.TrimSpace(rest)
 	}
 	return r.URL.Query().Get("token")
 }
@@ -114,7 +116,7 @@ func checkMCPAuth(w http.ResponseWriter, r *http.Request) bool {
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("WWW-Authenticate", `Bearer realm="UberSDR MCP"`)
 	w.WriteHeader(http.StatusUnauthorized)
-	w.Write([]byte(`{"error":"Unauthorized: send the MCP auth token as 'Authorization: Bearer <token>' or ?token=<token>"}` + "\n"))
+	w.Write([]byte(`{"error":"Unauthorized: send the MCP auth token as 'Authorization: Bearer <token>' or add ?token=<token> to the URL"}` + "\n"))
 	return false
 }
 

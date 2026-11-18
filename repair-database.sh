@@ -124,7 +124,30 @@ restore() {
             status=1
         fi
     fi
+    show_backups
     exit "$status"
+}
+
+# Lists the damaged originals kept by this and earlier repairs, with the
+# command to delete them. Printed last, once the receiver is running again,
+# so it is the last thing on screen and the command works as shown.
+show_backups() {
+    local list rm_cmd
+    if [ "$(docker inspect -f '{{.State.Running}}' "$CONTAINER" 2>/dev/null)" = "true" ]; then
+        list=$(docker exec "$CONTAINER" sh -c 'ls -1 /app/config/db/ubersdr.db.damaged-* 2>/dev/null' </dev/null)
+        rm_cmd="docker exec $CONTAINER rm"
+    else
+        list=$(docker compose run --rm --no-deps -T --entrypoint sh "$SERVICE" -c \
+            'ls -1 /app/config/db/ubersdr.db.damaged-* 2>/dev/null' </dev/null 2>/dev/null)
+        rm_cmd="cd $UBERSDR_DIR && docker compose run --rm --no-deps --entrypoint rm $SERVICE"
+    fi
+    [ -n "$list" ] || return 0
+    echo
+    echo "The damaged original database is kept as a backup:"
+    echo "$list" | sed 's/^/    /'
+    echo "It takes as much disk space as the database. Once UberSDR is working normally,"
+    echo "delete it with:"
+    echo "$list" | while read -r f; do echo "    $rm_cmd $f"; done
 }
 trap restore EXIT
 trap 'exit 130' INT TERM

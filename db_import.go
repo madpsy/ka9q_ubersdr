@@ -780,8 +780,22 @@ func (imp *DBImporter) importSpots(ctx context.Context) error {
 		return err
 	}
 	log.Printf("[DB import] spots: inserted %d rows total", total)
+
+	// The history page lists decoder names from spot_decoder_names, which
+	// LogSpot keeps up to date; imported spots bypass it. A full read of the
+	// table, but this import runs once, into an empty table, in the background.
+	if _, err := imp.db.ExecContext(ctx, importDecoderNamesSQL); err != nil {
+		log.Printf("[DB import] spot_decoder_names: %v", err)
+	}
 	return nil
 }
+
+// importDecoderNamesSQL records every decoder name in spots with its newest ts.
+const importDecoderNamesSQL = `INSERT INTO spot_decoder_names (name, last_ts)
+	SELECT decoder_name, MAX(ts) FROM spots
+	 WHERE decoder_name IS NOT NULL AND decoder_name != ''
+	 GROUP BY decoder_name
+	ON CONFLICT(name) DO UPDATE SET last_ts = max(last_ts, excluded.last_ts)`
 
 // ─────────────────────────────────────────────────────────────────────────────
 // cw_spots  ← <CWSpotsDir>/YYYY/MM/DD/<band>.csv

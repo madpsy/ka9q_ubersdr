@@ -6,6 +6,7 @@ import (
 	"log"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -25,6 +26,12 @@ type SpotsLogger struct {
 
 	// SQLite read-only connection pool. Used for all SELECT queries.
 	readDB *sql.DB
+
+	// Decoder names recorded in spot_decoder_names, with the hour (Unix
+	// seconds, rounded up) last recorded for each, so a name is written at
+	// most once an hour rather than with every spot.
+	namesMu   sync.Mutex
+	namesSeen map[string]int64
 }
 
 // SetDB wires the SQLite write connection into the spots logger.
@@ -161,8 +168,52 @@ func (sl *SpotsLogger) LogSpot(decode *DecodeInfo) error {
 		log.Printf("[DB] spots insert error: %v", err)
 		return err
 	}
+	sl.noteDecoderName(decode.BandName, decode.Timestamp.Unix())
 
 	return nil
+}
+
+// noteDecoderName records name in spot_decoder_names for the history page's
+// name list. last_ts is rounded up to the end of the hour, so it is never
+// older than the name's newest spot even though only the first spot each
+// hour writes it, and retention never drops a name before its spots.
+func (sl *SpotsLogger) noteDecoderName(name string, ts int64) {
+	if name == "" {
+		return
+	}
+	hourEnd := (ts/3600 + 1) * 3600
+	sl.namesMu.Lock()
+	if sl.namesSeen == nil {
+		sl.namesSeen = map[string]int64{}
+	}
+	if sl.namesSeen[name] >= hourEnd {
+		sl.namesMu.Unlock()
+		return
+	}
+	sl.namesSeen[name] = hourEnd
+	sl.namesMu.Unlock()
+	if _, err := sl.db.Exec(upsertDecoderNameSQL, name, hourEnd); err != nil {
+		log.Printf("[DB] spot_decoder_names: %v", err)
+		sl.namesMu.Lock()
+		delete(sl.namesSeen, name) // try again with the next spot
+		sl.namesMu.Unlock()
+	}
+}
+
+// spotDatesSQL lists the UTC days that have rows in table (spots or
+// cw_spots), newest first. A plain SELECT DISTINCT DATE(ts) has to read one
+// index entry per row to find a few hundred days. This is a loose index scan
+// over the ts-first index instead: it seeks to the newest ts, then to the
+// newest ts before the start of that day, and so on, costing one index seek
+// per day returned however many rows each day has.
+func spotDatesSQL(table string) string {
+	return `WITH RECURSIVE d(t) AS (
+	     SELECT MAX(ts) FROM ` + table + `
+	     UNION ALL
+	     SELECT (SELECT MAX(ts) FROM ` + table + ` WHERE ts < d.t - d.t % 86400)
+	     FROM d WHERE d.t IS NOT NULL
+	 )
+	 SELECT DATE(t, 'unixepoch') FROM d WHERE t IS NOT NULL`
 }
 
 // Close is a no-op — there are no file handles or goroutines to release.
@@ -551,20 +602,7 @@ func (sl *SpotsLogger) GetAvailableDates() ([]string, error) {
 		return nil, fmt.Errorf("spots database is not available")
 	}
 
-	// A plain SELECT DISTINCT ... ORDER BY date DESC has to walk one index entry
-	// per spot to find a few hundred distinct days, so its cost grows with the
-	// table. This recursive form is a loose index scan: it seeks to the newest
-	// day, then repeatedly seeks to the newest day strictly older than the last,
-	// costing one index seek per day returned instead of one per row.
-	rows, err := sl.readDB.Query(
-		`WITH RECURSIVE d(day) AS (
-		     SELECT MAX(DATE(ts, 'unixepoch')) FROM spots
-		     UNION ALL
-		     SELECT (SELECT MAX(DATE(ts, 'unixepoch')) FROM spots
-		              WHERE DATE(ts, 'unixepoch') < d.day)
-		     FROM d WHERE d.day IS NOT NULL
-		 )
-		 SELECT day FROM d WHERE day IS NOT NULL`)
+	rows, err := sl.readDB.Query(spotDatesSQL("spots"))
 	if err != nil {
 		return nil, fmt.Errorf("spots dates query failed: %w", err)
 	}
@@ -587,20 +625,9 @@ func (sl *SpotsLogger) GetAvailableNames() ([]string, error) {
 		return nil, fmt.Errorf("spots database is not available")
 	}
 
-	// Same loose index scan as GetAvailableDates: a handful of decoder names
-	// should cost a handful of index seeks, not a scan of every spot. Both
-	// conditions are repeated inside so the partial index still matches.
-	rows, err := sl.readDB.Query(
-		`WITH RECURSIVE n(name) AS (
-		     SELECT MIN(decoder_name) FROM spots
-		      WHERE decoder_name IS NOT NULL AND decoder_name != ''
-		     UNION ALL
-		     SELECT (SELECT MIN(decoder_name) FROM spots
-		              WHERE decoder_name > n.name
-		                AND decoder_name IS NOT NULL AND decoder_name != '')
-		     FROM n WHERE n.name IS NOT NULL
-		 )
-		 SELECT name FROM n WHERE name IS NOT NULL`)
+	// One row per name (see spot_decoder_names in db_manager.go), already in
+	// name order through its UNIQUE index.
+	rows, err := sl.readDB.Query(`SELECT name FROM spot_decoder_names ORDER BY name`)
 	if err != nil {
 		return nil, fmt.Errorf("spots names query failed: %w", err)
 	}

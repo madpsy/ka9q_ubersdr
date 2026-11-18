@@ -124,8 +124,7 @@ fi
 
 # The schema, read from the original's first page (which every check above
 # has already read). sqlite_* tables are SQLite's own: sqlite_sequence is
-# created and copied separately, and statistics are rebuilt by the receiver's
-# nightly maintenance.
+# created and copied separately, and statistics are rebuilt by ANALYZE below.
 tables=$(sqlite3 "$DB" "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY rowid;") ||
     fail "cannot read the schema"
 [ -n "$tables" ] || fail "the database has no tables"
@@ -216,14 +215,20 @@ for t in $damaged; do
     log "    $t: $n row ids could not be read"
 done
 
-# Then the AUTOINCREMENT counters, so new rows never reuse an old id, and
-# finally the indexes, built from the copied rows.
+# Then the AUTOINCREMENT counters, so new rows never reuse an old id, the
+# indexes, built from the copied rows, and fresh planner statistics.
 {
     if [ "$has_seq" = "1" ]; then
         echo "DELETE FROM main.sqlite_sequence;"
         echo "INSERT INTO main.sqlite_sequence SELECT * FROM old.sqlite_sequence WHERE 1;"
     fi
     cat "$WORK/indexes.sql"
+    # Planner statistics, which are not copied: without them SQLite can pick
+    # an index that reads months of rows for a one-day query. analysis_limit
+    # samples each index (as the receiver's own maintenance does), so this
+    # takes seconds even on a large database.
+    echo "PRAGMA main.analysis_limit=1000;"
+    echo "ANALYZE main;"
     echo "PRAGMA main.journal_mode=DELETE;"
 } | on_new -bail >/dev/null 2>"$WORK/err" ||
     fail "creating the indexes: $(tail -3 "$WORK/err")"
@@ -280,8 +285,6 @@ if [ "$lost_rows" -gt 0 ] || [ "$differ" -eq 1 ]; then
 fi
 if [ "$KEEP_BACKUP" -eq 1 ]; then
     log "The original is kept as $backup"
-    log "Once UberSDR is running normally, remove it with:"
-    log "    docker exec ka9q_ubersdr rm $backup"
 else
     rm -f "$backup"
     log "The original was deleted (--no-backup)."

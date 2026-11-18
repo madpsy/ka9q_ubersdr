@@ -236,6 +236,7 @@ func retentionRules(cfg RetentionConfig) []retentionRule {
 		// the session via ON DELETE CASCADE.
 		{"session", cfg.SessionsDays, "ended_at", ""},
 		{"spots", cfg.SpotsDays, "ts", ""},
+		{"spot_decoder_names", cfg.SpotsDays, "last_ts", ""},
 		{"cw_spots", cfg.CWSpotsDays, "ts", ""},
 		{"chat_messages", cfg.ChatDays, "ts", ""},
 		{"chat_mod_actions", cfg.ChatDays, "ts", ""},
@@ -278,6 +279,10 @@ const retentionInterval = 1 * time.Hour
 // retentionStartupDelay holds the first prune back until the server has come
 // up, rather than competing with everything it does at startup.
 var retentionStartupDelay = 2 * time.Minute
+
+// maintenanceStartupDelay is when the startup analysis of tables with no
+// statistics runs: after the first retention pass.
+var maintenanceStartupDelay = 3 * time.Minute
 
 // StartRetentionLoop starts a background goroutine that prunes old rows from
 // all DB tables shortly after startup and then every retentionInterval
@@ -346,6 +351,20 @@ func (m *DBManager) StartMaintenanceLoop(ctx context.Context, loc *time.Location
 		loc = time.UTC
 	}
 	go func() {
+		// Tables with no statistics yet (a new table, or every table after
+		// the database is rebuilt by repair-database) get them shortly after
+		// startup rather than at the next nightly run: without them the
+		// planner guesses, and can pick an index that reads months of rows
+		// for a one-day query. Tables that already have statistics are left
+		// for the nightly run. It follows the first retention pass, so the
+		// statistics describe the pruned tables.
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(maintenanceStartupDelay):
+		}
+		m.runMaintenance(ctx, "startup", false)
+
 		for {
 			next := nextDailyRun(time.Now(), loc, dbMaintenanceHour, dbMaintenanceMinute)
 			timer := time.NewTimer(time.Until(next))
@@ -1026,15 +1045,33 @@ func (m *DBManager) initSchema() error {
 				dbm          INTEGER            -- transmitter power dBm (WSPR only, else NULL)
 			)`,
 		},
-		{"spots_idx_ts", `CREATE INDEX IF NOT EXISTS spots_idx_ts          ON spots(ts)`},
-		{"spots_idx_mode_band", `CREATE INDEX IF NOT EXISTS spots_idx_mode_band   ON spots(mode, band)`},
-		{"spots_idx_callsign", `CREATE INDEX IF NOT EXISTS spots_idx_callsign    ON spots(callsign)`},
+		// Every spots query has a ts range, so (ts, mode) serves them all,
+		// including the dates list and the retention prune; callsign serves
+		// callsign searches across the whole retention period. On a busy
+		// receiver each index costs about as much as a fifth of the table,
+		// so there are no others: see obsoleteIndexes for the ones earlier
+		// versions created and why each was dropped.
 		{"spots_idx_ts_mode", `CREATE INDEX IF NOT EXISTS spots_idx_ts_mode     ON spots(ts, mode)`},
-		// Expression index: lets DISTINCT DATE(ts,'unixepoch') … ORDER BY date DESC
-		// use an index scan instead of a full table scan (fixes /api/decoder/spots/dates timeout).
-		{"spots_idx_date", `CREATE INDEX IF NOT EXISTS spots_idx_date         ON spots (DATE(ts, 'unixepoch') DESC)`},
-		// Partial index on decoder_name for GetAvailableNames (no index existed before).
-		{"spots_idx_decoder_name", `CREATE INDEX IF NOT EXISTS spots_idx_decoder_name ON spots (decoder_name) WHERE decoder_name IS NOT NULL AND decoder_name != ''`},
+		{"spots_idx_callsign", `CREATE INDEX IF NOT EXISTS spots_idx_callsign    ON spots(callsign)`},
+
+		// ----------------------------------------------------------------
+		// spot_decoder_names
+		//
+		// The decoder config names that have spots, for the history page's
+		// name filter (GetAvailableNames). One row per name, so listing them
+		// does not need an index over every spot's decoder_name. LogSpot
+		// keeps last_ts current (rounded up to the hour, at most one write
+		// per name per hour) and retention drops a name with its last spots.
+		// ----------------------------------------------------------------
+		{
+			"spot_decoder_names",
+			`CREATE TABLE IF NOT EXISTS spot_decoder_names (
+				id      INTEGER PRIMARY KEY,
+				name    TEXT    NOT NULL UNIQUE,
+				last_ts INTEGER NOT NULL  -- Unix seconds UTC of its newest spot (or later)
+			)`,
+		},
+		{"spot_decoder_names_idx_last_ts", `CREATE INDEX IF NOT EXISTS spot_decoder_names_idx_last_ts ON spot_decoder_names(last_ts)`},
 
 		// ----------------------------------------------------------------
 		// cw_spots
@@ -1076,13 +1113,12 @@ func (m *DBManager) initSchema() error {
 				loc_source   TEXT               -- "qrz" | "cty"
 			)`,
 		},
-		{"cw_spots_idx_ts", `CREATE INDEX IF NOT EXISTS cw_spots_idx_ts       ON cw_spots(ts)`},
+		// (ts, band) serves every time-range query and the dates list; band
+		// the band list; dx_call callsign searches. See obsoleteIndexes for
+		// the ones dropped.
+		{"cw_spots_idx_ts_band", `CREATE INDEX IF NOT EXISTS cw_spots_idx_ts_band  ON cw_spots(ts, band)`},
 		{"cw_spots_idx_band", `CREATE INDEX IF NOT EXISTS cw_spots_idx_band     ON cw_spots(band)`},
 		{"cw_spots_idx_dx_call", `CREATE INDEX IF NOT EXISTS cw_spots_idx_dx_call  ON cw_spots(dx_call)`},
-		{"cw_spots_idx_ts_band", `CREATE INDEX IF NOT EXISTS cw_spots_idx_ts_band  ON cw_spots(ts, band)`},
-		// Expression index: lets DISTINCT DATE(ts,'unixepoch') … ORDER BY date DESC
-		// use an index scan instead of a full table scan (fixes /api/cwskimmer/spots/dates timeout).
-		{"cw_spots_idx_date", `CREATE INDEX IF NOT EXISTS cw_spots_idx_date    ON cw_spots (DATE(ts, 'unixepoch') DESC)`},
 
 		// ----------------------------------------------------------------
 		// noise_floor

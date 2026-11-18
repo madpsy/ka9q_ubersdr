@@ -372,16 +372,8 @@ func (sl *CWSkimmerSpotsLogger) GetCWAvailableDates() ([]string, error) {
 	}
 
 	// Loose index scan: one index seek per day returned rather than one index
-	// entry per spot. See GetAvailableDates for the reasoning.
-	rows, err := sl.readDB.Query(
-		`WITH RECURSIVE d(day) AS (
-		     SELECT MAX(DATE(ts, 'unixepoch')) FROM cw_spots
-		     UNION ALL
-		     SELECT (SELECT MAX(DATE(ts, 'unixepoch')) FROM cw_spots
-		              WHERE DATE(ts, 'unixepoch') < d.day)
-		     FROM d WHERE d.day IS NOT NULL
-		 )
-		 SELECT day FROM d WHERE day IS NOT NULL`)
+	// entry per spot. See spotDatesSQL.
+	rows, err := sl.readDB.Query(spotDatesSQL("cw_spots"))
 	if err != nil {
 		return nil, fmt.Errorf("cw_spots dates query failed: %w", err)
 	}

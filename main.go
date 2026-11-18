@@ -497,26 +497,41 @@ func main() {
 	}
 	defer dbManager.Close()
 
-	// A database created before auto_vacuum was set correctly never shrinks
-	// on its own. When enough of it is free space, it is rebuilt once here,
-	// before anything else starts: the receiver comes up a few minutes later
-	// on that one start, rather than stalling decodes while running.
+	// One-time database work that needs the write connection to itself for
+	// a while, so it runs here, before anything else starts, rather than
+	// stalling decodes while running. Each part does nothing once done:
+	//   - indexes earlier versions created that no query uses are dropped
+	//     (gigabytes on a busy receiver; tens of seconds to drop);
+	//   - a database created before auto_vacuum was set correctly, with
+	//     enough free space, is rebuilt once by VACUUM (minutes).
 	//
 	// The server's own signal handling starts much later, so a stop request
-	// (docker stop, Ctrl-C) during this is caught here: it cancels the
-	// VACUUM, which SQLite rolls back, and the process exits cleanly. It is
-	// tried again on the next start. Whatever happens, a problem here is
-	// logged and startup carries on; it never stops the receiver starting.
+	// (docker stop, Ctrl-C) during this is caught here: it cancels the step
+	// in progress, which SQLite rolls back, and the process exits cleanly.
+	// It is tried again on the next start. Whatever happens, a problem here
+	// is logged and startup carries on; it never stops the receiver starting.
 	//
-	// While a VACUUM runs, a holding server answers on the HTTP port, so
+	// While either runs, a holding server answers on the HTTP port, so
 	// Docker's health check passes and the containers that wait on this one
-	// start; it hands the port back the moment the VACUUM ends.
-	reclaimCtx, stopReclaim := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	dbManager.ReclaimSpaceAtStartup(reclaimCtx, func() func() {
-		return startHoldingServer(config.Server.Listen)
-	})
-	stopRequested := reclaimCtx.Err() != nil
-	stopReclaim()
+	// start; it hands the port back as soon as the work ends. It starts only
+	// if there is work to do.
+	startupCtx, stopStartupSignals := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	var stopHolding func()
+	holdPort := func() func() {
+		if stopHolding == nil {
+			stopHolding = startHoldingServer(config.Server.Listen)
+		}
+		return nil // released below, once all of it is done
+	}
+	dbManager.DropObsoleteIndexesAtStartup(startupCtx, holdPort)
+	if startupCtx.Err() == nil {
+		dbManager.ReclaimSpaceAtStartup(startupCtx, holdPort)
+	}
+	if stopHolding != nil {
+		stopHolding()
+	}
+	stopRequested := startupCtx.Err() != nil
+	stopStartupSignals()
 	if stopRequested {
 		log.Printf("[DB] stop requested during startup database maintenance; exiting")
 		dbManager.Close()

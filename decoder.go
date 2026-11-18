@@ -908,9 +908,8 @@ func (md *MultiDecoder) deliverDecode(decode *DecodeInfo, bandName string, cycle
 	if md.spotsLogger != nil {
 		locatorsOnly := md.config.SpotsLogLocatorsOnly != nil && *md.config.SpotsLogLocatorsOnly
 		if !locatorsOnly || decode.HasLocator {
-			if err := md.spotsLogger.LogSpot(decode); err != nil {
-				log.Printf("Warning: Failed to log spot to CSV: %v", err)
-			}
+			// LogSpot logs its own failures ("[DB] spots insert error").
+			_ = md.spotsLogger.LogSpot(decode)
 		}
 	}
 

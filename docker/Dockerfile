@@ -70,6 +70,7 @@ RUN apt-get update && apt-get install -y \
     libfftw3-double3 \
     libfdk-aac2 \
     libfaad2 \
+    sqlite3 \
     && wget https://github.com/mikefarah/yq/releases/latest/download/yq_linux_${TARGETARCH} -O /usr/bin/yq \
     && chmod +x /usr/bin/yq \
     && wget https://github.com/madpsy/ubersdr-js8call/releases/download/latest/js8_${TARGETARCH} -O /usr/bin/js8 \
@@ -174,6 +175,11 @@ COPY --from=builder /build/geoip ./geoip
 # Copy entrypoint script
 COPY docker/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
+
+# Database check and repair, run by ~/ubersdr/repair-database.sh on the host
+# in a one-off container while the receiver is stopped
+COPY docker/repair-database.sh /usr/local/bin/repair-database
+RUN chmod +x /usr/local/bin/repair-database
 
 # Expose default ports
 # 8080 - Web interface (as configured in config.yaml)

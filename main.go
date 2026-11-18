@@ -507,8 +507,14 @@ func main() {
 	// VACUUM, which SQLite rolls back, and the process exits cleanly. It is
 	// tried again on the next start. Whatever happens, a problem here is
 	// logged and startup carries on; it never stops the receiver starting.
+	//
+	// While a VACUUM runs, a holding server answers on the HTTP port, so
+	// Docker's health check passes and the containers that wait on this one
+	// start; it hands the port back the moment the VACUUM ends.
 	reclaimCtx, stopReclaim := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	dbManager.ReclaimSpaceAtStartup(reclaimCtx)
+	dbManager.ReclaimSpaceAtStartup(reclaimCtx, func() func() {
+		return startHoldingServer(config.Server.Listen)
+	})
 	stopRequested := reclaimCtx.Err() != nil
 	stopReclaim()
 	if stopRequested {

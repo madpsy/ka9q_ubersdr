@@ -379,8 +379,13 @@ var (
 // for a 2.9 GB database on an SSD), and decoder spots are written on the live
 // decode delivery path, so while the server is up it would stall decodes to
 // listeners. Before startup nothing is waiting on it.
-func (m *DBManager) ReclaimSpaceAtStartup(ctx context.Context) bool {
-	return m.reclaimSpace(ctx, "startup")
+//
+// whileVacuuming, if not nil, is called only once a VACUUM is certain to run,
+// just before it starts, and the function it returns is called when the
+// VACUUM ends however it ends. main uses it to answer health checks on the
+// HTTP port meanwhile, so Docker does not mark the container unhealthy.
+func (m *DBManager) ReclaimSpaceAtStartup(ctx context.Context, whileVacuuming func() (done func())) bool {
+	return m.reclaimSpace(ctx, "startup", whileVacuuming)
 }
 
 // reclaimSpace runs a one-time VACUUM on a database still in auto_vacuum NONE
@@ -392,7 +397,7 @@ func (m *DBManager) ReclaimSpaceAtStartup(ctx context.Context) bool {
 // It runs only when it is worth it, only with room on disk for the rebuilt
 // copy and its WAL, and under a timeout: an interrupted VACUUM rolls back
 // cleanly and is tried again on the next start.
-func (m *DBManager) reclaimSpace(ctx context.Context, when string) (vacuumed bool) {
+func (m *DBManager) reclaimSpace(ctx context.Context, when string, whileVacuuming func() (done func())) (vacuumed bool) {
 	defer func() {
 		if r := recover(); r != nil {
 			log.Printf("[DB] %s maintenance: reclaim recovered from panic: %v", when, r)
@@ -432,6 +437,11 @@ func (m *DBManager) reclaimSpace(ctx context.Context, when string) (vacuumed boo
 		return false
 	}
 	defer conn.Close()
+	if whileVacuuming != nil {
+		if done := whileVacuuming(); done != nil {
+			defer done()
+		}
+	}
 	log.Printf("[DB] %s maintenance: VACUUM to reclaim %d MB of %d MB. One-time, switching the database to incremental "+
 		"auto_vacuum; this can take several minutes and the receiver starts when it finishes",
 		when, free*pageSize>>20, pages*pageSize>>20)

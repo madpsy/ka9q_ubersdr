@@ -783,7 +783,7 @@ func TestReclaimSpaceVacuumsOldDatabaseOnce(t *testing.T) {
 	mgr, path := oldStyleDB(t)
 	before, _ := os.Stat(path)
 
-	if !mgr.reclaimSpace(context.Background(), "nightly") {
+	if !mgr.reclaimSpace(context.Background(), "nightly", nil) {
 		t.Fatal("did not vacuum a database that is mostly free space")
 	}
 	var mode, free int64
@@ -802,7 +802,7 @@ func TestReclaimSpaceVacuumsOldDatabaseOnce(t *testing.T) {
 		t.Errorf("%d rows kept, want 50", kept)
 	}
 	// Now incremental: never again.
-	if mgr.reclaimSpace(context.Background(), "nightly") {
+	if mgr.reclaimSpace(context.Background(), "nightly", nil) {
 		t.Error("vacuumed again once incremental")
 	}
 }
@@ -811,12 +811,12 @@ func TestReclaimSpaceGuards(t *testing.T) {
 	// Not enough disk for the rebuilt copy.
 	withVacuumGuards(t, 1<<20, nil)
 	mgr, _ := oldStyleDB(t)
-	if mgr.reclaimSpace(context.Background(), "nightly") {
+	if mgr.reclaimSpace(context.Background(), "nightly", nil) {
 		t.Error("vacuumed without room on disk")
 	}
 	// Free disk unknown: skipped, never run blind.
 	vacuumDiskFree = func(string) (int64, error) { return 0, fmt.Errorf("unknown") }
-	if mgr.reclaimSpace(context.Background(), "nightly") {
+	if mgr.reclaimSpace(context.Background(), "nightly", nil) {
 		t.Error("vacuumed with free disk space unknown")
 	}
 	var mode int
@@ -827,7 +827,7 @@ func TestReclaimSpaceGuards(t *testing.T) {
 	// Too little free space to be worth it.
 	vacuumDiskFree = func(string) (int64, error) { return 1 << 40, nil }
 	vacuumMinFreeBytes = 1 << 40
-	if mgr.reclaimSpace(context.Background(), "nightly") {
+	if mgr.reclaimSpace(context.Background(), "nightly", nil) {
 		t.Error("vacuumed below the free-space threshold")
 	}
 	// A database created by NewDBManager is incremental already.
@@ -837,7 +837,7 @@ func TestReclaimSpaceGuards(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer fresh.Close()
-	if fresh.reclaimSpace(context.Background(), "nightly") {
+	if fresh.reclaimSpace(context.Background(), "nightly", nil) {
 		t.Error("vacuumed an incremental database")
 	}
 }
@@ -857,7 +857,7 @@ func TestReclaimOnlyAtStartup(t *testing.T) {
 	if mode != 0 {
 		t.Fatalf("the nightly pass changed auto_vacuum to %d; it must not vacuum", mode)
 	}
-	if !mgr.ReclaimSpaceAtStartup(context.Background()) {
+	if !mgr.ReclaimSpaceAtStartup(context.Background(), nil) {
 		t.Fatal("startup did not reclaim")
 	}
 	mgr.db.QueryRow(`PRAGMA auto_vacuum`).Scan(&mode)
@@ -912,7 +912,7 @@ func TestReclaimInterruptedIsSafe(t *testing.T) {
 	interrupted := false
 	for _, d := range []time.Duration{time.Millisecond, 5 * time.Millisecond, 20 * time.Millisecond, 80 * time.Millisecond} {
 		ctx, cancel := context.WithTimeout(context.Background(), d)
-		ok := mgr.reclaimSpace(ctx, "startup")
+		ok := mgr.reclaimSpace(ctx, "startup", nil)
 		cancel()
 		if ok {
 			t.Skipf("VACUUM finished within %v; cannot interrupt it on this machine", d)
@@ -934,7 +934,7 @@ func TestReclaimInterruptedIsSafe(t *testing.T) {
 	if check != "ok" || rows != 20050 {
 		t.Fatalf("after an interrupted VACUUM: integrity %q, %d rows; want ok and 20050", check, rows)
 	}
-	if !mgr.reclaimSpace(context.Background(), "startup") {
+	if !mgr.reclaimSpace(context.Background(), "startup", nil) {
 		t.Error("a later reclaim did not run")
 	}
 }

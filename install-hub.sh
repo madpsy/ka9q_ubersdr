@@ -717,6 +717,10 @@ echo "Fetching start-ubersdr.sh script..."
 curl -sSL https://raw.githubusercontent.com/madpsy/ka9q_ubersdr/refs/heads/main/start-ubersdr.sh -o "$ACTUAL_HOME/ubersdr/start-ubersdr.sh"
 chmod +x "$ACTUAL_HOME/ubersdr/start-ubersdr.sh"
 
+echo "Fetching repair-database.sh script..."
+curl -sSL https://raw.githubusercontent.com/madpsy/ka9q_ubersdr/refs/heads/main/repair-database.sh -o "$ACTUAL_HOME/ubersdr/repair-database.sh"
+chmod +x "$ACTUAL_HOME/ubersdr/repair-database.sh"
+
 echo "Fetching check-health.sh script..."
 curl -sSL https://raw.githubusercontent.com/madpsy/ka9q_ubersdr/refs/heads/main/check-health.sh -o "$ACTUAL_HOME/ubersdr/check-health.sh"
 chmod +x "$ACTUAL_HOME/ubersdr/check-health.sh"

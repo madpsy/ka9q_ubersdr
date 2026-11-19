@@ -23,7 +23,7 @@ Pod::Spec.new do |s|
   s.authors          = { 'MadPsy' => 'https://ubersdr.org' }
   s.source           = { :path => '.' }
   s.source_files     = 'sources/**/*.{swift,h,m}'
-  s.ios.deployment_target = '14.0'
+  s.ios.deployment_target = '15.0'
   # Weak, because it is not there to link against on most of the devices this
   # installs on: Translation.framework first shipped in iOS 17.4, and the app
   # still runs from iOS 15. Linked strongly, dyld would refuse to launch the

@@ -23,4 +23,14 @@ end
 
 post_install do |installer|
   assertDeploymentTarget(installer)
+  # Capacitor's podspecs (and its helper above) say iOS 14.0, which Xcode 27
+  # refuses outright: its floor is 15.0. Lift every pod to the app's own
+  # platform above, so pods never claim less than the app they are built into.
+  installer.pods_project.targets.each do |target|
+    target.build_configurations.each do |config|
+      if config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'].to_f < 15.0
+        config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '15.0'
+      end
+    end
+  end
 end

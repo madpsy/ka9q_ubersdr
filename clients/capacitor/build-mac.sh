@@ -406,7 +406,7 @@ preflight() {
     fi
 
     local sims
-    sims="$(mac "xcrun simctl list devices available 2>/dev/null | grep -c '$SIM_DEVICE'" || echo 0)"
+    sims="$(mac "xcrun simctl list devices available 2>/dev/null | grep -c '$SIM_DEVICE'" || true)"
     if [[ "${sims:-0}" -lt 1 ]]; then
         echo "    simulator      '$SIM_DEVICE' not available"
         echo "                   Pick another with SIM_DEVICE=, or see: xcrun simctl list devices"

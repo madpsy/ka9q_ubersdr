@@ -10,10 +10,11 @@
 const assert = require('assert');
 
 const {
-    FRAME_DECODE, FRAME_STATS, FRAME_ERROR, QUALITIES, MIN_QUALITIES,
+    FRAME_DECODE, FRAME_STATS, FRAME_ERROR, FRAME_PENDING, QUALITIES, MIN_QUALITIES,
     LINE_GAP_MS, LINE_CHARS, MAX_LINES,
     decodeFrame, appendDecode, passesQuality, positive, toText, visibleChunks,
 } = require('./.build/morse.cjs');
+const { CW_ABBREVIATIONS, wordKind, wordsOf } = require('./.build/morsewords.cjs');
 
 let pass = 0;
 const t = (name, fn) => {
@@ -254,6 +255,47 @@ t('a pitch or speed the decoder has not found yet reads as nothing', () => {
     assert.strictEqual(positive(-1), null);
     assert.strictEqual(positive(NaN), null);
     assert.strictEqual(positive(600), 600);
+});
+
+// --- pending text -------------------------------------------------------------------
+
+t('a pending frame is its text, empty included', () => {
+    const msg = (text) => {
+        const body = Buffer.from(text, 'utf8');
+        const b = Buffer.alloc(5 + body.length);
+        b[0] = FRAME_PENDING;
+        b.writeUInt32BE(body.length, 1);
+        body.copy(b, 5);
+        return b;
+    };
+    assert.deepStrictEqual(decodeFrame(msg(' DE G4')), { kind: 'pending', text: ' DE G4' });
+    assert.deepStrictEqual(decodeFrame(msg('')), { kind: 'pending', text: '' });
+    // Its length past the end: dropped, not read beyond.
+    const bad = msg('AB');
+    bad.writeUInt32BE(9, 1);
+    assert.strictEqual(decodeFrame(bad), null);
+});
+
+// --- words ------------------------------------------------------------------------
+
+t('calls, the words sent with them, abbreviations and reports are told apart', () => {
+    const kinds = Object.fromEntries(['G4ALD', 'EA8/DF4UE', 'DL2DBU/P', 'CQ', 'DE', 'TEST', 'TNX', '73', 'B4',
+        '5NN', '599', 'HELLO'].map((w) => [w, wordKind(w)]));
+    assert.deepStrictEqual(kinds, {
+        G4ALD: 'call', 'EA8/DF4UE': 'call', 'DL2DBU/P': 'call', CQ: 'key', DE: 'key', TEST: 'key',
+        TNX: 'abbr', 73: 'abbr', B4: 'abbr', '5NN': 'report', 599: 'report', HELLO: 'word',
+    });
+    assert.strictEqual(CW_ABBREVIATIONS.TNX, 'Thanks');
+});
+
+t('a word given in pieces, partly unsure, is one word with its runs', () => {
+    const w = wordsOf([{ text: ' G4', conf: 'high' }, { text: 'AL', conf: 'low' }, { text: 'D TNX', conf: 'high' }]);
+    assert.deepStrictEqual(w, [
+        { space: ' ' },
+        { word: 'G4ALD', kind: 'call', runs: [{ text: 'G4', conf: 'high' }, { text: 'AL', conf: 'low' }, { text: 'D', conf: 'high' }] },
+        { space: ' ' },
+        { word: 'TNX', kind: 'abbr', runs: [{ text: 'TNX', conf: 'high' }] },
+    ]);
 });
 
 console.log(`\nall ${pass} CW decoder tests passed`);

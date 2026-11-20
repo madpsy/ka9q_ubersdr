@@ -46,12 +46,12 @@ func GetInfo() map[string]interface{} {
 	return map[string]interface{}{
 		"name":        "morse",
 		"displayName": "Morse Code Decoder",
-		"version":     "2.0.0",
-		"description": "CW decoder powered by ggmorse (cw-decoder subprocess). Auto-detects pitch and speed.",
+		"version":     "3.0.0",
+		"description": "CW decoder: a neural network (cw-decoder subprocess) that reads any note from 400 to 1200 Hz at any speed.",
 		"parameters": map[string]interface{}{
 			"pitch": map[string]interface{}{
 				"type":        "number",
-				"description": "CW tone frequency in Hz (100–2000). Locks ggmorse to pitch±150 Hz search window. Omit for full auto-detect (ggmorse searches 500–700 Hz by default).",
+				"description": "CW tone frequency in Hz (100–2000). Keeps the decoder to about ±100 Hz of it, leaving out other signals in the passband. Omit to hear any note from 400 to 1200 Hz.",
 				"minimum":     100,
 				"maximum":     2000,
 				"optional":    true,
@@ -81,6 +81,11 @@ func GetInfo() map[string]interface{} {
 					"type_byte":   "0x12",
 					"description": "Error message (e.g. binary not found)",
 					"format":      "[type:1=0x12][msg_len:4 uint32 BE][msg: UTF-8]",
+				},
+				"pending_event": map[string]interface{}{
+					"type_byte":   "0x13",
+					"description": "What follows the decoded text as the decoder now reads it; may still change, and replaces the last",
+					"format":      "[type:1=0x13][text_len:4 uint32 BE][text: UTF-8]",
 				},
 			},
 		},

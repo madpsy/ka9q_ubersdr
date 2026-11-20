@@ -2,9 +2,11 @@
 //
 // The decoding is the server's: this attaches the `morse` audio extension to
 // the session's audio (see ../useAudioExtension.js) and reads the frames that
-// come back (see ./frames.js). ggmorse finds the tone and the speed by itself,
-// so unlike the teleprinter decoders there is almost nothing to set up — which
-// is why this panel is mostly output.
+// come back (see ./frames.js). The decoder is a neural network that hears any
+// note from 400 to 1200 Hz at any speed, so unlike the teleprinter decoders
+// there is almost nothing to set up — which is why this panel is mostly
+// output. It settles text a couple of seconds behind the audio and sends what
+// it reads beyond that as pending text, shown grey after the copy.
 //
 // v1's behaviour where v1 had a reason: the same start/clear/copy transport, the
 // same minimum-quality filter, the same colouring of the copy by confidence, and
@@ -34,15 +36,19 @@ import {
     MIN_QUALITIES, appendDecode, decodeFrame, positive, toText, visibleChunks,
 } from './frames.js';
 import { saveFile } from '../../lib/saveFile.js';
+import { CW_ABBREVIATIONS, wordsOf } from './words.js';
+import { normaliseCallsign, requestLookup } from '../../lib/callsign.js';
+import { openCallsignLookup } from '../../compat/legacyBridge.js';
+import { getSessionId } from '../../radio/session.js';
 
 // What the server will accept — audio_extensions/morse/extension.go refuses
 // anything outside it, and a refused attach is an error the operator has to
 // clear rather than a value they can nudge back.
 const PITCH_LIMITS = { min: 100, max: 2000, step: 10 };
 
-// Where click-to-tune puts a note when the pitch is not locked: the middle of
-// the band ggmorse searches when it is left to itself.
-const AUTO_TARGET_HZ = 550;
+// Where click-to-tune puts a note when the pitch is not locked: well inside
+// the 400-1200 Hz the decoder hears on its own.
+const AUTO_TARGET_HZ = 700;
 
 // Modes that produce a beat note for the decoder to hear. Everything else is
 // not an error — the audio is taken as it comes — but nothing will be copied,
@@ -53,13 +59,16 @@ const TONE_MODES = ['cwu', 'cwl', 'usb', 'lsb'];
 // arrive several times a second while nothing is being copied, and each one
 // re-renders the panel. Without this, every stats frame would reconcile a
 // page of text to move a number by one hertz.
-const MorseConsole = memo(function MorseConsole({ lines, timestamps, autoScroll, minQuality }) {
+const MorseConsole = memo(function MorseConsole({ lines, pending, timestamps, autoScroll, minQuality, onCall }) {
     const box = useRef(null);
+    // The hover tip over a call or an abbreviation: placed above the word,
+    // kept on the screen.
+    const [tip, setTip] = useState(null);
 
     useEffect(() => {
         if (!autoScroll || !box.current) return;
         box.current.scrollTop = box.current.scrollHeight;
-    }, [lines, autoScroll]);
+    }, [lines, pending, autoScroll]);
 
     // Lines the filter has emptied are dropped rather than left as blanks: a
     // console of empty rows is a worse way of saying "nothing was that good".
@@ -67,23 +76,62 @@ const MorseConsole = memo(function MorseConsole({ lines, timestamps, autoScroll,
         .map((l) => ({ line: l, chunks: visibleChunks(l, minQuality) }))
         .filter((l) => l.chunks.length);
 
+    const hover = (e) => {
+        const t = e.target.closest && e.target.closest('[data-tip]');
+        if (!t) { setTip(null); return; }
+        const r = t.getBoundingClientRect();
+        const half = Math.min(170, window.innerWidth / 2);
+        const at = r.left + r.width / 2;
+        setTip({ text: t.dataset.tip, x: Math.max(half, Math.min(window.innerWidth - half, at)), y: r.top, arrow: at - Math.max(half, Math.min(window.innerWidth - half, at)) });
+    };
+
+    const word = (w, i) => {
+        if (w.space) return w.space;
+        const body = w.runs.map((r, j) => (
+            r.conf === 'low' || r.conf === 'poor'
+                ? <span key={j} className={`mo__c mo__c--${r.conf}`}>{r.text}</span>
+                : r.text
+        ));
+        if (w.kind === 'call') {
+            return (
+                <button key={i} type="button" className="mo__w mo__w--call"
+                    data-tip={`${w.word}: look it up`} onClick={() => onCall(w.word)}>{body}</button>
+            );
+        }
+        const meaning = CW_ABBREVIATIONS[w.word];
+        return (
+            <span key={i} className={`mo__w mo__w--${w.kind}`}
+                data-tip={meaning ? `${w.word}: ${meaning}` : undefined}>{body}</span>
+        );
+    };
+
     return (
-        <div className="tp__console" ref={box}>
-            {shown.length === 0 && (
+        <div className="tp__console" ref={box} onMouseOver={hover} onMouseLeave={() => setTip(null)}
+            onScroll={() => setTip(null)}>
+            {shown.length === 0 && !pending && (
                 <Empty>
                     {lines.length ? 'Nothing decoded at this quality.' : 'Nothing decoded yet.'}
                 </Empty>
             )}
-            {shown.map(({ line, chunks }) => (
+            {shown.map(({ line, chunks }, n) => (
                 <div key={line.id} className="tp__line">
                     {timestamps && <span className="tp__line-at">{formatTime(line.at)}</span>}
                     <span className="tp__line-text">
-                        {chunks.map((c) => (
-                            <span key={c.id} className={`mo__q mo__q--${c.conf}`}>{c.text}</span>
-                        ))}
+                        {wordsOf(chunks).map(word)}
+                        {n === shown.length - 1 && pending && (
+                            <span className="mo__pending" title="as the decoder reads it so far: may still change">{pending}</span>
+                        )}
                     </span>
                 </div>
             ))}
+            {shown.length === 0 && pending && (
+                <div className="tp__line"><span className="tp__line-text"><span className="mo__pending">{pending.trimStart()}</span></span></div>
+            )}
+            {tip && (
+                <div className="mo__tip" role="tooltip" style={{ left: tip.x, top: tip.y, '--arrow': `${tip.arrow}px` }}>
+                    {tip.text}
+                </div>
+            )}
         </div>
     );
 });
@@ -93,13 +141,14 @@ const MorseConsole = memo(function MorseConsole({ lines, timestamps, autoScroll,
 // the view switches, the readouts and the audio level. See the registry's
 // `minimal`.
 export default function MorseExtension({ minimal }) {
-    const { running, audioState, tuning, actions } = useRadio();
+    const { running, audioState, tuning, actions, serverInfo } = useRadio();
     // Attaching needs the audio session, not merely the power switch — see the
     // note on the same line in FT8Extension.jsx.
     const live = running && audioState === 'open';
 
     const [decoding, setDecoding] = useState(false);
     const [lines, setLines] = useState([]);
+    const [pending, setPending] = useState('');
     const [stats, setStats] = useState({ pitch: 0, speed: 0, conf: null, cost: null });
     // What the subprocess said when it failed. Kept apart from the hook's own
     // `error`, which is about the attach: the attach can succeed and the decoder
@@ -116,7 +165,9 @@ export default function MorseExtension({ minimal }) {
     const params = useMemo(() => (lockPitch ? { pitch } : {}), [lockPitch, pitch]);
 
     const onResult = (f) => {
-        if (f.kind === 'decode') {
+        if (f.kind === 'pending') {
+            setPending(f.text);
+        } else if (f.kind === 'decode') {
             setLines((prev) => appendDecode(prev, f));
             setStats({ pitch: f.pitch, speed: f.speed, conf: f.conf, cost: f.cost });
         } else if (f.kind === 'stats') {
@@ -144,7 +195,10 @@ export default function MorseExtension({ minimal }) {
     // The readouts are the decoder's, so they must not be left showing the last
     // thing it heard once it has stopped.
     useEffect(() => {
-        if (!decoding) setStats({ pitch: 0, speed: 0, conf: null, cost: null });
+        if (!decoding) {
+            setStats({ pitch: 0, speed: 0, conf: null, cost: null });
+            setPending('');
+        }
     }, [decoding]);
 
     const set = (patch) => setOpts((prev) => ({ ...prev, ...patch }));
@@ -156,7 +210,18 @@ export default function MorseExtension({ minimal }) {
 
     const start = () => { setFault(null); setDecoding(true); };
 
-    const clear = () => setLines([]);
+    const clear = () => { setLines([]); setPending(''); };
+
+    // A call in the copy, looked up as the FT8 panel does: the in-app panel
+    // when it is open, else the lookup page, else QRZ.
+    const lookUp = (call) => {
+        if (!call || requestLookup(call)) return;
+        if (serverInfo && serverInfo.lookup_service) {
+            openCallsignLookup({ uuid: getSessionId(), callsign: call });
+        } else {
+            window.open(`https://www.qrz.com/db/${encodeURIComponent(normaliseCallsign(call) || call)}`, '_blank', 'noopener');
+        }
+    };
 
     const copy = () => {
         if (!text || !navigator.clipboard) return;
@@ -258,7 +323,7 @@ export default function MorseExtension({ minimal }) {
                 <div className="tp__config">
                     <Switch
                         label="Lock pitch"
-                        title="Tell the decoder which note to listen for instead of letting it hunt. ggmorse searches 400–700 Hz on its own, which is right for most CW and wrong for a station outside it or a passband with two signals in it"
+                        title="Tell the decoder which note to listen for instead of letting it hunt. The decoder hears 400–1200 Hz on its own; locking keeps it to about ±100 Hz of this note, for a passband with two signals in it or a note outside that range"
                         checked={lockPitch}
                         onChange={setLockPitch}
                     />
@@ -347,6 +412,8 @@ export default function MorseExtension({ minimal }) {
 
             <MorseConsole
                 lines={lines}
+                pending={pending}
+                onCall={lookUp}
                 timestamps={opts.timestamps}
                 autoScroll={opts.autoScroll}
                 minQuality={minQuality}
@@ -365,8 +432,8 @@ export default function MorseExtension({ minimal }) {
                     <span
                         className="mo__stat"
                         title={stats.cost != null
-                            ? `How much of the last decode ggmorse had to guess (cost ${stats.cost.toFixed(2)} — lower is better)`
-                            : 'How much of the last decode ggmorse had to guess'}
+                            ? `How sure the decoder was of the last text (cost ${stats.cost.toFixed(2)} — lower is better)`
+                            : 'How sure the decoder was of the last text'}
                     >
                         <span className="mo__stat-label">Quality</span>
                         <span className={`mo__stat-value mo__q--${stats.conf || 'none'}`}>

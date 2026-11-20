@@ -9711,6 +9711,65 @@ a.btn { text-decoration: none; }
 .mo__q--poor { color: var(--bad); opacity: 0.75; }
 .mo__q--none { color: var(--text-faint); }
 
+/* The copy, word by word (./extensions/morse/words.js): calls stand out and
+   open the lookup; the words a call is sent with (CQ, DE, TEST) are set
+   apart; abbreviations are underlined, their meaning on hover. Characters the
+   decoder was unsure of are faint, the least sure in red; what it reads so far
+   but has not settled is grey, and may still change. */
+.mo__w--call {
+    font: inherit;
+    padding: 0;
+    border: 0;
+    border-radius: 2px;
+    background: none;
+    color: var(--accent);
+    font-weight: 700;
+    cursor: pointer;
+}
+.mo__w--call:hover { background: var(--accent-soft); text-decoration: underline; text-underline-offset: 3px; }
+.mo__w--key { color: var(--violet); font-weight: 600; cursor: help; }
+.mo__w--abbr { text-decoration: underline dotted var(--text-faint); text-underline-offset: 4px; cursor: help; }
+.mo__w--report { color: var(--text-dim); }
+.mo__c--low { opacity: 0.5; text-decoration: underline wavy var(--warn); text-decoration-thickness: 1px; text-underline-offset: 4px; }
+.mo__c--poor { color: var(--bad); opacity: 0.6; }
+.mo__pending { color: var(--text-faint); }
+.mo__pending::after {
+    content: "";
+    display: inline-block;
+    width: 0.55em;
+    height: 1.05em;
+    margin-left: 2px;
+    vertical-align: -0.15em;
+    background: var(--accent);
+    opacity: 0.6;
+    animation: mo-blink 1.1s steps(1) infinite;
+}
+@keyframes mo-blink { 50% { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .mo__pending::after { animation: none; } }
+.mo__tip {
+    position: fixed;
+    z-index: 1000;
+    max-width: 320px;
+    transform: translate(-50%, calc(-100% - 8px));
+    padding: 5px 9px;
+    border-radius: var(--radius-sm);
+    background: var(--text);
+    color: var(--bg);
+    font: calc(12px * var(--ui-scale))/1.4 var(--font);
+    pointer-events: none;
+    box-shadow: var(--shadow-sm);
+}
+.mo__tip::after {
+    content: "";
+    position: absolute;
+    left: calc(50% + var(--arrow, 0px));
+    bottom: -4px;
+    width: 8px;
+    height: 8px;
+    background: var(--text);
+    transform: translateX(-50%) rotate(45deg);
+}
+
 /* Bigger than the teleprinter console it borrows, as v1's was: RTTY prints
    pages you scan, CW arrives a character at a time and is read live off the
    screen while you listen to it. v1 set 18px against a 13px UI; this is the

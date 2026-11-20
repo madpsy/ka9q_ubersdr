@@ -1,13 +1,18 @@
 // The CW decoder's wire format, and the console it fills.
 //
 // Decoding happens on the server: audio_extensions/morse/extension.go feeds the
-// session's audio to a `cw-decoder` subprocess built round ggmorse, which finds
-// the tone and the sending speed for itself. Three binary frames come back, all
+// session's audio to a `cw-decoder` subprocess, a neural network that hears
+// any note from 400 to 1200 Hz at any speed. Four binary frames come back, all
 // big-endian (audio_extensions/morse/extension.go):
 //
-//   0x10  decode  [type:1][confidence:1][cost:f32][pitch:f32][speed:f32][len:u32][utf-8 text]
-//   0x11  stats   [type:1][pitch:f32][speed:f32]
-//   0x12  error   [type:1][len:u32][utf-8 message]
+//   0x10  decode   [type:1][confidence:1][cost:f32][pitch:f32][speed:f32][len:u32][utf-8 text]
+//   0x11  stats    [type:1][pitch:f32][speed:f32]
+//   0x12  error    [type:1][len:u32][utf-8 message]
+//   0x13  pending  [type:1][len:u32][utf-8 text]
+//
+// Decoded text is settled: given once, a couple of seconds behind the audio.
+// The pending frame is what the decoder reads beyond it so far, which may
+// still change: each replaces the last.
 //
 // The stats frame carries no text: it is how the decoder says what it is
 // hearing while nothing is being copied, which is exactly when you want to know.
@@ -20,7 +25,8 @@
 //
 // ── confidence ──────────────────────────────────────────────────────────────
 //
-// Every decode carries ggmorse's own estimate of how much to trust it. That is
+// Every decode carries the decoder's own estimate of how much to trust it (the
+// network's probability of its least sure character, in four buckets). That is
 // worth more here than in any other decoder in this build: CW copy off a noisy
 // band is part guesswork, and knowing which characters were guessed is the
 // difference between a callsign and a callsign-shaped smear. So it is kept per
@@ -38,6 +44,10 @@ import { formatTime } from '../teleprinter.js';
 export const FRAME_DECODE = 0x10;
 export const FRAME_STATS = 0x11;
 export const FRAME_ERROR = 0x12;
+// What follows the decoded text as the decoder now reads it: it may still
+// change, and each replaces the last ("" when nothing follows).
+//   [type:1=0x13][len:u32][utf-8 text]
+export const FRAME_PENDING = 0x13;
 
 // Indexed by the confidence byte: 0 high, 1 medium, 2 low, 3 poor.
 export const QUALITIES = ['high', 'medium', 'low', 'poor'];
@@ -100,6 +110,12 @@ export function decodeFrame(data) {
         case FRAME_STATS:
             if (b.length < 9) return null;
             return { kind: 'stats', pitch: view.getFloat32(1), speed: view.getFloat32(5) };
+        case FRAME_PENDING: {
+            if (b.length < 5) return null;
+            const length = view.getUint32(1);
+            if (length > b.length - 5) return null;
+            return { kind: 'pending', text: utf8 ? utf8.decode(b.subarray(5, 5 + length)) : '' };
+        }
         case FRAME_ERROR: {
             if (b.length < 5) return null;
             const length = view.getUint32(1);
@@ -122,7 +138,7 @@ const CONTROLS = /[\x00-\x09\x0b-\x1f\x7f]/g;
 export const MAX_LINES = 500;
 
 // A line ends when the sender stops for this long. Morse has no line ending —
-// ggmorse emits characters and word gaps and nothing else — so without a rule
+// the decoder sends characters and word gaps and nothing else — so without a rule
 // like this the console would be one line that never closed, its timestamp
 // would say when the session started rather than when the transmission did, and
 // the line cap would never trim anything.
@@ -138,7 +154,7 @@ export const LINE_CHARS = 160;
  * A line holds chunks rather than a string: each chunk is the text from one
  * decode event and carries that event's confidence, which is what lets the
  * quality colouring and the quality filter work on part of a line. Runs of the
- * same confidence are merged as they arrive — ggmorse sends a character or two
+ * same confidence are merged as they arrive — the decoder sends a character or two
  * at a time, and one span per character would be thousands of DOM nodes for a
  * page of copy.
  *
@@ -217,7 +233,7 @@ export function toText(lines, { timestamps = false, minQuality = 'all' } = {}) {
 /**
  * A pitch or speed for display, or null when the decoder has not found one.
  *
- * ggmorse reports zero until it has locked on, and a display saying "0 Hz" is a
+ * The decoder reports zero until it has heard something, and a display saying "0 Hz" is a
  * claim about the signal rather than an admission that there isn't one yet.
  */
 export function positive(value) {

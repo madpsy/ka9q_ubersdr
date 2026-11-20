@@ -351,6 +351,8 @@ esbuild olivia.entry.js --bundle --format=cjs --platform=node \
     --outfile=.build/olivia.cjs --log-level=warning
 esbuild ../src/extensions/morse/frames.js --bundle --format=cjs --platform=node \
     --outfile=.build/morse.cjs --log-level=warning
+esbuild ../src/extensions/morse/words.js --bundle --format=cjs --platform=node \
+    --outfile=.build/morsewords.cjs --log-level=warning
 esbuild ../src/extensions/wefax/image.js --bundle --format=cjs --platform=node \
     --outfile=.build/wefax.cjs --log-level=warning
 esbuild ../src/lib/markerNav.js --bundle --format=cjs --platform=node \

@@ -59,6 +59,9 @@ const (
 	MsgDecode = 0x10
 	MsgStats  = 0x11
 	MsgError  = 0x12
+	// MsgPending: what follows the decoded text as the decoder now reads it
+	// (it may change); replaces the last pending text.
+	MsgPending = 0x13
 )
 
 // Confidence byte values
@@ -172,6 +175,9 @@ func (e *ExternalMorseExtension) Start(audioChan <-chan AudioSample, resultChan 
 		args = append(args, "--pitch", strconv.FormatFloat(e.pitchHz, 'f', 0, 64))
 	}
 	cmd := exec.Command(cwDecoderBinary, args...)
+	// The decoder's pending events (0x13), which only a decoder that has them
+	// sends, and only when asked: one that does not ignores this.
+	cmd.Env = append(os.Environ(), "CW_DECODER_PENDING=1")
 	cmd.Stderr = io.Discard // suppress cw-decoder stderr (ggmorse character trace)
 
 	stdin, err := cmd.StdinPipe()
@@ -310,6 +316,8 @@ func (e *ExternalMorseExtension) readLoop(resultChan chan<- []byte) {
 			msg = encodeDecodeMsg(ev)
 		case "stats":
 			msg = encodeStatsMsg(ev)
+		case "pending":
+			msg = encodePendingMsg(ev.Text)
 		default:
 			log.Printf("[Morse] unknown event type: %q", ev.Type)
 			continue
@@ -362,6 +370,18 @@ func encodeStatsMsg(ev cwEvent) []byte {
 	msg[0] = MsgStats
 	binary.BigEndian.PutUint32(msg[1:5], math.Float32bits(ev.Pitch))
 	binary.BigEndian.PutUint32(msg[5:9], math.Float32bits(ev.Speed))
+	return msg
+}
+
+// encodePendingMsg builds a 0x13 binary frame.
+//
+//	[type:1=0x13][text_len:4 uint32 BE][text: UTF-8]
+func encodePendingMsg(text string) []byte {
+	b := []byte(text)
+	msg := make([]byte, 1+4+len(b))
+	msg[0] = MsgPending
+	binary.BigEndian.PutUint32(msg[1:5], uint32(len(b)))
+	copy(msg[5:], b)
 	return msg
 }
 

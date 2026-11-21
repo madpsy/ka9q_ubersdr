@@ -3685,6 +3685,7 @@ func main() {
 	handler = httpLogger(logFile, geoIPService, handler)
 	// Ban middleware runs first (before logging) to block banned IPs, countries, and ASNs early
 	handler = banMiddleware(config, ipBanManager, countryBanManager, asnBanManager, handler)
+	handler = serverHeaderMiddleware(uberSDRServerHeader, handler)
 
 	// Start HTTP server
 	server := &http.Server{
@@ -3851,7 +3852,7 @@ func main() {
 			// hand-rolled IP ban inside HandleKiwiWebSocket, which leaves
 			// /status, /users, /snr, /s-meter, /VER and the static UI reachable
 			// by banned User-Agents, countries and ASNs.
-			Handler: banMiddleware(config, ipBanManager, countryBanManager, asnBanManager, kiwiMux),
+			Handler: serverHeaderMiddleware(kiwiSDRServerHeader(&config.Server), banMiddleware(config, ipBanManager, countryBanManager, asnBanManager, kiwiMux)),
 		}
 
 		httpServers.Add("KiwiSDR", kiwiServer)

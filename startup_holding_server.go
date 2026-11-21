@@ -68,7 +68,7 @@ func startHoldingServer(addr string) (stop func()) {
 		return func() {}
 	}
 	srv := &http.Server{
-		Handler:           holdingHandler(),
+		Handler:           serverHeaderMiddleware(uberSDRServerHeader, holdingHandler()),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       10 * time.Second,
 		WriteTimeout:      10 * time.Second,

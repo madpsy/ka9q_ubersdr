@@ -518,7 +518,7 @@ func (wsh *WebSocketHandler) HandleWebSocket(w http.ResponseWriter, r *http.Requ
 	}
 
 	// Upgrade HTTP connection to WebSocket
-	rawConn, err := upgrader.Upgrade(w, r, nil)
+	rawConn, err := upgrader.Upgrade(w, r, upgradeResponseHeader(w))
 	if err != nil {
 		log.Printf("Failed to upgrade connection: %v", err)
 		return

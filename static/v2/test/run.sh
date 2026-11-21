@@ -641,6 +641,7 @@ node audioclass.test.js
 node ../native/audioclass/test.js
 node waterfall.test.js
 node waterfalltimes.test.js
+node waterfalltimes_timeshift.test.js
 node timeconstant.test.js
 node mediasession.test.js
 node announce.test.js

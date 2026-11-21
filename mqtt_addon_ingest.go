@@ -180,7 +180,7 @@ func (s *AddonIngestServer) Start() error {
 	}
 	s.listener = ln
 	s.server = &http.Server{
-		Handler:           mux,
+		Handler:           serverHeaderMiddleware(uberSDRServerHeader, mux),
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,
 		WriteTimeout:      30 * time.Second,

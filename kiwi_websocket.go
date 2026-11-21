@@ -767,7 +767,7 @@ func (kwsh *KiwiWebSocketHandler) HandleKiwiWebSocket(w http.ResponseWriter, r *
 	// Rate limiting is still enforced at the command level via rateLimiterManager
 
 	// Upgrade to WebSocket
-	rawConn, err := upgrader.Upgrade(w, r, nil)
+	rawConn, err := upgrader.Upgrade(w, r, upgradeResponseHeader(w))
 	if err != nil {
 		log.Printf("Failed to upgrade KiwiSDR connection: %v", err)
 		return

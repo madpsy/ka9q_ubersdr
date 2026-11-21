@@ -1298,7 +1298,8 @@ function commitRow(st, now, levels) {
         st.head = (st.head - 1 + st.ringH) % st.ringH;
         st.ringCtx.putImageData(st.rowPx, 0, st.head);
     }
-    noteRows(st.times, st.rowH, rowWallTime(getTimeshift()), now, st.dpr);
+    const wallNow = Date.now();
+    noteRows(st.times, st.rowH, rowWallTime(getTimeshift(), wallNow), now, st.dpr, wallNow);
 
     const gap = st.lastRowAt ? now - st.lastRowAt : 0;
     st.rowDt = smoothInterval(st.rowDt, gap, st.lastGap);

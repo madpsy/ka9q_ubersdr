@@ -4568,7 +4568,8 @@ function drawWaterfall(g, d, wf, wfMarks, wfH, pxW, floor, range, commitRow, cfg
         }
         // Noted whether or not the stamps are shown, so switching them on has
         // the recent history labelled rather than starting from nothing.
-        noteRows(g.times, rowH, rowWallTime(getTimeshift()), performance.now(), g.dpr);
+        const wallNow = Date.now();
+        noteRows(g.times, rowH, rowWallTime(getTimeshift(), wallNow), performance.now(), g.dpr, wallNow);
     }
 
     const octx = wf.getContext('2d', { alpha: false });

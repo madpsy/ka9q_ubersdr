@@ -87,17 +87,55 @@ t('"ago" counts back from the newest row, in whole units', () => {
     assert.strictEqual(agoLabel(-500), '0s ago');
 });
 
-t('"ago" is the age against the waterfall, not the clock', () => {
-    // A replay's rows carry history's wall time; the label must not include the
-    // delay, or the top of a replayed waterfall would read minutes old.
-    const tm = feed(createTimeMarks(), { rate: 20, secs: 30, t0: Date.UTC(2026, 0, 1, 11, 0, 3) });
+t('"ago" is the age at the last draw, a replay\'s delay included', () => {
+    // A replayed row 20 s behind live is 20 s old, as the Timeshift panel says.
+    // Counted from the newest row instead, the live rows further down — newer
+    // than the replay above them — would all clamp to "0s ago".
+    const lag = 20000;
+    const t0 = Date.UTC(2026, 0, 1, 11, 0, 3);
+    const tm = createTimeMarks();
+    for (let i = 0; i < 600; i++) noteRows(tm, 2, t0 + i * 50 - lag, 1000 + i * 50, 1, t0 + i * 50);
     const last = tm.marks[tm.marks.length - 1];
     const c = { save() {}, restore() {}, fillRect() {}, beginPath() {}, moveTo() {}, lineTo() {},
         stroke() {}, fillText() {}, measureText: (s) => ({ width: s.length * 6 }) };
     const { drawTimeMarks } = require('./.build/waterfalltimes.cjs');
     drawTimeMarks(c, tm, 10000, 1, { zone: 'ago' });
-    assert.strictEqual(last.label, agoLabel(tm.lastT - last.t));
-    assert.ok(/^\d+s ago$/.test(last.label), last.label);
+    assert.strictEqual(last.label, agoLabel(tm.liveT - last.t));
+    assert.ok(tm.liveT - last.t >= lag, last.label);
+});
+
+t('a jump forward (going live, skipping ahead) stamps no stale boundary', () => {
+    // Replay at 12:00:03.x, then live at 12:00:27: the 12:00:25 boundary was
+    // crossed in time that was never drawn, and this row is 2 s past it.
+    const tm = feed(createTimeMarks(), { rate: 20, secs: 0.5 });
+    const n = tm.marks.length;
+    noteRows(tm, 2, Date.UTC(2026, 9, 31, 12, 0, 27), tm.lastAt + 50, 1);
+    assert.strictEqual(tm.marks.length, n);
+    // ...and rows from there on mark the next boundary normally.
+    const t1 = tm.lastT;
+    for (let i = 1; i <= 80; i++) noteRows(tm, 2, t1 + i * 50, tm.lastAt + 50, 1);
+    const last = tm.marks[tm.marks.length - 1];
+    assert.strictEqual(last.t, Date.UTC(2026, 9, 31, 12, 0, 30));
+});
+
+t('a mark after a pause lands where the history resumes', () => {
+    // Paused at 12:00:09.9, resumed a minute later: the picture carries on from
+    // where it stopped, so the 12:00:10 boundary belongs on the next row.
+    const tm = feed(createTimeMarks(), { rate: 20, secs: 6.95 });
+    noteRows(tm, 2, tm.lastT + 150, tm.lastAt + 60000, 1);
+    const last = tm.marks[tm.marks.length - 1];
+    assert.strictEqual(last.t, Date.UTC(2026, 9, 31, 12, 0, 10));
+    assert.strictEqual(markY(tm, last), 0);
+});
+
+t('a row is stamped with the position on screen, paused or playing', () => {
+    const { rowWallTime } = require('./.build/waterfalltimes.cjs');
+    const now = 1e12;
+    assert.strictEqual(rowWallTime(null, now), now);
+    assert.strictEqual(rowWallTime({ replaying: false, behindMs: 0, delayMs: 0 }, now), now);
+    assert.strictEqual(rowWallTime({ replaying: true, behindMs: 8000, delayMs: 8000 }, now), now - 8000);
+    // Paused at live, then skipped back 10 s: delayMs is still 0.
+    assert.strictEqual(rowWallTime({ replaying: true, behindMs: 10000, delayMs: 0 }, now), now - 10000);
 });
 
 t('a clock that goes backwards (replay) makes no mark', () => {

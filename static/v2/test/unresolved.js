@@ -140,6 +140,13 @@ for (const file of files) {
     // names an export without ever binding it locally, so counting the names in
     // it as uses reports every re-exporting module as broken.
     body = body.replace(/^\s*export\s*\{[^}]*\}\s*from\b[^;]*;/gm, ' ');
+    // And an object key — `{ MSG: 'Message', N: 'No' }`. A key is a property
+    // name, not a reference, so a table of abbreviations that happens to share
+    // spellings with some module's exports is not using them. Only the key
+    // position is dropped: after `{`, `,` or the start of a line, and followed
+    // by a single colon, so `a ? MSG : b`, `case MSG:` (preceded by `case`),
+    // `{ MSG }` shorthand and the value side of `k: MSG` all still count.
+    body = body.replace(/(^|[{,])(\s*)[A-Za-z_$][\w$]*(\s*):(?!:)/gm, '$1$2$3:');
     for (const name of exported) {
         if (imported.has(name) || declared.has(name) || ALLOWED.has(name)) continue;
         const used = new RegExp(`(?<![\\w$.])${name.replace(/\$/g, '\\$')}(?![\\w$])`).test(body);

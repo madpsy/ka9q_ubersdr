@@ -42,11 +42,17 @@ const MAX_MARKS = 64;
 // animation clock; the speed only has to be right to within a step of STEPS_S.
 const SPEED_WEIGHT = 0.1;
 
+// The least a row is taken to cover when deciding whether a boundary fell in it
+// — rows can arrive a frame or two late against the animation clock.
+const ROW_SLACK_MS = 250;
+
 export function createTimeMarks() {
     return {
         rows: 0,          // device rows written since creation
         marks: [],        // { row, t } — `row` is the value of `rows` when made
         lastT: 0,         // wall time of the last committed row, ms
+        liveT: 0,         // the clock when it was committed — lastT, unless a
+                          // timeshift replay is showing history
         lastAt: 0,        // monotonic time of the last commit, ms
         speed: 0,         // device rows per second, estimated
     };
@@ -57,6 +63,7 @@ export function clearTimeMarks(tm) {
     if (!tm) return;
     tm.marks.length = 0;
     tm.lastT = 0;
+    tm.liveT = 0;
 }
 
 /**
@@ -72,10 +79,11 @@ export function stepFor(rowsPerSec, dpr) {
 
 /**
  * Record `n` device rows just written, representing wall time `t` (ms), at
- * monotonic time `at` (ms). Makes a mark if a boundary of the current interval
- * was crossed since the previous row.
+ * monotonic time `at` (ms) and wall clock `live` (ms; `t` itself unless a
+ * timeshift replay is showing history). Makes a mark if a boundary of the
+ * current interval was crossed since the previous row.
  */
-export function noteRows(tm, n, t, at, dpr) {
+export function noteRows(tm, n, t, at, dpr, live = t) {
     if (!tm || !(n > 0)) return;
     if (tm.lastAt > 0 && at > tm.lastAt) {
         const inst = (n * 1000) / (at - tm.lastAt);
@@ -86,6 +94,7 @@ export function noteRows(tm, n, t, at, dpr) {
     }
     tm.lastAt = at;
     tm.rows += n;
+    tm.liveT = live;
 
     const prevT = tm.lastT;
     tm.lastT = t;
@@ -96,6 +105,15 @@ export function noteRows(tm, n, t, at, dpr) {
     const step = stepFor(tm.speed, dpr) * 1000;
     const boundary = Math.floor(t / step) * step;
     if (boundary <= prevT) return;
+    // The mark goes on this row, so the boundary has to be a moment this row
+    // could be showing — within about a row's time of it. Rows that follow one
+    // another cover the gap between them and always pass; a jump forward does
+    // not. Going live from a replay, skipping ahead in one, or a waterfall that
+    // has sat stopped puts a row at `t` with nothing drawn for the time before
+    // it, and the boundary crossed in that time would be stamped on a row up to
+    // a whole step later than it says.
+    const rowMs = (n * 1000) / tm.speed;
+    if (t - boundary > Math.max(ROW_SLACK_MS, 2 * rowMs)) return;
 
     // A change of speed can make a new interval's boundary land close to the
     // last mark; better a missing label than two on top of each other.
@@ -159,10 +177,15 @@ export function zoneReading(zone, rx, at) {
  * A mark's label in `zone`: HH:MM, with seconds when the interval needs them.
  * Read from the UTC fields of a shifted epoch, as the Time panel does.
  *
- * 'ago' instead counts back from `now`, which the waterfall passes as the wall
- * time of its newest row — so the top of the picture is "0s ago" even while a
- * replay is playing history back, and a paused waterfall does not age a picture
- * that is not moving.
+ * 'ago' instead counts back from `now`, which the waterfall passes as the clock
+ * when its newest row was drawn (tm.liveT) — not that row's own time. During a
+ * timeshift replay the two differ by the delay, and the delay is exactly what
+ * the label has to show: a row replayed 20 s behind *is* 20 s old, which is
+ * what the Timeshift panel says, and the live rows still further down the
+ * picture (newer than the replayed ones above them) keep honest ages rather
+ * than all reading "0s ago". Counting from the last draw rather than from
+ * Date.now() is still what keeps a paused waterfall from ageing a picture that
+ * is not moving.
  */
 export function timeMarkLabel(mark, zone = 'utc', rx = null, now = Date.now()) {
     if (zone === 'ago') return agoLabel(now - mark.t);
@@ -200,10 +223,10 @@ export function drawTimeMarks(c, tm, H, dpr, { zone = 'ago', rx = null, limit = 
         // lookup is the expensive part. The key is what the label depends on —
         // for 'ago', the age as shown, which changes about once a second.
         const key = zone === 'ago'
-            ? `ago|${agoLabel(tm.lastT - mk.t)}`
+            ? `ago|${agoLabel(tm.liveT - mk.t)}`
             : `${zone}|${rx ? `${rx.timezone}|${rx.timezone_offset}` : ''}`;
         if (mk.labelKey !== key) {
-            mk.label = timeMarkLabel(mk, zone, rx, tm.lastT);
+            mk.label = timeMarkLabel(mk, zone, rx, tm.liveT);
             mk.labelKey = key;
         }
         const text = mk.label;
@@ -224,10 +247,15 @@ export function drawTimeMarks(c, tm, H, dpr, { zone = 'ago', rx = null, limit = 
 }
 
 /**
- * The wall time a row committed now represents: the clock, less the replay's
- * delay when the timeshift is playing history back.
+ * The wall time a row committed now represents: the clock, less how far behind
+ * live the timeshift is showing.
+ *
+ * behindMs, not delayMs. delayMs is only the playing delay: a pause leaves it as
+ * it was and a seek while paused does not touch it, so a frame shown by a skip
+ * back from a pause taken at live would be stamped as now. behindMs is measured
+ * from the position actually on screen, playing or paused.
  */
-export function rowWallTime(timeshift) {
-    const lag = timeshift && timeshift.replaying ? (timeshift.delayMs || 0) : 0;
-    return Date.now() - lag;
+export function rowWallTime(timeshift, now = Date.now()) {
+    const lag = timeshift && timeshift.replaying ? (timeshift.behindMs || 0) : 0;
+    return now - lag;
 }

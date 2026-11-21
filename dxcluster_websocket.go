@@ -230,7 +230,7 @@ func (h *DXClusterWebSocketHandler) HandleWebSocket(w http.ResponseWriter, r *ht
 	modToken := h.moderatorToken(r, clientIP)
 
 	// Upgrade HTTP connection to WebSocket
-	conn, err := h.upgrader.Upgrade(w, r, nil)
+	conn, err := h.upgrader.Upgrade(w, r, upgradeResponseHeader(w))
 	if err != nil {
 		log.Printf("DX Cluster WebSocket: Failed to upgrade connection: %v", err)
 		return

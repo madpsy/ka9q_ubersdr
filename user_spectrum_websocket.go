@@ -248,7 +248,7 @@ func (swsh *UserSpectrumWebSocketHandler) HandleSpectrumWebSocket(w http.Respons
 	}
 
 	// Upgrade HTTP connection to WebSocket
-	rawConn, err := upgrader.Upgrade(w, r, nil)
+	rawConn, err := upgrader.Upgrade(w, r, upgradeResponseHeader(w))
 	if err != nil {
 		log.Printf("Failed to upgrade spectrum connection: %v", err)
 		return

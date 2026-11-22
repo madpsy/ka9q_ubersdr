@@ -372,6 +372,52 @@ func TestKiwiSetModSameFamilyMovesOnlyTheFilter(t *testing.T) {
 	}
 }
 
+// Every family of UI buttons sharing a preset -- USB/USN, LSB/LSN, CW/CWN,
+// NBFM/NNFM as well as AM/AMN/AMW -- moves only the filter, using Kiwi's
+// default edges for the button pressed. Moving between families does load the
+// new preset.
+func TestKiwiSetModEveryFamilyMovesOnlyTheFilter(t *testing.T) {
+	for _, family := range []struct {
+		preset string
+		modes  []string
+	}{
+		{"usb", []string{"usb", "usn", "usb"}},
+		{"lsb", []string{"lsb", "lsn", "lsb"}},
+		{"cwu", []string{"cw", "cwn", "cw"}},
+		{"nfm", []string{"nbfm", "nnfm", "nbfm"}},
+		{"am", []string{"am", "amn", "amw"}},
+	} {
+		kc, rec := newKiwiModeTestConn(t)
+		for i, mode := range family.modes {
+			pb := kiwiDefaultPassbands[mode]
+			kc.applySetMod(setMod(mode, itoa(pb.Lo), itoa(pb.Hi), "7100"))
+			want := kiwiTuning{Mode: mode, CarrierHz: 7100000, Pass: pb}.radiod()
+
+			u := rec.lastUpdate(t)
+			if u.mode != "" {
+				t.Errorf("%s (step %d): preset %q reloaded, want none", mode, i, u.mode)
+			}
+			if u.low != want.Low || u.high != want.High || !u.sendBandwidth {
+				t.Errorf("%s: sent %d..%d, want %d..%d", mode, u.low, u.high, want.Low, want.High)
+			}
+			if lo, hi, preset := sessionEdges(kc.session); lo != want.Low || hi != want.High || preset != family.preset {
+				t.Errorf("%s: session stores %s %d..%d, want %s %d..%d",
+					mode, preset, lo, hi, family.preset, want.Low, want.High)
+			}
+		}
+		if len(rec.creates) != 1 || rec.creates[0] != family.preset {
+			t.Errorf("%s family: creates %v, want one %s channel", family.preset, rec.creates, family.preset)
+		}
+	}
+
+	kc, rec := newKiwiModeTestConn(t)
+	kc.applySetMod(setMod("usb", "300", "2700", "7100"))
+	kc.applySetMod(setMod("lsn", "-2400", "-300", "7100"))
+	if u := rec.lastUpdate(t); u.mode != "lsb" || u.low != -2400 || u.high != -300 {
+		t.Errorf("usb -> lsn sent %+v, want preset lsb with -2400..-300", u)
+	}
+}
+
 // A change of preset carries the listener's AGC, since the preset load resets
 // radiod's; manual gain, which the update packet cannot carry, follows it.
 func TestKiwiSetModPresetChangeRestoresAGC(t *testing.T) {

@@ -1558,7 +1558,7 @@ mqtt:
     offline_after_sec: 300
 
     # Maximum Home Assistant entities a single addon may declare.
-    max_entities: 20
+    max_entities: 50
 
     # Whether addons may declare Home Assistant entities. Defaults to whatever
     # homeassistant_discovery above is set to, so no extra opt-in is needed.

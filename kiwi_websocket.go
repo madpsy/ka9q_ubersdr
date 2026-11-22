@@ -425,17 +425,27 @@ func (kwsh *KiwiWebSocketHandler) HandleKiwiSMeter(w http.ResponseWriter, r *htt
 		http.Error(w, "frequency out of range (0–30000 kHz)", http.StatusBadRequest)
 		return
 	}
-	mode := "cwn"
+	// The suffix is a Kiwi mode name; measure through that mode's default
+	// passband, translated to radiod terms as a SET mod would be. An unknown
+	// suffix falls back to the default rather than being passed to radiod as a
+	// preset name it does not have.
+	kiwiMode := "cwn"
 	if freqEnd < len(raw) {
-		mode = raw[freqEnd:]
+		if m := strings.ToLower(raw[freqEnd:]); kiwiModeToRadiod[m] != "" {
+			kiwiMode = m
+		}
 	}
-	freqHz := uint64(freqKHz * 1000)
+	want := kiwiTuning{
+		Mode:      kiwiMode,
+		CarrierHz: uint64(math.Round(freqKHz * 1000)),
+		Pass:      kiwiDefaultPassbands[kiwiMode],
+	}.radiod()
 
 	// ── 2. Create an internal session (empty clientIP = exempt from limits) ─
 	// Use a unique userSessionID so DestroySession can find it cleanly.
 	internalID := fmt.Sprintf("s-meter-%d", time.Now().UnixNano())
 	session, err := kwsh.sessions.CreateSessionWithBandwidthAndPassword(
-		freqHz, mode, 3000,
+		want.FreqHz, want.Mode, 3000,
 		"", "", // sourceIP, clientIP — empty = internal, no user-slot consumed
 		internalID, // userSessionID
 		"",         // password
@@ -451,9 +461,17 @@ func (kwsh *KiwiWebSocketHandler) HandleKiwiSMeter(w http.ResponseWriter, r *htt
 		}
 	}()
 
+	// Creation leaves the preset's filter in place; the mode's own passband
+	// follows as an update, recorded on the session so it stays put.
+	if err := kwsh.sessions.UpdateSessionWithEdges(session.ID, 0, "", want.Low, want.High, true); err != nil {
+		log.Printf("HandleKiwiSMeter: failed to set passband: %v", err)
+	}
+
 	// ── 3. Poll for BasebandPower (up to 500 ms) ───────────────────────────
 	// radiod sends channel-status packets asynchronously; we wait until we
-	// receive a valid reading (> -200 dBFS) or time out.
+	// receive a valid reading (> -200 dBFS) taken through the passband asked
+	// for, or time out. A reading through the preset's filter is kept as a
+	// fallback in case the passband never shows in time.
 	const (
 		smeterPollInterval = 25 * time.Millisecond
 		smeterTimeout      = 500 * time.Millisecond
@@ -463,7 +481,9 @@ func (kwsh *KiwiWebSocketHandler) HandleKiwiSMeter(w http.ResponseWriter, r *htt
 	for time.Now().Before(deadline) {
 		if cs := kwsh.radiod.GetChannelStatus(session.SSRC); cs != nil && cs.BasebandPower > -200 {
 			basebandPower = cs.BasebandPower
-			break
+			if math.Abs(float64(cs.LowEdge)-float64(want.Low)) < 1 && math.Abs(float64(cs.HighEdge)-float64(want.High)) < 1 {
+				break
+			}
 		}
 		time.Sleep(smeterPollInterval)
 	}
@@ -842,6 +862,18 @@ type kiwiConn struct {
 	decimator         *kiwiDecimator
 	decimatorInRate   int
 	decimatorChannels int
+	// decimatorAMPass is the AM post-detection bandwidth the decimator was
+	// built with, 0 for the plain one; see newKiwiAMDecimator.
+	decimatorAMPass int
+	// tuning is what the client last asked for with SET mod, in Kiwi's terms
+	// (kiwi_passband.go); haveTuning is false until the first one. Written by
+	// the message handler, read by streamAudio. Guarded by mu.
+	tuning     kiwiTuning
+	haveTuning bool
+	// agc is the client's last SET agc, kept so a mode change -- which reloads
+	// radiod's preset and with it the preset's AGC -- can put it back.
+	// Guarded by mu.
+	agc *AGCParams
 	// wfRequest is the spectrum geometry the zoom handler last asked radiod
 	// for, paired with the grid the client assumes. Guarded by mu.
 	wfRequest kiwiSpectrumRequest
@@ -1213,11 +1245,119 @@ func kiwiAGCParams(params map[string]string, cfg *Config) (AGCParams, bool) {
 	return out, true
 }
 
+// applySetMod handles "SET mod=... low_cut=... high_cut=... freq=...", which
+// a Kiwi client sends for every change of mode, passband or frequency.
+//
+// The rules it follows are in kiwi_passband.go. What it adds is getting them to
+// radiod in a way that sticks:
+//
+//   - The session is created on the first command and immediately given that
+//     command's edges. Creation only loads the preset and records placeholder
+//     edges of 50..3000 Hz, and checkAudioParameterMismatch enforces whatever
+//     edges the session records -- so a session left at the placeholders has
+//     its channel forced to 50..3000 within a second, which turned every Kiwi
+//     AM listener into AM through an SSB filter.
+//   - A preset is loaded only when the radiod preset actually changes. Kiwi's
+//     mode families (am/amn/amw, usb/usn, cw/cwn, nbfm/nnfm) share one preset
+//     and differ only in their edges, so the buttons between them move the
+//     filter and nothing else -- no AGC reset, no retune blanking.
+//   - When a preset is loaded it resets radiod's AGC, so the listener's last
+//     SET agc goes with it.
+func (kc *kiwiConn) applySetMod(params map[string]string) {
+	kc.mu.RLock()
+	prev, havePrev := kc.tuning, kc.haveTuning
+	session := kc.session
+	agc := kc.agc
+	kc.mu.RUnlock()
+
+	next, err := nextKiwiTuning(prev, havePrev, params, kc.maxPassbandEdgeHz())
+	if err != nil {
+		log.Printf("KiwiSDR: %v from %s — ignoring", err, kc.clientIP)
+		return
+	}
+	want := next.radiod()
+
+	if session == nil {
+		// Only the SND connection owns an audio session.
+		if kc.connType != "SND" {
+			return
+		}
+		// Last checkpoint before audio can flow. A client is not obliged
+		// to send "SET auth" first, so the check at the auth branch is
+		// not sufficient on its own — without this, a banned client could
+		// reach a session by sending "SET mod" alone.
+		if kc.handler != nil && kc.enforceIdentityBan(kc.handler.identityForSession(kc.userSessionID)) {
+			return
+		}
+		session, err = kc.sessions.CreateSessionWithBandwidthAndPassword(
+			want.FreqHz, want.Mode, 3000, kc.sourceIP, kc.clientIP, kc.userSessionID, kc.password)
+		if err != nil {
+			log.Printf("Failed to create KiwiSDR session: %v", err)
+			return
+		}
+		kc.mu.Lock()
+		kc.session = session
+		kc.tuning, kc.haveTuning = next, true
+		kc.mu.Unlock()
+		kc.audioReceiver.GetChannelAudio(session)
+
+		// Replace the placeholder edges, and apply any AGC the client set
+		// before it had a session to set it on.
+		kc.sendRadiodTuning(session, 0, "", want, kiwiAGCForPreset(agc, want.Mode))
+		return
+	}
+
+	session.mu.RLock()
+	currentMode := session.Mode
+	session.mu.RUnlock()
+
+	mode := ""
+	var presetAGC *AGCParams
+	if want.Mode != currentMode {
+		mode = want.Mode
+		presetAGC = kiwiAGCForPreset(agc, want.Mode)
+	}
+	if !kc.sendRadiodTuning(session, want.FreqHz, mode, want, presetAGC) {
+		return
+	}
+	kc.mu.Lock()
+	kc.tuning, kc.haveTuning = next, true
+	kc.mu.Unlock()
+}
+
+// sendRadiodTuning sends one tuning to radiod and records it on the session,
+// which is what keeps checkAudioParameterMismatch from reverting it. freq 0 and
+// mode "" leave those unchanged. agc rides in the same packet; manual gain
+// cannot (the update packet carries no GAIN), so with the AGC off it follows as
+// a separate AGC command, which the per-channel command pacing keeps from being
+// dropped. Returns false if radiod could not be updated.
+func (kc *kiwiConn) sendRadiodTuning(session *Session, freq uint64, mode string, want radiodTuning, agc *AGCParams) bool {
+	if err := kc.sessions.UpdateSessionChannel(session.ID, freq, mode, want.Low, want.High, true, agc); err != nil {
+		log.Printf("Failed to update KiwiSDR session: %v", err)
+		return false
+	}
+	if agc != nil && agc.Gain != nil {
+		if err := kc.sessions.UpdateAGC(session.ID, *agc); err != nil {
+			log.Printf("KiwiSDR: manual gain after mode change failed for %s: %v", kc.clientIP, err)
+		}
+	}
+	return true
+}
+
 // applyAGC handles "SET agc=...".
 func (kc *kiwiConn) applyAGC(params map[string]string) {
-	kc.mu.RLock()
+	agcParams, ok := kiwiAGCParams(params, kc.config)
+	if !ok {
+		return
+	}
+
+	// Kept whatever the mode, and before there is a session at all: the
+	// browser can send its AGC settings before its first SET mod, and a later
+	// mode change reloads radiod's preset and needs to restore them.
+	kc.mu.Lock()
+	kc.agc = &agcParams
 	session := kc.session
-	kc.mu.RUnlock()
+	kc.mu.Unlock()
 	if session == nil {
 		return
 	}
@@ -1230,11 +1370,6 @@ func (kc *kiwiConn) applyAGC(params map[string]string) {
 	// its level would corrupt exactly what those uses depend on. FM does not
 	// use radiod's linear AGC at all.
 	if strings.HasPrefix(mode, "iq") || mode == "fm" || mode == "nfm" {
-		return
-	}
-
-	agcParams, ok := kiwiAGCParams(params, kc.config)
-	if !ok {
 		return
 	}
 
@@ -1560,77 +1695,8 @@ func (kc *kiwiConn) handleSetCommand(command string) {
 	}
 
 	// Handle mod command (frequency/mode/bandwidth)
-	if kiwiMode, hasMod := params["mod"]; hasMod {
-		mode, ok := kiwiModeToRadiod[strings.ToLower(kiwiMode)]
-		if !ok {
-			log.Printf("KiwiSDR: unsupported mode '%s' from %s — ignoring", kiwiMode, kc.clientIP)
-			return
-		}
-
-		var freq uint64
-		var lowCut, highCut int
-
-		if freqStr, ok := params["freq"]; ok {
-			freqKHz, _ := strconv.ParseFloat(freqStr, 64)
-			freq = uint64(freqKHz * 1000)
-		}
-
-		if lcStr, ok := params["low_cut"]; ok {
-			lowCut, _ = strconv.Atoi(lcStr)
-		}
-		if hcStr, ok := params["high_cut"]; ok {
-			highCut, _ = strconv.Atoi(hcStr)
-		}
-
-		// Keep the passband inside what the announced rate can carry. radiod
-		// would accept edges out to +/-12 kHz on a 24 kHz am/fm channel, and
-		// everything past the announced Nyquist folds back into the audio band
-		// when streamAudio decimates. See maxPassbandEdgeHz.
-		if edge := kc.maxPassbandEdgeHz(); edge > 0 {
-			if lowCut < -edge {
-				lowCut = -edge
-			}
-			if highCut > edge {
-				highCut = edge
-			}
-		}
-
-		// Create or update session
-		kc.mu.RLock()
-		existingSession := kc.session
-		kc.mu.RUnlock()
-
-		if existingSession == nil {
-			// Create initial session (only for SND connections)
-			if kc.connType == "SND" {
-				// Last checkpoint before audio can flow. A client is not obliged
-				// to send "SET auth" first, so the check at the auth branch is
-				// not sufficient on its own — without this, a banned client could
-				// reach a session by sending "SET mod" alone.
-				if kc.handler != nil && kc.enforceIdentityBan(kc.handler.identityForSession(kc.userSessionID)) {
-					return
-				}
-				session, err := kc.sessions.CreateSessionWithBandwidthAndPassword(
-					freq, mode, 3000, kc.sourceIP, kc.clientIP, kc.userSessionID, kc.password)
-				if err != nil {
-					log.Printf("Failed to create KiwiSDR session: %v", err)
-					return
-				}
-				kc.mu.Lock()
-				kc.session = session
-				kc.mu.Unlock()
-				kc.audioReceiver.GetChannelAudio(session)
-			}
-		} else {
-			// Update existing session
-			if freq > 0 || mode != "" || (lowCut != 0 && highCut != 0) {
-				sendBW := lowCut != 0 && highCut != 0
-				err := kc.sessions.UpdateSessionWithEdges(existingSession.ID, freq, mode, lowCut, highCut, sendBW)
-				if err != nil {
-					log.Printf("Failed to update KiwiSDR session: %v", err)
-				}
-			}
-		}
+	if _, hasMod := params["mod"]; hasMod {
+		kc.applySetMod(params)
 		return
 	}
 
@@ -2279,7 +2345,7 @@ func (kc *kiwiConn) sendInitMessages() {
 		rxTitle = kc.config.Admin.Callsign + " - " + kc.config.Admin.Name
 	}
 
-	cfgJSON := `{"passbands":{"am":{"lo":-4900,"hi":4900},"amn":{"lo":-2500,"hi":2500},"amw":{"lo":-6000,"hi":6000},"sam":{"lo":-4900,"hi":4900},"sal":{"lo":-4900,"hi":0},"sau":{"lo":0,"hi":4900},"sas":{"lo":-4900,"hi":4900},"qam":{"lo":-4900,"hi":4900},"drm":{"lo":-5000,"hi":5000},"lsb":{"lo":-2400,"hi":-300},"lsn":{"lo":-2100,"hi":-300},"usb":{"lo":300,"hi":2400},"usn":{"lo":300,"hi":2100},"cw":{"lo":-400,"hi":400},"cwn":{"lo":-250,"hi":250},"nbfm":{"lo":-6000,"hi":6000},"nnfm":{"lo":-5000,"hi":5000},"iq":{"lo":-10000,"hi":10000}},"rx_grid":"` + gridSquare + `","rx_gps":"` + gpsCoords + `","rx_antenna":"` + kc.config.Admin.Antenna + `","index_html_params":{"PAGE_TITLE":"KiwiSDR","RX_PHOTO_HEIGHT":350,"RX_PHOTO_TITLE_HEIGHT":70,"RX_PHOTO_TITLE":"","RX_PHOTO_DESC":"","RX_TITLE":"` + rxTitle + `","RX_LOC":"` + kc.config.Admin.Location + `","RX_QRA":"` + gridSquare + `","RX_ASL":` + fmt.Sprintf("%d", kc.config.Admin.ASL) + `,"RX_GMAP":""},"owner_info":"` + ownerInfo + `","init":{"freq":7020,"mode":"cw","zoom":0,"max_dB":-10,"min_dB":-110},"waterfall_cal":-3,"waterfall_min_dB":-110,"waterfall_max_dB":-10,"snr_meas_interval_hrs":0}`
+	cfgJSON := `{"passbands":` + kiwiPassbandsJSON() + `,"rx_grid":"` + gridSquare + `","rx_gps":"` + gpsCoords + `","rx_antenna":"` + kc.config.Admin.Antenna + `","index_html_params":{"PAGE_TITLE":"KiwiSDR","RX_PHOTO_HEIGHT":350,"RX_PHOTO_TITLE_HEIGHT":70,"RX_PHOTO_TITLE":"","RX_PHOTO_DESC":"","RX_TITLE":"` + rxTitle + `","RX_LOC":"` + kc.config.Admin.Location + `","RX_QRA":"` + gridSquare + `","RX_ASL":` + fmt.Sprintf("%d", kc.config.Admin.ASL) + `,"RX_GMAP":""},"owner_info":"` + ownerInfo + `","init":{"freq":7020,"mode":"cw","zoom":0,"max_dB":-10,"min_dB":-110},"waterfall_cal":-3,"waterfall_min_dB":-110,"waterfall_max_dB":-10,"snr_meas_interval_hrs":0}`
 	cfgJSONEncoded := url.QueryEscape(cfgJSON)
 	cfgJSONEncoded = strings.ReplaceAll(cfgJSONEncoded, "+", "%20")
 	kc.sendMsg("load_cfg", cfgJSONEncoded)
@@ -2963,17 +3029,40 @@ func (kc *kiwiConn) streamAudio(done <-chan struct{}) {
 			// packet carries the rate it was captured at (stamped in
 			// routeAudio), so a mode change is picked up here without this
 			// path needing its own copy of the per-mode rate table.
+			//
+			// For AM the decimator also stands in for the low pass a KiwiSDR
+			// applies after its envelope detector, sized to the passband, so a
+			// passband change rebuilds it as well (newKiwiAMDecimator).
 			announced := kc.announcedSampleRate()
-			if audioPacket.SampleRate != kc.decimatorInRate || audioPacket.Channels != kc.decimatorChannels {
+			kc.mu.RLock()
+			amPass := kc.tuning.amPostFilterHz()
+			kc.mu.RUnlock()
+			if stereo {
+				amPass = 0
+			}
+			rateChanged := audioPacket.SampleRate != kc.decimatorInRate || audioPacket.Channels != kc.decimatorChannels
+			if rateChanged || amPass != kc.decimatorAMPass {
+				prev := kc.decimator
 				kc.decimatorInRate = audioPacket.SampleRate
 				kc.decimatorChannels = audioPacket.Channels
+				kc.decimatorAMPass = amPass
 				kc.decimator = nil
 				// The filter runs over one continuous stream, so interleaved
 				// stereo would smear I into Q. Only "iq" is mapped and it is
 				// already at the announced rate, so this never needs to
 				// convert; refuse rather than corrupt if that ever changes.
 				if !stereo {
-					kc.decimator = newKiwiDecimator(audioPacket.SampleRate, announced)
+					if amPass > 0 {
+						kc.decimator = newKiwiAMDecimator(audioPacket.SampleRate, announced, amPass)
+					}
+					if kc.decimator == nil {
+						kc.decimator = newKiwiDecimator(audioPacket.SampleRate, announced)
+					}
+				}
+				// Same stream, new filter: continue from the old one's
+				// samples rather than from silence.
+				if !rateChanged {
+					kc.decimator.carryHistory(prev)
 				}
 				if kc.decimator == nil && audioPacket.SampleRate != announced {
 					// Nothing in presets.conf produces this for a mode the

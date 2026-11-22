@@ -87,6 +87,113 @@ func newKiwiDecimator(inputRate, outputRate int) *kiwiDecimator {
 	}
 }
 
+// newKiwiAMDecimator is newKiwiDecimator with the low pass a KiwiSDR puts after
+// its AM envelope detector folded in.
+//
+// A KiwiSDR filters only before detection for every mode but AM, where it also
+// runs the detector output through m_AM_FIR (rx/rx_sound_cmd.cpp): flat to
+// passHz, the larger of the passband's edge magnitudes, and stopping by 1.8
+// times that or the Nyquist frequency, whichever is lower. That is what makes
+// AMN sound narrow: an envelope detector produces beat products out to twice the
+// IF half-width, and without the second filter AMN's hiss extends to ~5 kHz.
+// radiod has no post-detection filter, so the emulation applies one here, in the
+// decimator every AM packet already passes through.
+//
+// The plain decimator's response is fixed (Blackman, cutoff 0.45 of the output
+// rate). This one is designed per passband with a Kaiser window, which reaches
+// 60 dB in fewer taps: about 45 for AMN, 80 for AM, 110 for AMW. AMW asks to be
+// flat right up to the output Nyquist, which no decimation filter can do, so its
+// transition is centred there instead: flat to 5.6 kHz at a 12 kHz output, with
+// the little that folds back landing above the flat band.
+//
+// Used only by the KiwiSDR audio path. newKiwiDecimator is shared with the
+// WebSDR emulation and is deliberately left alone.
+func newKiwiAMDecimator(inputRate, outputRate, passHz int) *kiwiDecimator {
+	if inputRate <= 0 || outputRate <= 0 || inputRate%outputRate != 0 || passHz <= 0 {
+		return nil
+	}
+	nyquist := float64(outputRate) / 2
+	pass := math.Min(float64(passHz), nyquist)
+	stop := math.Min(1.8*float64(passHz), nyquist)
+
+	// Narrowest transition worth paying for, and how far either side of the
+	// output Nyquist a passband that reaches it may spill.
+	const minTransitionHz = 800.0
+	if stop-pass < minTransitionHz {
+		pass = nyquist - minTransitionHz/2
+		stop = nyquist + minTransitionHz/2
+	}
+
+	// Kaiser design (Oppenheim & Schafer): 60 dB stopband, cutoff mid-transition.
+	const attenDB = 60.0
+	beta := 0.1102 * (attenDB - 8.7)
+	deltaW := 2 * math.Pi * (stop - pass) / float64(inputRate)
+	numTaps := int(math.Ceil((attenDB-8)/(2.285*deltaW))) + 1
+	if numTaps%2 == 0 {
+		numTaps++
+	}
+	const maxTaps = 255
+	if numTaps > maxTaps {
+		numTaps = maxTaps
+	}
+	cutoff := (pass + stop) / 2 / float64(inputRate) // cycles per input sample
+
+	taps := make([]float32, numTaps)
+	mid := (numTaps - 1) / 2
+	i0Beta := besselI0(beta)
+	var sum float64
+	for i := 0; i < numTaps; i++ {
+		n := float64(i - mid)
+		h := 2 * cutoff
+		if n != 0 {
+			h = math.Sin(2*math.Pi*cutoff*n) / (math.Pi * n)
+		}
+		r := n / float64(mid)
+		h *= besselI0(beta*math.Sqrt(1-r*r)) / i0Beta
+		taps[i] = float32(h)
+		sum += h
+	}
+	for i := range taps {
+		taps[i] = float32(float64(taps[i]) / sum)
+	}
+
+	return &kiwiDecimator{
+		factor:  inputRate / outputRate,
+		taps:    taps,
+		history: make([]float32, numTaps-1),
+	}
+}
+
+// besselI0 is the zeroth-order modified Bessel function of the first kind, by
+// its power series; the Kaiser window needs it only for arguments below ~10,
+// where 30 terms are far more than enough.
+func besselI0(x float64) float64 {
+	sum, term := 1.0, 1.0
+	q := x * x / 4
+	for k := 1; k < 30; k++ {
+		term *= q / float64(k*k)
+		sum += term
+	}
+	return sum
+}
+
+// carryHistory seeds d's filter history from prev's, so swapping one filter
+// for another mid-stream -- a passband drag rebuilds the AM filter -- continues
+// from the same samples instead of restarting from silence with a click. Both
+// histories are oldest-first, so the newest samples are aligned at the end.
+// The decimation phase carries over too, keeping the output cadence even.
+func (d *kiwiDecimator) carryHistory(prev *kiwiDecimator) {
+	if d == nil || prev == nil || d.factor != prev.factor {
+		return
+	}
+	n := len(prev.history)
+	if n > len(d.history) {
+		n = len(d.history)
+	}
+	copy(d.history[len(d.history)-n:], prev.history[len(prev.history)-n:])
+	d.phase = prev.phase
+}
+
 // Factor reports how many input samples are consumed per output sample.
 func (d *kiwiDecimator) Factor() int {
 	if d == nil {

@@ -49,9 +49,11 @@ const WORDS = {
         none: 'No supported USB device found',
         noMatch: 'No matching devices',
         // The one thing worth saying that a serial port never needs: on Linux
-        // an RC-28 that is plugged in but missing here is nearly always the
-        // udev rule, and nothing else on screen would say so.
-        plugIn: 'Plug the RC-28 in — this list updates on its own. On Linux it also needs the udev rule from the README.',
+        // an RC-28 or TM-2 that is plugged in but missing here is nearly
+        // always the udev rule, and nothing else on screen would say so. The
+        // picker is not told which of the two the page asked for, so it names
+        // both.
+        plugIn: 'Plug the RC-28 or TM-2 in — this list updates on its own. On Linux it also needs that device’s udev rule from the README.',
     },
     bluetooth: {
         heading: 'Select a Bluetooth device',

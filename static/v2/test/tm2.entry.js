@@ -6,6 +6,7 @@
 export * from '../src/controls/tm2.js';
 export * as frame from '../src/controls/tm2frame.js';
 export * as display from '../src/controls/tm2display.js';
+export * as intro from '../src/controls/tm2intro.js';
 export {
     getSurface, getTm2, releaseSurfaceExcept, surfaceKeyLabel,
 } from '../src/controls/sources.js';

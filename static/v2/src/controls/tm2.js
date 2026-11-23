@@ -38,6 +38,7 @@ import { framesEqual, newFrame, tm2Payload, setField, OUTPUT_PAYLOAD } from './t
 import {
     E1_PAGES, E2_PAGES, PAGE_LABEL, changePopup, functionPopup, renderTm2, tm2Settings,
 } from './tm2display.js';
+import { INTRO_MS, INTRO_STEP_MS, introFrame } from './tm2intro.js';
 
 // Tmate2_C's VENDOR_ID / PRODUCT_ID, and its 50-TMATE2.rules.
 export const TM2_VENDOR_ID = 0x1721;
@@ -268,6 +269,8 @@ export class TM2Control extends Emitter {
         this._pumping = null;
         this._closing = false;
         this._writeFailed = false;
+        this._introAt = null;    // when the start-up show began, while it plays
+        this._introTimer = null;
     }
 
     /** Which page each small knob is on, by name — for the panel and the tests. */
@@ -331,8 +334,11 @@ export class TM2Control extends Emitter {
         device.addEventListener('inputreport', this._onReport);
         if (navigator.hid.addEventListener) navigator.hid.addEventListener('disconnect', this._onGone);
         if (typeof window !== 'undefined' && window.addEventListener) window.addEventListener('pagehide', this._onPageHide);
+        // Synchronous: ControlWatch hands over the operator's settings here,
+        // so whether the show plays is theirs, not the defaults'.
         this.emit('state', { connected: true });
         this.emit('message', { text: 'TM-2 connected', tone: 'good' });
+        if (this._settings.intro) this.playIntro();
         this._answerTimer = this._setTimeout(() => {
             this._answerTimer = null;
             if (this._heard || !this.connected) return;
@@ -388,7 +394,8 @@ export class TM2Control extends Emitter {
     _clearTimers() {
         for (const id of Object.values(this._timers)) this._clearTimeout(id);
         this._timers = {};
-        for (const t of ['_flushTimer', '_answerTimer', '_popupTimer']) {
+        this._introAt = null;
+        for (const t of ['_flushTimer', '_answerTimer', '_popupTimer', '_introTimer']) {
             if (this[t] !== null) this._clearTimeout(this[t]);
             this[t] = null;
         }
@@ -410,6 +417,9 @@ export class TM2Control extends Emitter {
         this._lastRaw = raw;
         const r = parseInput(bytes, e.reportId);
         if (!r) return;
+        // Anything touched ends the show: the operator wants the receiver.
+        // (The report differs from the last, so a knob moved or a key changed.)
+        if (this._pos !== null && this._introAt !== null) this.stopIntro();
 
         if (this._pos === null) {
             // The first report is where the knobs are, not a movement — and a
@@ -523,7 +533,38 @@ export class TM2Control extends Emitter {
 
     setSettings(raw) {
         this._settings = tm2Settings(raw);
+        if (!this._settings.intro && this._introAt !== null) this.stopIntro();
+        else this._render();
+    }
+
+    /** The start-up show (tm2intro.js), from the top. */
+    playIntro() {
+        if (!this.connected) return;
+        this._introAt = this._now();
+        if (this._introTimer !== null) this._clearTimeout(this._introTimer);
+        this._introTick();
         this._render();
+    }
+
+    stopIntro() {
+        if (this._introTimer !== null) this._clearTimeout(this._introTimer);
+        this._introTimer = null;
+        this._introAt = null;
+        this._render();
+    }
+
+    get playingIntro() {
+        return this._introAt !== null;
+    }
+
+    _introTick() {
+        this._introTimer = this._setTimeout(() => {
+            this._introTimer = null;
+            if (this._introAt === null) return;
+            if (this._now() - this._introAt >= INTRO_MS) { this.stopIntro(); return; }
+            this._introTick();
+            this._render();
+        }, INTRO_STEP_MS);
     }
 
     /**
@@ -563,7 +604,8 @@ export class TM2Control extends Emitter {
             popup: this._popup ? this._popup.kind : null,
             blinkOn: Math.floor(now / BLINK_MS) % 2 === 0,
         };
-        const f = renderTm2({ rx: this._rx, settings: this._settings, ui });
+        let f = renderTm2({ rx: this._rx, settings: this._settings, ui });
+        if (this._introAt !== null) f = introFrame(now - this._introAt, f);
         setField(f, 'click', this._click);
         return f;
     }

@@ -249,6 +249,9 @@ async function connected(opts = {}) {
     const hid = fakeHid({ chosen: [dev] });
     const clock = fakeClock();
     const tm2 = new TM2Control(clock);
+    // The start-up show only where a test asks for it: the rest are about
+    // what the receiver puts on the display.
+    if (!opts.intro) tm2.setSettings({ intro: false });
     const inputs = [];
     const msgs = [];
     tm2.on('input', (e) => inputs.push(e));
@@ -335,6 +338,134 @@ at('an unplugged TM-2 says so and stops listening', async () => {
     assert.strictEqual(tm2.connected, false);
     assert.strictEqual(dev.listening(), 0);
     assert.ok(msgs.some((m) => m.text === 'TM-2 disconnected'));
+});
+
+// --- the start-up show ---------------------------------------------------------------
+
+const I = tm.intro;
+const HW = ['contrast', 'encoder_speed1', 'encoder_speed2', 'encoder_speed3', 'encoder_trans12',
+    'encoder_trans23', 'trans_time', 'click'];
+const introBase = () => {
+    const f = D.renderTm2({ rx: RX, settings: { backlight: '#3366cc', contrast: 40, accel: 'strong' }, ui: {} });
+    F.setField(f, 'click', 1);
+    return f;
+};
+const fieldFull = (name) => (1 << F.FIELDS[name][1]) - 1;
+
+t('the show keeps the base frame’s contrast, acceleration and click throughout', () => {
+    const base = introBase();
+    for (let at = 0; at < I.INTRO_MS; at += I.INTRO_STEP_MS) {
+        const f = I.introFrame(at, base);
+        for (const name of HW) assert.strictEqual(F.getField(f, name), F.getField(base, name), `${name} at ${at} ms`);
+    }
+});
+
+t('every segment and both LEDs light at some point in the show', () => {
+    const base = introBase();
+    const seen = {};
+    for (let at = 0; at < I.INTRO_MS; at += 10) {
+        const f = I.introFrame(at, base);
+        for (const name of [...I.SEGMENT_FIELDS, 'usb_led', 'lock_led']) seen[name] = (seen[name] || 0) | F.getField(f, name);
+    }
+    for (const name of [...I.SEGMENT_FIELDS, 'usb_led', 'lock_led']) {
+        assert.strictEqual(seen[name], fieldFull(name), name);
+    }
+});
+
+t('the show starts dark and colourful, and moves', () => {
+    const base = introBase();
+    const first = I.introFrame(0, base);
+    for (const name of I.SEGMENT_FIELDS.filter((n) => /^main_/.test(n))) assert.strictEqual(F.getField(first, name), 0, name);
+    const rgbAt = (at) => ['rgb_red', 'rgb_green', 'rgb_blue'].map((n) => F.getField(I.introFrame(at, base), n));
+    const colours = new Set([0, 200, 400, 600, 800, 1000, 1400, 1800].map((at) => rgbAt(at).join(',')));
+    assert.ok(colours.size >= 6, `backlight cycles (${colours.size} colours)`);
+    const distinct = new Set();
+    for (let at = 0; at < I.INTRO_MS; at += I.INTRO_STEP_MS) distinct.add(hex(I.introFrame(at, base)));
+    assert.ok(distinct.size > 60, `a new frame most steps (${distinct.size})`);
+});
+
+t('the show ends on the name, in the operator’s backlight, and then is the base frame', () => {
+    const base = introBase();
+    const last = I.introFrame(I.INTRO_MS - 1, base);
+    const name = built((x) => F.displayMainText(x, 'UBERSDR '));
+    for (let pos = 1; pos <= F.MAIN_DIGITS; pos += 1) {
+        for (const h of ['l', 'r']) {
+            assert.strictEqual(F.getField(last, `main_${pos}${h}`), F.getField(name, `main_${pos}${h}`), `main_${pos}${h}`);
+        }
+    }
+    for (const n of ['rgb_red', 'rgb_green', 'rgb_blue']) assert.strictEqual(F.getField(last, n), F.getField(base, n), n);
+    assert.ok(F.framesEqual(I.introFrame(I.INTRO_MS, base), base));
+});
+
+// Steps the fake clock through the show, letting each write land.
+async function play(ctx, ms) {
+    for (let done = 0; done < ms; done += I.INTRO_STEP_MS) {
+        ctx.clock.advance(I.INTRO_STEP_MS);
+        // eslint-disable-next-line no-await-in-loop
+        await settle();
+    }
+}
+
+at('connecting plays the show, then hands the display to the receiver', async () => {
+    const ctx = await connected({ intro: true });
+    ctx.tm2.setReceiver(RX);
+    await settle();
+    assert.ok(ctx.tm2.playingIntro);
+    assert.strictEqual(shown(ctx.dev, 'hz'), 0, 'not the frequency yet');
+    const before = ctx.dev.sent.length;
+    await play(ctx, I.INTRO_MS / 2);
+    assert.ok(ctx.dev.sent.length - before > 30, `animated (${ctx.dev.sent.length - before} frames)`);
+    await play(ctx, I.INTRO_MS / 2 + I.INTRO_STEP_MS);
+    assert.ok(!ctx.tm2.playingIntro);
+    assert.strictEqual(shown(ctx.dev, 'hz'), 1, 'the frequency');
+    const n = ctx.dev.sent.length;
+    await play(ctx, 400);
+    assert.strictEqual(ctx.dev.sent.length, n, 'and the timer has stopped');
+});
+
+at('a knob turned during the show stops it and still tunes', async () => {
+    const ctx = await connected({ intro: true });
+    ctx.tm2.setReceiver(RX);
+    await play(ctx, 600);
+    assert.ok(ctx.tm2.playingIntro);
+    ctx.dev.fire(report({ main: 999 }));
+    await settle();
+    assert.ok(!ctx.tm2.playingIntro);
+    assert.strictEqual(shown(ctx.dev, 'hz'), 1);
+    ctx.clock.advance(FLUSH_MS);
+    assert.deepStrictEqual(keys(ctx.inputs), ['main_up']);
+});
+
+at('the first report does not stop the show; a key does', async () => {
+    const ctx = await connected({ intro: true });
+    assert.ok(ctx.tm2.playingIntro, 'the baseline report is not a touch');
+    ctx.dev.fire(report({ pressed: ['f1'] }));
+    assert.ok(!ctx.tm2.playingIntro);
+});
+
+at('with the show turned off, the first frame is the receiver’s', async () => {
+    const ctx = await connected();
+    assert.ok(!ctx.tm2.playingIntro);
+    const off = new TM2Control(fakeClock());
+    off.setSettings({ intro: false });
+    assert.strictEqual(off.playingIntro, false);
+});
+
+at('turning the show off mid-way stops it', async () => {
+    const ctx = await connected({ intro: true });
+    await play(ctx, 300);
+    ctx.tm2.setSettings({ intro: false });
+    assert.ok(!ctx.tm2.playingIntro);
+});
+
+at('disconnecting mid-show stops the timer and leaves the display blank', async () => {
+    const ctx = await connected({ intro: true });
+    await play(ctx, 300);
+    await ctx.tm2.disconnect();
+    const n = ctx.dev.sent.length;
+    await play(ctx, 400);
+    assert.strictEqual(ctx.dev.sent.length, n);
+    assert.deepStrictEqual(ctx.dev.sent[n - 1][1], new Array(43).fill(0));
 });
 
 // --- the knobs ----------------------------------------------------------------------

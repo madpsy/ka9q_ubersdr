@@ -105,6 +105,8 @@ export const DEFAULT_TM2_DISPLAY = {
     // A click from the TM-2 the moment a press becomes a hold.
     clickOnHold: true,
     accel: 'mild',
+    // The start-up show (tm2intro.js) each time a connection opens.
+    intro: true,
 };
 
 const HEX = /^#[0-9a-f]{6}$/i;
@@ -116,7 +118,7 @@ export function tm2Settings(raw) {
     s.contrast = Math.max(0, Math.min(255, Math.round(Number(s.contrast)) || 0));
     if (!READOUTS.some((r) => r.value === s.readout)) s.readout = DEFAULT_TM2_DISPLAY.readout;
     if (!ACCEL[s.accel]) s.accel = DEFAULT_TM2_DISPLAY.accel;
-    for (const k of ['meterColour', 'dimWhenDown', 'blinkWhenDown', 'clickOnHold']) s[k] = !!s[k];
+    for (const k of ['meterColour', 'dimWhenDown', 'blinkWhenDown', 'clickOnHold', 'intro']) s[k] = !!s[k];
     return s;
 }
 

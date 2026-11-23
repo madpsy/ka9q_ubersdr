@@ -1217,6 +1217,12 @@ function TM2Display({ display, onChange }) {
                 label="Click once a press counts as a hold"
                 title="Holds fire on release; the click says the moment letting go stops being a tap"
             />
+            <Switch
+                checked={display.intro}
+                onChange={(v) => onChange({ intro: v })}
+                label="Play the start-up show on connecting"
+                title="About four seconds of every segment and a colour-cycling backlight, ending on the UberSDR name; any knob or key skips it"
+            />
         </>
     );
 }

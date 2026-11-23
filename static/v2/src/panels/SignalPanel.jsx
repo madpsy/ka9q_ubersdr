@@ -336,11 +336,21 @@ function SquelchControl({ minimal }) {
     );
 }
 
-function drawSnr(canvas, points, now) {
+// The chart's two readings. Both are kept in the history all the time, so a
+// swap redraws the last ten seconds in the other unit rather than starting an
+// empty chart.
+const CHARTS = {
+    snr: { key: 'snr', colour: snrColour, label: 'SNR' },
+    dbfs: { key: 'dbfs', colour: sMeterColour, label: 'Signal dBFS' },
+};
+
+function drawChart(canvas, points, now, chart) {
+    const { key, colour } = chart;
+    const value = (p) => p[key];
     const s = chartSurface(canvas);
     if (!s) return;
     const { ctx, w, ht, dpr } = s;
-    const vals = points.filter((p) => p.v != null).map((p) => p.v);
+    const vals = points.filter((p) => value(p) != null).map(value);
     if (vals.length < 2) return;
 
     // v1's rule (app.js drawSnrHistoryChart): pad by 10% of the span with a
@@ -371,7 +381,7 @@ function drawSnr(canvas, points, now) {
     const runs = [];
     let run = [];
     for (const p of points) {
-        if (p.v == null) { if (run.length) runs.push(run); run = []; continue; }
+        if (value(p) == null) { if (run.length) runs.push(run); run = []; continue; }
         run.push(p);
     }
     if (run.length) runs.push(run);
@@ -380,10 +390,10 @@ function drawSnr(canvas, points, now) {
     ctx.lineJoin = 'round';
     ctx.lineCap = 'round';
     for (const r of runs) {
-        const pts = chartPoints(r, now, w, y);
-        // Coloured per segment on v1's ramp, so the trace says how good the
-        // signal is and not just how it moved.
-        strokeCurve(ctx, pts, (i) => snrColour(pts[i].p.v));
+        const pts = chartPoints(r, now, w, y, value);
+        // Coloured per segment on the matching meter's ramp, so the trace says
+        // how good the signal is and not just how it moved.
+        strokeCurve(ctx, pts, (i) => colour(value(pts[i].p)));
     }
 }
 
@@ -398,12 +408,23 @@ export default function SignalPanel({ minimal }) {
     const m = useMeters(15);
     const canvasRef = useRef(null);
     const history = useRef([]);
+    const chart = CHARTS[display.signalChart] || CHARTS.snr;
+    // Read by the frame loop, so a swap does not restart it.
+    const chartRef = useRef(chart);
+    chartRef.current = chart;
+    const swapChart = () => display.set({ signalChart: chart === CHARTS.snr ? 'dbfs' : 'snr' });
 
     // Sampling only. The trace is drawn by the frame loop below, on the
     // display's clock rather than the meters' — see lib/rollingChart.js.
     useEffect(() => {
         const h = history.current;
-        h.push({ t: performance.now(), v: m.snr == null ? null : m.snr });
+        // dBFS of -999 is the meter's "nothing yet", not a reading.
+        const p = m.basebandPower;
+        h.push({
+            t: performance.now(),
+            snr: m.snr == null ? null : m.snr,
+            dbfs: p == null || p <= -998 ? null : p,
+        });
         trimBefore(h, performance.now() - SPAN_MS - KEEP_MS);
         // Keyed on the whole snapshot rather than on the reading, so a sample
         // is taken on every tick of the meter clock and not only when the
@@ -426,7 +447,7 @@ export default function SignalPanel({ minimal }) {
         const capMs = maxFps > 0 ? 1000 / maxFps : 0;
 
         const frame = () => {
-            drawSnr(canvasRef.current, history.current, performance.now());
+            drawChart(canvasRef.current, history.current, performance.now(), chartRef.current);
             if (capMs) timer = setTimeout(() => { raf = requestAnimationFrame(frame); }, capMs);
             else raf = requestAnimationFrame(frame);
         };
@@ -598,10 +619,18 @@ export default function SignalPanel({ minimal }) {
                         />
                     </div>
 
-                    <div className="sparkline">
+                    {/* A button, as the NET chart in Stats is: a press swaps
+                        SNR for the signal in dBFS, and it is a display setting
+                        so it survives a reload. */}
+                    <button
+                        type="button"
+                        className="sparkline sparkline--press"
+                        onClick={swapChart}
+                        title={chart === CHARTS.snr ? 'Click for the signal in dBFS' : 'Click for the SNR'}
+                    >
                         <canvas ref={canvasRef} />
-                        <span className="sparkline__label sparkline__label--bottom sparkline__label--left">SNR, last 10 s</span>
-                    </div>
+                        <span className="sparkline__label sparkline__label--bottom sparkline__label--left">{chart.label}, last 10 s</span>
+                    </button>
 
                     {!running && <div className="note note--tight">Meters are live once the receiver is started.</div>}
                 </>

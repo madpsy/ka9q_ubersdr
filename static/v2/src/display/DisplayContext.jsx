@@ -447,6 +447,9 @@ export const DEFAULTS = {
     // or 'snr'. Clicking the meter swaps it. Signal by default because it is
     // the one that answers "is anything there".
     topMeter: 'signal',
+    // What the Signal panel's scrolling chart plots: 'snr' or 'dbfs', the
+    // signal power the S-meter reads. Clicking the chart swaps it.
+    signalChart: 'snr',
     // The Stats panel's NET chart, in bits rather than bytes. Clicking the chart
     // swaps it, and it is a display setting like any other so it survives a
     // reload — the same arrangement as the meters above, and for the same

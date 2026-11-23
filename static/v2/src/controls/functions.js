@@ -36,6 +36,14 @@ import {
     stepVfo,
 } from '../lib/vfos.js';
 import { getVfoLimit } from '../radio/session.js';
+import {
+    NB_THRESHOLD_MAX, NB_THRESHOLD_MIN, NB_THRESHOLD_STEP, NB_WIDTH_MAX, NB_WIDTH_MIN, NB_WIDTH_STEP,
+} from '../lib/noiseBlanker.js';
+import { NR_RANGES } from '../lib/nr.js';
+import { rmModeSupported } from '../lib/rmnoise.js';
+import {
+    boolValue, computeStep, controlKind, formatParamName, isInt, parseEnum, runtimeParams,
+} from '../lib/dsp.js';
 import { announceSettings, setAnnounceSettings } from '../lib/announce.js';
 import { requestFreqEntry } from '../lib/freqEntry.js';
 import {
@@ -791,6 +799,15 @@ function dspGroup(schemas) {
             run: (ev, ctx) => cycleDsp(ctx, names, -1),
         },
     ];
+    if (names.length) {
+        items.push({
+            id: 'dsp_reset',
+            label: 'Reset NR filter settings',
+            hint: 'the selected filter’s settings back to the receiver’s defaults',
+            accepts: PRESS,
+            run: (ev, ctx) => ctx.actions.resetDspParams(),
+        });
+    }
     for (const s of schemas || []) {
         items.push({
             id: `dsp_select_${s.name}`,
@@ -798,10 +815,250 @@ function dspGroup(schemas) {
             hint: s.description || undefined,
             accepts: PRESS,
             run: (ev, ctx) => ctx.actions.setDsp(s.name, true),
+            lit: (ctx) => {
+                const d = ctx.state().dsp;
+                return !!d.enabled && d.filter === s.name;
+            },
         });
     }
-    return group('Noise reduction', items);
+    for (const s of schemas || []) {
+        for (const p of runtimeParams(s)) {
+            const fn = dspParamFunction(s, p);
+            if (fn) items.push(fn);
+        }
+    }
+    return group('Noise reduction — receiver', items);
 }
+
+// A filter's settings, one function each, generated from its schema the way the
+// panel generates its sliders (lib/dsp.js decides which control a param gets).
+// Each names its filter, so a knob mapped to dfnr's attenuation sets dfnr's
+// whichever filter is running — it is stored and applies when dfnr next runs,
+// as the panel's own values do — rather than quietly retargeting whatever is
+// selected. Free-text params are left out: there is nothing a knob can type.
+function dspParamFunction(schema, p) {
+    const kind = controlKind(p);
+    if (kind === 'text') return null;
+    const id = `dsp_param_${schema.name}_${p.name}`;
+    const label = `NR — ${schema.name}: ${formatParamName(p.name).toLowerCase()}`;
+    const hint = p.description || undefined;
+    const current = (ctx) => {
+        const params = ctx.state().dsp.params || {};
+        const v = (params[schema.name] || {})[p.name];
+        return v ?? p.default;
+    };
+    const set = (ctx, v) => ctx.actions.setDspParam(p.name, v, schema.name);
+    if (kind === 'bool') {
+        return {
+            id, label, hint, accepts: PRESS,
+            run: (ev, ctx) => set(ctx, !boolValue(current(ctx))),
+            lit: (ctx) => boolValue(current(ctx)),
+        };
+    }
+    if (kind === 'enum') {
+        // A press walks the choices round; a detent steps and stops at the
+        // ends, as every other knob here does; a fader picks by position.
+        const values = parseEnum(p).map((o) => o.value);
+        return {
+            id, label, hint, accepts: CONTINUOUS,
+            run: (ev, ctx) => {
+                let i = values.indexOf(Math.round(parseFloat(current(ctx))));
+                if (i < 0) i = 0;
+                let next;
+                if (ev.kind === ABS) next = Math.round(clamp(ev.value, 0, 1) * (values.length - 1));
+                else if (ev.kind === TRIG) next = (i + 1) % values.length;
+                else next = clamp(i + detents(ev), 0, values.length - 1);
+                set(ctx, values[next]);
+            },
+        };
+    }
+    const min = parseFloat(p.min);
+    const max = parseFloat(p.max);
+    const step = computeStep(p);
+    return {
+        id, label, hint, accepts: CONTINUOUS,
+        run: (ev, ctx) => {
+            const now = parseFloat(current(ctx));
+            const v = toRange(ev, Number.isFinite(now) ? now : min, min, max, step);
+            set(ctx, isInt(p) ? Math.round(v) : snap(v, step, min, max));
+        },
+    };
+}
+
+// A value onto its slider's grid, without the float dust a 0.1 step leaves
+// (0.30000000000000004 would go to the receiver, and to a display, as is).
+function snap(v, step, min, max) {
+    const n = Math.round((v - min) / step) * step + min;
+    const decimals = Math.max(0, -Math.floor(Math.log10(step)) + 1);
+    return clamp(Number(n.toFixed(decimals)), min, max);
+}
+
+// --- noise, in this client ----------------------------------------------------
+//
+// The Noise panel's other half: the blanker and the client NR, which run on the
+// decoded audio and so exist on every receiver — including the ones with no
+// receiver-side filters at all, where these are the only noise controls there
+// are. Same ranges and steps as the panel's sliders (lib/noiseBlanker.js,
+// lib/nr.js), and the same state: a mapped control and the panel are one
+// setting, not two.
+
+// The client NR engines, in the panel's order. Labelled as the panel labels
+// them: 'nr2' is shown as plain "NR" there, v1's spectral subtraction.
+export const CLIENT_NR_ENGINES = [
+    { id: 'lsa', label: 'LSA' },
+    { id: 'nr2', label: 'NR (spectral subtraction)' },
+    { id: 'rmn', label: 'RM Noise' },
+];
+
+// Whether RM Noise would actually run now: SSB or CW, and a login that has
+// not been refused. The panel asks the same two questions (rmNeedsLogin).
+// `ctx.state().rmn` is read lazily by useControlContext; a context without it
+// — a test, the bridge — is treated as having no login.
+function rmnUsable(ctx) {
+    const st = ctx.state();
+    if (!rmModeSupported(st.tuning && st.tuning.mode)) return false;
+    return !!(st.rmn && !st.rmn.needsLogin);
+}
+
+function noiseOf(ctx) {
+    const n = ctx.state().noise || {};
+    return { nb: n.nb || {}, nr: n.nr || {} };
+}
+
+// The next engine round from the one chosen, switched on. A blind walk skips RM
+// Noise where it cannot run — a knob cannot sign anybody in, and landing on it
+// would leave the audio untouched with nothing on screen saying why. Picked by
+// name (cnr_select_rmn) it is selected regardless, as the panel's button does:
+// that is a deliberate choice, and the panel then asks for the login.
+function cycleClientNr(ctx, dir) {
+    const nr = noiseOf(ctx).nr;
+    const ids = CLIENT_NR_ENGINES.map((e) => e.id).filter((id) => id !== 'rmn' || rmnUsable(ctx));
+    const at = CLIENT_NR_ENGINES.findIndex((e) => e.id === nr.type);
+    // From an engine not in the walk (RM Noise without a login), carry on from
+    // where it sits in the full list rather than restarting at the top.
+    for (let k = 1; k <= CLIENT_NR_ENGINES.length; k += 1) {
+        const i = ((at < 0 ? 0 : at) + dir * k + CLIENT_NR_ENGINES.length * 2) % CLIENT_NR_ENGINES.length;
+        const id = CLIENT_NR_ENGINES[i].id;
+        if (ids.includes(id)) {
+            ctx.actions.setNoise({ nr: { type: id, enabled: true } });
+            return;
+        }
+    }
+}
+
+function noiseLevel(id, label, part, key, range, hint) {
+    return {
+        id, label, hint, accepts: CONTINUOUS,
+        run: (ev, ctx) => {
+            const cur = Number(noiseOf(ctx)[part][key]);
+            const now = Number.isFinite(cur) ? cur : range.min;
+            const v = snap(toRange(ev, now, range.min, range.max, range.step), range.step, range.min, range.max);
+            ctx.actions.setNoise({ [part]: { [key]: v } });
+        },
+    };
+}
+
+// NR, whichever kind this receiver has. The receiver's own filters where it
+// offers any — better placed in the chain, before the audio is encoded — and
+// the client's where it has none, which is many receivers. For a console that
+// should simply have an NR button that works wherever it is plugged in; the
+// two specific groups are still there for a mapping that wants one or the
+// other, or both on separate controls.
+function receiverNrNames(ctx) {
+    return (ctx.state().dsp.schemas || []).map((f) => f.name);
+}
+
+const NOISE_ANY = group('Noise reduction', [
+    {
+        id: 'nr_toggle_any',
+        label: 'NR on/off — the receiver’s, else this client’s',
+        hint: 'the receiver’s filters where it has any, this client’s NR where it does not',
+        accepts: PRESS,
+        run: (ev, ctx) => {
+            const names = receiverNrNames(ctx);
+            if (!names.length) {
+                ctx.actions.setNoise({ nr: { enabled: !noiseOf(ctx).nr.enabled } });
+                return;
+            }
+            const d = ctx.state().dsp;
+            ctx.actions.setDsp(d.filter || names[0], !d.enabled);
+        },
+        lit: (ctx) => (receiverNrNames(ctx).length
+            ? !!ctx.state().dsp.enabled
+            : !!noiseOf(ctx).nr.enabled),
+    },
+    {
+        id: 'nr_next_any',
+        label: 'Next NR — receiver filter, else client engine',
+        accepts: PRESS,
+        run: (ev, ctx) => {
+            const names = receiverNrNames(ctx);
+            if (names.length) cycleDsp(ctx, names, +1);
+            else cycleClientNr(ctx, +1);
+        },
+    },
+    {
+        id: 'nr_prev_any',
+        label: 'Previous NR — receiver filter, else client engine',
+        accepts: PRESS,
+        run: (ev, ctx) => {
+            const names = receiverNrNames(ctx);
+            if (names.length) cycleDsp(ctx, names, -1);
+            else cycleClientNr(ctx, -1);
+        },
+    },
+]);
+
+const NOISE_CLIENT = group('Noise reduction — this client', [
+    {
+        id: 'nb_toggle',
+        label: 'Noise blanker on/off',
+        accepts: PRESS,
+        run: (ev, ctx) => ctx.actions.setNoise({ nb: { enabled: !noiseOf(ctx).nb.enabled } }),
+        lit: (ctx) => !!noiseOf(ctx).nb.enabled,
+    },
+    noiseLevel('nb_threshold', 'Noise blanker threshold', 'nb', 'thresholdDb',
+        { min: NB_THRESHOLD_MIN, max: NB_THRESHOLD_MAX, step: NB_THRESHOLD_STEP },
+        'how far over the band an impulse must stand — lower catches more'),
+    noiseLevel('nb_width', 'Noise blanker width', 'nb', 'widthMs',
+        { min: NB_WIDTH_MIN, max: NB_WIDTH_MAX, step: NB_WIDTH_STEP },
+        'the shortest blank, in ms'),
+    {
+        id: 'cnr_toggle',
+        label: 'Client NR on/off',
+        hint: 'with the engine last chosen',
+        accepts: PRESS,
+        run: (ev, ctx) => ctx.actions.setNoise({ nr: { enabled: !noiseOf(ctx).nr.enabled } }),
+        lit: (ctx) => !!noiseOf(ctx).nr.enabled,
+    },
+    {
+        id: 'cnr_next',
+        label: 'Next client NR engine',
+        accepts: PRESS,
+        run: (ev, ctx) => cycleClientNr(ctx, +1),
+    },
+    {
+        id: 'cnr_prev',
+        label: 'Previous client NR engine',
+        accepts: PRESS,
+        run: (ev, ctx) => cycleClientNr(ctx, -1),
+    },
+    ...CLIENT_NR_ENGINES.map((e) => ({
+        id: `cnr_select_${e.id}`,
+        label: `Client NR — ${e.label}`,
+        accepts: PRESS,
+        run: (ev, ctx) => ctx.actions.setNoise({ nr: { type: e.id, enabled: true } }),
+        lit: (ctx) => {
+            const nr = noiseOf(ctx).nr;
+            return !!nr.enabled && nr.type === e.id;
+        },
+    })),
+    noiseLevel('cnr_strength', 'Client NR strength', 'nr', 'strength', NR_RANGES.strength,
+        'LSA and NR; RM Noise has its own'),
+    noiseLevel('cnr_makeup', 'Client NR makeup gain', 'nr', 'makeupDb', NR_RANGES.makeupDb),
+    noiseLevel('cnr_floor', 'Client NR spectral floor', 'nr', 'floor', NR_RANGES.floor, 'the NR engine only'),
+    noiseLevel('cnr_adapt', 'Client NR adaptation', 'nr', 'adaptRate', NR_RANGES.adaptRate, 'the NR engine only'),
+]);
 
 function cycleDsp(ctx, names, dir) {
     if (!names.length) return;
@@ -818,15 +1075,18 @@ const ALIAS = {
     mode_cw: 'mode_cwu',
     // v1's A/B swap, which v2 could not honour until there were VFOs to swap.
     vfo_ab_toggle: 'vfo_toggle_ab',
+    // v1's NR2 was its client-side spectral subtraction. v2's client NR is the
+    // same stage — NR2 survives in it as an engine, LSA is the default — so a
+    // v1 NR2 button switches that stage, with whichever engine is chosen.
+    nr2_toggle: 'cnr_toggle',
 };
 
 // Functions v1 could map that v2 has no equivalent for. Kept by name so an
 // imported v1 mapping file is reported honestly — the row shows as unavailable
 // rather than being dropped on load, which would look like a corrupt import.
-export const RETIRED = {
-    nb_toggle: 'Noise blanker — v2 has no client-side blanker',
-    nr2_toggle: 'Replaced by “Noise reduction on/off”',
-};
+// Empty for now: v1's noise blanker and NR2, the two that were, are back as
+// nb_toggle and (through ALIAS) cnr_toggle.
+export const RETIRED = {};
 
 // What the receiver has beyond the receiver itself, for the two groups that are
 // not always there: `{ rotator: bool, antenna: { count, labels } | null }`.
@@ -854,7 +1114,7 @@ function bandReachable(f) {
 export function catalogue(dspSchemas, hw) {
     return [
         ...FREQUENCY, ...MODE, ...BAND.filter(bandReachable), ...VFO, ...AUDIO, ...SPECTRUM, ...ANNOUNCE,
-        ...dspGroup(dspSchemas),
+        ...NOISE_ANY, ...NOISE_CLIENT, ...dspGroup(dspSchemas),
         ...(hasRotator(hw) ? ROTATOR : []),
         ...(hasAntenna(hw) ? antennaGroup(hw) : []),
     ];

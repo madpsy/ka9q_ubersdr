@@ -10,7 +10,7 @@ export {
     getSurface, getTm2, releaseSurfaceExcept, surfaceKeyLabel,
 } from '../src/controls/sources.js';
 export {
-    DEFAULT_STATE, SURFACES, isMappedSurface, loadState,
+    DEFAULT_STATE, SURFACES, isMappedSurface, loadState, upgradeTm2Mappings,
 } from '../src/controls/mappings.js';
 export { findFunction, runFunction, nextBand } from '../src/controls/functions.js';
 export { bandsInRange } from '../src/lib/bands.js';

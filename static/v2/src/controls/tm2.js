@@ -36,7 +36,7 @@
 import { Emitter } from '../radio/emitter.js';
 import { framesEqual, newFrame, tm2Payload, setField, OUTPUT_PAYLOAD } from './tm2frame.js';
 import {
-    E1_PAGES, E2_PAGES, PAGE_LABEL, changePopup, renderTm2, tm2Settings,
+    E1_PAGES, E2_PAGES, PAGE_LABEL, changePopup, functionPopup, renderTm2, tm2Settings,
 } from './tm2display.js';
 
 // Tmate2_C's VENDOR_ID / PRODUCT_ID, and its 50-TMATE2.rules.
@@ -99,8 +99,8 @@ export const TM2_KEYS = [
         ...PAGES[knob].flatMap((page) => [
             { key: `${knob}_${page}_up`, label: `${knob.toUpperCase()} (${PAGE_LABEL[page]}) — clockwise` },
             { key: `${knob}_${page}_down`, label: `${knob.toUpperCase()} (${PAGE_LABEL[page]}) — anticlockwise` },
+            { key: `${knob}_${page}_hold`, label: `${knob.toUpperCase()} (${PAGE_LABEL[page]}) push — hold` },
         ]),
-        { key: `${knob}_hold`, label: `${knob.toUpperCase()} push — hold` },
     ]),
     ...[1, 2, 3, 4, 5, 6].flatMap((n) => [
         { key: `f${n}_tap`, label: `F${n} — tap` },
@@ -121,6 +121,12 @@ const m = (fn) => ({ function: fn, throttleMs: 0, mode: 'none' });
 // squelch, NR; E2 the filter; F1 receiver (here VFO), F2 a DSP control (it is
 // AGC there; v2's nearest is NR), F3/F4 mode, F5/F6 step. Holds add what ELAD
 // leaves unassigned. Every row is the operator's to change.
+//
+// A small knob's hold is per page, like its turn, so each page's hold belongs
+// with what that page sets: mute on VOL, auto-squelch on SQL, the client NR
+// on NR (the turn there walks the receiver's filters). F2 is NR — the
+// receiver's where it has filters, the client's where it has none, so the
+// button works on every receiver — and held, the noise blanker.
 export const TM2_DEFAULT_MAPPINGS = {
     main_up: m('freq_rx_step'),
     main_down: m('freq_rx_step'),
@@ -130,20 +136,24 @@ export const TM2_DEFAULT_MAPPINGS = {
     e1_vol_down: m('volume_down'),
     e1_sql_up: m('squelch_set'),
     e1_sql_down: m('squelch_set'),
-    e1_nr_up: m('dsp_next'),
-    e1_nr_down: m('dsp_prev'),
-    e1_hold: m('mute_toggle'),
+    e1_vol_hold: m('mute_toggle'),
+    e1_sql_hold: m('squelch_auto'),
+    e1_nr_up: m('nr_next_any'),
+    e1_nr_down: m('nr_prev_any'),
+    e1_nr_hold: m('cnr_toggle'),
     e2_high_up: m('bw_high'),
     e2_high_down: m('bw_high'),
     e2_low_up: m('bw_low'),
     e2_low_down: m('bw_low'),
     e2_shift_up: m('bw_shift'),
     e2_shift_down: m('bw_shift'),
-    e2_hold: m('filter_reset'),
+    e2_high_hold: m('filter_reset'),
+    e2_low_hold: m('filter_reset'),
+    e2_shift_hold: m('filter_reset'),
     f1_tap: m('vfo_next'),
     f1_hold: m('vfo_toggle_ab'),
-    f2_tap: m('dsp_toggle'),
-    f2_hold: m('squelch_toggle'),
+    f2_tap: m('nr_toggle_any'),
+    f2_hold: m('nb_toggle'),
     f3_tap: m('mode_prev'),
     f3_hold: m('band_prev'),
     f4_tap: m('mode_next'),
@@ -451,8 +461,8 @@ export class TM2Control extends Emitter {
             for (let i = 0; i < Math.abs(steps); i += 1) {
                 this.emit('input', { key, event: { kind: 'relative', delta: one } });
             }
-            // Turning a small knob shows what it is setting, live.
-            this._showPopup(this.pages[knob]);
+            // What it is setting shows once the mapping has run — see
+            // noteResult — so the popup is the function's, not the page's.
         }
     }
 
@@ -486,8 +496,9 @@ export class TM2Control extends Emitter {
         // Measured, not taken from the timer: a busy page that runs the timer
         // late must still call a 700 ms press a hold.
         const hold = this._now() - since >= HOLD_MS;
-        if (!hold && (name === 'e1' || name === 'e2')) {
-            this._nextPage(name);
+        if (name === 'e1' || name === 'e2') {
+            if (!hold) { this._nextPage(name); return; }
+            this.emit('input', { key: `${name}_${this.pages[name]}_hold`, event: { kind: 'trigger' } });
             return;
         }
         this.emit('input', { key: `${name}_${hold ? 'hold' : 'tap'}`, event: { kind: 'trigger' } });
@@ -513,6 +524,18 @@ export class TM2Control extends Emitter {
     setSettings(raw) {
         this._settings = tm2Settings(raw);
         this._render();
+    }
+
+    /**
+     * A mapped control of this TM-2's has run `fnId` (dispatch.js,
+     * onControlResult). Shows what that function sets, where the display has
+     * a way to say it — any control, so a button mapped to "Volume up" shows
+     * the volume as the knob does.
+     */
+    noteResult(key, fnId, ok) {
+        if (!ok || !this.connected) return;
+        const kind = functionPopup(fnId);
+        if (kind) this._showPopup(kind);
     }
 
     /** The TM-2's click: it sounds when the click bit changes. */

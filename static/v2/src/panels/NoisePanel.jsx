@@ -24,8 +24,10 @@ import { Button, Empty, Field, Segmented, Slider, Switch } from '../components/u
 import { isIQ } from '../radio/constants.js';
 import DspControl from './DspControl.jsx';
 import {
-    NB_THRESHOLD_MAX, NB_THRESHOLD_MIN, NB_WIDTH_MAX, NB_WIDTH_MIN, TRACE_LEN, TRACE_MS,
+    NB_THRESHOLD_MAX, NB_THRESHOLD_MIN, NB_THRESHOLD_STEP, NB_WIDTH_MAX, NB_WIDTH_MIN,
+    NB_WIDTH_STEP, TRACE_LEN, TRACE_MS,
 } from '../lib/noiseBlanker.js';
+import { NR_RANGES } from '../lib/nr.js';
 import { cssVar } from '../lib/audioWaterfall.js';
 import {
     RM_REGISTER_URL, getRmNoise, rmCredentials, rmFamilyOfModel, rmModeSupported,
@@ -408,7 +410,7 @@ export default function NoisePanel({ minimal }) {
                             value={nb.thresholdDb}
                             min={NB_THRESHOLD_MIN}
                             max={NB_THRESHOLD_MAX}
-                            step={1}
+                            step={NB_THRESHOLD_STEP}
                             onChange={(v) => setNb({ thresholdDb: v })}
                         />
                     </Field>
@@ -420,7 +422,7 @@ export default function NoisePanel({ minimal }) {
                             value={nb.widthMs}
                             min={NB_WIDTH_MIN}
                             max={NB_WIDTH_MAX}
-                            step={0.5}
+                            step={NB_WIDTH_STEP}
                             onChange={(v) => setNb({ widthMs: v })}
                         />
                     </Field>
@@ -503,9 +505,7 @@ export default function NoisePanel({ minimal }) {
                     <Field label="Strength" hint={`${nr.strength}%`}>
                         <Slider
                             value={nr.strength}
-                            min={0}
-                            max={100}
-                            step={5}
+                            {...NR_RANGES.strength}
                             onChange={(v) => setNr({ strength: v })}
                         />
                     </Field>
@@ -517,18 +517,14 @@ export default function NoisePanel({ minimal }) {
                             <Field label="Spectral floor" hint={`${nr.floor}%`}>
                                 <Slider
                                     value={nr.floor}
-                                    min={0}
-                                    max={10}
-                                    step={0.5}
+                                    {...NR_RANGES.floor}
                                     onChange={(v) => setNr({ floor: v })}
                                 />
                             </Field>
                             <Field label="Adaptation" hint={`${Number(nr.adaptRate).toFixed(1)}%`}>
                                 <Slider
                                     value={nr.adaptRate}
-                                    min={0.1}
-                                    max={5}
-                                    step={0.1}
+                                    {...NR_RANGES.adaptRate}
                                     onChange={(v) => setNr({ adaptRate: v })}
                                 />
                             </Field>
@@ -540,9 +536,7 @@ export default function NoisePanel({ minimal }) {
                     >
                         <Slider
                             value={nr.makeupDb}
-                            min={-12}
-                            max={12}
-                            step={0.5}
+                            {...NR_RANGES.makeupDb}
                             onChange={(v) => setNr({ makeupDb: v })}
                         />
                     </Field>

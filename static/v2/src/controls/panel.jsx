@@ -10,6 +10,7 @@ import { useRadio } from '../radio/RadioContext.jsx';
 import { useDisplay } from '../display/DisplayContext.jsx';
 import { controlState, onControlState, updateControlState } from './mappings.js';
 import { antennaInfo, hardwareMessages, readAntenna } from './hardware.js';
+import { getRmNoise, rmCredentials } from '../lib/rmnoise.js';
 
 const MAX_MESSAGES = 60;
 
@@ -27,6 +28,13 @@ export function useControlState() {
 // current radio through a ref rather than closing over the render that happened
 // to create them. The object identity never changes, which is what lets it be
 // handed to a singleton once.
+function rmnNeedsLogin() {
+    const rm = getRmNoise();
+    if (rm.ready) return false;
+    const creds = rmCredentials();
+    return !!rm.authFailed || !(creds.username && creds.password);
+}
+
 export function useControlContext(stepHz) {
     const radio = useRadio();
     const display = useDisplay();
@@ -40,6 +48,12 @@ export function useControlContext(stepHz) {
             audio: radio.audio,
             squelch: radio.squelch,
             dsp: radio.dsp,
+            // The client blanker and NR, for their functions and lamps.
+            noise: radio.noise,
+            // Whether RM Noise could run if a knob walked onto it — the
+            // panel's own test (NoisePanel, rmNeedsLogin). A getter, so the
+            // stored login is only read when a function asks.
+            get rmn() { return { needsLogin: rmnNeedsLogin() }; },
             // For the VFO functions: a recalled VFO carries a zoom, and putting
             // it back needs the spectrum's current bin count to turn it into a
             // span. See lib/vfos.js.

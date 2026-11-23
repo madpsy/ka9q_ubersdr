@@ -81,6 +81,10 @@ export const NB_THRESHOLD_MIN = 8;
 export const NB_THRESHOLD_MAX = 24;
 export const NB_WIDTH_MIN = 0.5;
 export const NB_WIDTH_MAX = 10;
+// The panel's slider steps, shared with the mappable functions
+// (controls/functions.js) so a knob walks the same values the slider does.
+export const NB_THRESHOLD_STEP = 1;
+export const NB_WIDTH_STEP = 0.5;
 
 // The average: slow enough that speech rides on it rather than dragging it
 // about, and long against any blank.

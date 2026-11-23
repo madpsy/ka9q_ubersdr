@@ -1345,6 +1345,29 @@ t('control kind follows the declared type and range', () => {
     assert.strictEqual(kind(DFNR, 'model'), 'text');        // string, no range
 });
 
+t('a param change is stored for its own filter, and sent only while that filter runs', () => {
+    const d = { filter: 'nr2', enabled: true, params: { nr2: { qspp: '0.2' } }, schemas: [] };
+    // The selected filter, as the panel sets it: stored, and sent live.
+    let r = dspLib.applyDspParam(d, 'qspp', 0.5);
+    assert.strictEqual(r.next.params.nr2.qspp, '0.5');
+    assert.deepStrictEqual(r.send, { qspp: '0.5' });
+    // Another filter's, as a mapped control sets it: stored there, not sent —
+    // it would land on nr2, the one running.
+    r = dspLib.applyDspParam(d, 'atten-limit', 30, 'dfnr');
+    assert.strictEqual(r.next.params.dfnr['atten-limit'], '30');
+    assert.strictEqual(r.next.params.nr2.qspp, '0.2', 'the running filter untouched');
+    assert.strictEqual(r.send, null);
+    // Its own filter named explicitly is the same as the selected one.
+    assert.deepStrictEqual(dspLib.applyDspParam(d, 'ae', false, 'nr2').send, { ae: 'false' });
+    // Stored but not sent while NR is off — set_dsp_params needs a live insert.
+    r = dspLib.applyDspParam({ ...d, enabled: false }, 'qspp', 0.4);
+    assert.strictEqual(r.next.params.nr2.qspp, '0.4');
+    assert.strictEqual(r.send, null);
+    // Nothing selected and nothing named: nothing to change.
+    const none = { filter: null, enabled: false, params: {} };
+    assert.strictEqual(dspLib.applyDspParam(none, 'x', 1).next, none);
+});
+
 t('enum options are parsed from the description', () => {
     const p = NR2.params.find((x) => x.name === 'gain-method');
     assert.deepStrictEqual(dspLib.parseEnum(p), [

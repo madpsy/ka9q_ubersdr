@@ -9,7 +9,7 @@ const assert = require('assert');
 const { parseToken, flexKeyLabel, FlexControl } = require('./.build/flexcontrol.cjs');
 const { midiKey, midiKeyLabel, CC, NOTE_ON, NOTE_OFF } = require('./.build/webmidi.cjs');
 const {
-    runFunction, catalogue, functionLabel, isEncoderFunction, isUnavailable, RETIRED,
+    runFunction, catalogue, functionLabel, functionLit, isEncoderFunction, isUnavailable, RETIRED,
 } = require('./.build/functions.cjs');
 const {
     antennaStep, nextAntenna, rotatorStep, hardwareMessages,
@@ -32,6 +32,11 @@ function fakeRadio(over = {}) {
         audio: { volume: 0.7, muted: false },
         squelch: { value: SQUELCH_MIN, enabled: false },
         dsp: { filter: null, enabled: false, params: {}, schemas: [] },
+        noise: {
+            nb: { enabled: false, thresholdDb: 19, widthMs: 4 },
+            nr: { enabled: false, type: 'lsa', strength: 40, makeupDb: 0, floor: 10, adaptRate: 1 },
+        },
+        rmn: { needsLogin: true },
         ...over,
     };
     const record = (name) => (...args) => calls.push([name, ...args]);
@@ -56,6 +61,9 @@ function fakeRadio(over = {}) {
             tuneTo: record('tuneTo'),
             setSpan: record('setSpan'),
             toggleTuneLock: record('toggleTuneLock'),
+            setNoise: record('setNoise'),
+            setDspParam: record('setDspParam'),
+            resetDspParams: record('resetDspParams'),
         },
     };
 }
@@ -520,6 +528,17 @@ t('every function id v1 could map is either still live or explicitly retired', (
     }
 });
 
+t('v1’s noise blanker and NR2 buttons work again', () => {
+    // Both were retired while v2 had no client noise stage; it has one now.
+    assert.ok(!RETIRED.nb_toggle && !RETIRED.nr2_toggle);
+    let r = fakeRadio();
+    assert.ok(runFunction('nb_toggle', TRIG, r));
+    assert.deepStrictEqual(r.calls, [['setNoise', { nb: { enabled: true } }]]);
+    r = fakeRadio();
+    assert.ok(runFunction('nr2_toggle', TRIG, r));
+    assert.deepStrictEqual(r.calls, [['setNoise', { nr: { enabled: true } }]], 'v1’s NR2 is the client NR');
+});
+
 t('v1’s single “CW” still resolves, to CW-upper as it did there', () => {
     // v2 splits CW into two sidebands, so the old id would otherwise import as
     // an unknown function and silently stop working.
@@ -710,6 +729,214 @@ at('two quick antenna presses land two along, not one plus a refusal', async () 
 
     assert.strictEqual(posts.length, 1, `sent ${posts.length} commands, expected 1`);
     assert.strictEqual(posts[0].antenna, 3);
+});
+
+// --- noise reduction -------------------------------------------------------
+
+const noiseRadio = (nb = {}, nr = {}, over = {}) => fakeRadio({
+    noise: {
+        nb: { enabled: false, thresholdDb: 19, widthMs: 4, ...nb },
+        nr: { enabled: false, type: 'lsa', strength: 40, makeupDb: 0, floor: 10, adaptRate: 1, ...nr },
+    },
+    ...over,
+});
+const lastNoise = (r) => r.calls.filter((c) => c[0] === 'setNoise').map((c) => c[1]);
+
+t('the client noise controls are mappable on every receiver, receiver filters or none', () => {
+    const ids = catalogue([]).map((f) => f.id);
+    for (const id of ['nb_toggle', 'nb_threshold', 'nb_width', 'cnr_toggle', 'cnr_next', 'cnr_prev',
+        'cnr_select_lsa', 'cnr_select_nr2', 'cnr_select_rmn', 'cnr_strength', 'cnr_makeup', 'cnr_floor',
+        'cnr_adapt', 'nr_toggle_any', 'nr_next_any', 'nr_prev_any']) {
+        assert.ok(ids.includes(id), id);
+    }
+    const groups = new Set(catalogue([]).map((f) => f.group));
+    assert.ok(groups.has('Noise reduction — this client'));
+});
+
+t('the blanker switches, and lights while on', () => {
+    const off = noiseRadio();
+    runFunction('nb_toggle', TRIG, off);
+    assert.deepStrictEqual(lastNoise(off), [{ nb: { enabled: true } }]);
+    assert.strictEqual(functionLit('nb_toggle', off), false);
+    const on = noiseRadio({ enabled: true });
+    runFunction('nb_toggle', TRIG, on);
+    assert.deepStrictEqual(lastNoise(on), [{ nb: { enabled: false } }]);
+    assert.strictEqual(functionLit('nb_toggle', on), true);
+});
+
+t('blanker threshold and width: the panel’s steps and limits, from a knob or a fader', () => {
+    let r = noiseRadio();
+    runFunction('nb_threshold', REL(2), r);
+    runFunction('nb_threshold', REL(-1), r);
+    assert.deepStrictEqual(lastNoise(r), [{ nb: { thresholdDb: 21 } }, { nb: { thresholdDb: 18 } }]);
+    r = noiseRadio({ thresholdDb: 24 });
+    runFunction('nb_threshold', REL(5), r);
+    assert.deepStrictEqual(lastNoise(r), [{ nb: { thresholdDb: 24 } }], 'stops at the top');
+    r = noiseRadio();
+    runFunction('nb_threshold', ABS(0), r);
+    runFunction('nb_threshold', ABS(1), r);
+    assert.deepStrictEqual(lastNoise(r), [{ nb: { thresholdDb: 8 } }, { nb: { thresholdDb: 24 } }]);
+    r = noiseRadio({ widthMs: 4 });
+    runFunction('nb_width', REL(1), r);
+    runFunction('nb_width', ABS(0.5), r);
+    assert.deepStrictEqual(lastNoise(r), [{ nb: { widthMs: 4.5 } }, { nb: { widthMs: 5.5 } }],
+        'half-millisecond steps; a fader lands on the grid');
+    r = noiseRadio({ widthMs: 0.5 });
+    runFunction('nb_width', REL(-3), r);
+    assert.deepStrictEqual(lastNoise(r), [{ nb: { widthMs: 0.5 } }], 'stops at the bottom');
+});
+
+t('client NR levels land on the slider’s grid, with no float dust', () => {
+    let r = noiseRadio({}, { adaptRate: 0.1 });
+    runFunction('cnr_adapt', REL(2), r);
+    assert.deepStrictEqual(lastNoise(r), [{ nr: { adaptRate: 0.3 } }], '0.1 + 0.2 is 0.3, not 0.30000000000000004');
+    r = noiseRadio({}, { strength: 40 });
+    runFunction('cnr_strength', REL(1), r);
+    runFunction('cnr_strength', ABS(1), r);
+    assert.deepStrictEqual(lastNoise(r), [{ nr: { strength: 45 } }, { nr: { strength: 100 } }]);
+    r = noiseRadio({}, { makeupDb: 0 });
+    runFunction('cnr_makeup', REL(-3), r);
+    assert.deepStrictEqual(lastNoise(r), [{ nr: { makeupDb: -1.5 } }]);
+    r = noiseRadio({}, { floor: 10 });
+    runFunction('cnr_floor', REL(1), r);
+    assert.deepStrictEqual(lastNoise(r), [{ nr: { floor: 10 } }]);
+});
+
+t('client NR: on/off keeps the engine; picking one switches it on and lights only it', () => {
+    let r = noiseRadio({}, { type: 'nr2' });
+    runFunction('cnr_toggle', TRIG, r);
+    assert.deepStrictEqual(lastNoise(r), [{ nr: { enabled: true } }]);
+    r = noiseRadio();
+    runFunction('cnr_select_nr2', TRIG, r);
+    assert.deepStrictEqual(lastNoise(r), [{ nr: { type: 'nr2', enabled: true } }]);
+    const on = noiseRadio({}, { enabled: true, type: 'nr2' });
+    assert.strictEqual(functionLit('cnr_select_nr2', on), true);
+    assert.strictEqual(functionLit('cnr_select_lsa', on), false);
+    assert.strictEqual(functionLit('cnr_select_nr2', noiseRadio({}, { type: 'nr2' })), false, 'not while off');
+    assert.strictEqual(functionLit('cnr_toggle', on), true);
+});
+
+t('walking the client engines skips RM Noise where it cannot run', () => {
+    const walk = (type, dir, over) => {
+        const r = noiseRadio({}, { type }, over);
+        runFunction(dir > 0 ? 'cnr_next' : 'cnr_prev', TRIG, r);
+        return lastNoise(r)[0].nr;
+    };
+    // No login: LSA ⇄ NR.
+    assert.deepStrictEqual(walk('lsa', +1), { type: 'nr2', enabled: true });
+    assert.deepStrictEqual(walk('nr2', +1), { type: 'lsa', enabled: true });
+    assert.deepStrictEqual(walk('lsa', -1), { type: 'nr2', enabled: true });
+    // Logged in, on SSB: RM Noise is in the walk.
+    const ok = { rmn: { needsLogin: false } };
+    assert.deepStrictEqual(walk('nr2', +1, ok), { type: 'rmn', enabled: true });
+    assert.deepStrictEqual(walk('lsa', -1, ok), { type: 'rmn', enabled: true });
+    // Logged in, but on AM, which RM Noise does not do.
+    const am = { ...ok, tuning: { frequency: 909000, mode: 'am', bandwidthLow: -5000, bandwidthHigh: 5000 } };
+    assert.deepStrictEqual(walk('nr2', +1, am), { type: 'lsa', enabled: true });
+    // Sitting on RM Noise with no login: on to the next one that runs.
+    assert.deepStrictEqual(walk('rmn', +1), { type: 'lsa', enabled: true });
+    assert.deepStrictEqual(walk('rmn', -1), { type: 'nr2', enabled: true });
+    // A context that cannot say (the bridge, a test) counts as no login.
+    assert.deepStrictEqual(walk('nr2', +1, { rmn: undefined }), { type: 'lsa', enabled: true });
+});
+
+t('NR on any receiver: the receiver’s filters where it has them, else the client’s', () => {
+    const schemas = [{ name: 'rn2' }, { name: 'nr2' }];
+    let r = noiseRadio({}, {}, { dsp: { filter: null, enabled: false, params: {}, schemas } });
+    runFunction('nr_toggle_any', TRIG, r);
+    assert.deepStrictEqual(r.calls, [['setDsp', 'rn2', true]], 'the receiver’s first filter');
+    assert.strictEqual(functionLit('nr_toggle_any', r), false);
+    r = noiseRadio({}, { enabled: true }, { dsp: { filter: 'nr2', enabled: true, params: {}, schemas } });
+    assert.strictEqual(functionLit('nr_toggle_any', r), true);
+    runFunction('nr_toggle_any', TRIG, r);
+    assert.deepStrictEqual(r.calls, [['setDsp', 'nr2', false]], 'the client NR is left alone');
+    r = noiseRadio({}, { enabled: true }, { dsp: { filter: 'nr2', enabled: true, params: {}, schemas } });
+    runFunction('nr_next_any', TRIG, r);
+    assert.deepStrictEqual(r.calls, [['setDsp', 'rn2', true]], 'walks the receiver’s filters');
+    // A receiver with none.
+    r = noiseRadio({}, { enabled: true });
+    assert.strictEqual(functionLit('nr_toggle_any', r), true, 'lit by the client NR');
+    runFunction('nr_toggle_any', TRIG, r);
+    runFunction('nr_next_any', TRIG, r);
+    runFunction('nr_prev_any', TRIG, r);
+    assert.deepStrictEqual(lastNoise(r), [
+        { nr: { enabled: false } }, { nr: { type: 'nr2', enabled: true } }, { nr: { type: 'nr2', enabled: true } },
+    ]);
+    assert.ok(!r.calls.some((c) => c[0] === 'setDsp'));
+});
+
+// Verbatim from a live server's get_dsp_filters, as protocol.test.js has them,
+// plus a free-text param to show those are left out.
+const NR2_SCHEMA = {
+    name: 'nr2',
+    params: [
+        { name: 'gain-method', type: 'int', default: '2', min: '0', max: '3', description: 'Gain method: 0=Linear 1=Log 2=Gamma 3=Trained', runtime_safe: true },
+        { name: 'gain-max', type: 'float', default: '1.0', min: '0', max: '2.0', description: 'Max gain cap', runtime_safe: true },
+        { name: 'ae', type: 'bool', default: 'true', description: 'Artifact elimination post-processing', runtime_safe: true },
+    ],
+};
+const DFNR_SCHEMA = {
+    name: 'dfnr',
+    params: [
+        { name: 'model', type: 'string', default: '', description: 'Model path', runtime_safe: false },
+        { name: 'atten-limit', type: 'float', default: '20', min: '0', max: '100', description: 'Attenuation limit', runtime_safe: true },
+        { name: 'label', type: 'string', default: 'x', description: 'free text', runtime_safe: true },
+    ],
+};
+const SCHEMAS = [NR2_SCHEMA, DFNR_SCHEMA];
+const dspRadio = (dsp = {}) => fakeRadio({
+    dsp: { filter: 'nr2', enabled: true, params: {}, schemas: SCHEMAS, ...dsp },
+});
+
+t('every receiver filter setting a knob can drive is mappable, and nothing it cannot', () => {
+    const ids = catalogue(SCHEMAS).map((f) => f.id);
+    for (const id of ['dsp_param_nr2_gain-method', 'dsp_param_nr2_gain-max', 'dsp_param_nr2_ae',
+        'dsp_param_dfnr_atten-limit', 'dsp_reset']) {
+        assert.ok(ids.includes(id), id);
+    }
+    assert.ok(!ids.includes('dsp_param_dfnr_model'), 'not one the server refuses mid-stream');
+    assert.ok(!ids.includes('dsp_param_dfnr_label'), 'not free text');
+    assert.ok(!catalogue([]).some((f) => f.id === 'dsp_reset'), 'no reset without filters');
+    assert.strictEqual(functionLabel('dsp_param_dfnr_atten-limit', SCHEMAS), 'NR — dfnr: atten limit');
+});
+
+t('a filter setting is set on its own filter, from its schema’s range and step', () => {
+    let r = dspRadio();
+    runFunction('dsp_param_dfnr_atten-limit', REL(2), r);
+    assert.deepStrictEqual(r.calls, [['setDspParam', 'atten-limit', 22, 'dfnr']],
+        'from the schema default, a whole unit a detent, on dfnr though nr2 runs');
+    r = dspRadio({ params: { nr2: { 'gain-max': '1.95' } } });
+    runFunction('dsp_param_nr2_gain-max', REL(1), r);
+    runFunction('dsp_param_nr2_gain-max', ABS(0.25), r);
+    assert.deepStrictEqual(r.calls, [
+        ['setDspParam', 'gain-max', 2, 'nr2'], ['setDspParam', 'gain-max', 0.5, 'nr2'],
+    ], 'stops at the top; a fader places it');
+});
+
+t('an enumerated setting steps through its choices; a bool switches and lights', () => {
+    let r = dspRadio();
+    runFunction('dsp_param_nr2_gain-method', TRIG, r);
+    runFunction('dsp_param_nr2_gain-method', REL(-1), r);
+    runFunction('dsp_param_nr2_gain-method', ABS(0), r);
+    assert.deepStrictEqual(r.calls.map((c) => c[2]), [3, 1, 0], 'a press from Gamma is Trained; back one; the fader’s end');
+    r = dspRadio({ params: { nr2: { 'gain-method': '3' } } });
+    runFunction('dsp_param_nr2_gain-method', TRIG, r);
+    runFunction('dsp_param_nr2_gain-method', REL(1), r);
+    assert.deepStrictEqual(r.calls.map((c) => c[2]), [0, 3], 'a press wraps round; a detent stops at the end');
+    r = dspRadio();
+    assert.strictEqual(functionLit('dsp_param_nr2_ae', r), true, 'its default, true');
+    runFunction('dsp_param_nr2_ae', TRIG, r);
+    assert.deepStrictEqual(r.calls, [['setDspParam', 'ae', false, 'nr2']]);
+    assert.strictEqual(functionLit('dsp_param_nr2_ae', dspRadio({ params: { nr2: { ae: 'false' } } })), false);
+});
+
+t('picking a receiver filter lights while it runs; reset asks the receiver for defaults', () => {
+    assert.strictEqual(functionLit('dsp_select_nr2', dspRadio()), true);
+    assert.strictEqual(functionLit('dsp_select_dfnr', dspRadio()), false);
+    assert.strictEqual(functionLit('dsp_select_nr2', dspRadio({ enabled: false })), false);
+    const r = dspRadio();
+    runFunction('dsp_reset', TRIG, r);
+    assert.deepStrictEqual(r.calls, [['resetDspParams']]);
 });
 
 // The asynchronous ones last, so the synchronous output above stays in order.

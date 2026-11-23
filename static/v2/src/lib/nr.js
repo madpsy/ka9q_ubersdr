@@ -128,6 +128,16 @@ export const NR_DEFAULTS = {
     adaptRate: 1.0,
 };
 
+// The panel's slider ranges, shared with the mappable functions
+// (controls/functions.js): a knob mapped to one walks the same range, in the
+// same steps, as the slider beside it. Floor and adaptation are NR2's own.
+export const NR_RANGES = {
+    strength: { min: 0, max: 100, step: 5 },
+    makeupDb: { min: -12, max: 12, step: 0.5 },
+    floor: { min: 0, max: 10, step: 0.5 },
+    adaptRate: { min: 0.1, max: 5, step: 0.1 },
+};
+
 // ---- estimator constants (Cohen & Berdugo 2002, Ephraim & Malah 1985) -------
 
 const A_SMOOTH = 0.75;      // power spectrum smoothing across time

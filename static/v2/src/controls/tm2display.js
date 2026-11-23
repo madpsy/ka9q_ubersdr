@@ -137,6 +137,23 @@ function label(name, value) {
     return name + v.padStart(Math.max(1, 9 - name.length), ' ');
 }
 
+// A value with three decimals, drawn against the display's own thousands dot
+// (dot2, between the fourth digit and the third): 4.5 ms is "4500" with the dot
+// lit, so it reads "4.500". Seven segments have no decimal point of their own
+// that sits anywhere else, and a '.' glyph would cost a whole digit.
+function fixed3(name, value) {
+    const n = Math.round((Number(value) || 0) * 1000);
+    const digits = String(Math.abs(n)).padStart(4, '0');
+    return label(name, (n < 0 ? '-' : '') + digits);
+}
+
+// The popups drawn with fixed3, which light dot2 — see renderTm2.
+const FIXED3 = new Set(['nbwidth', 'cnrmakeup', 'cnrfloor', 'cnradapt']);
+
+// The client NR engines as six characters can spell them. 'nr2' is labelled
+// plain "NR" in the Noise panel, and is here.
+const CNR_SHORT = { lsa: 'LSA', nr2: 'NR', rmn: 'RMN' };
+
 function stepText(hz) {
     if (hz >= 1000 && hz % 1000 === 0) return `${hz / 1000}K`;
     if (hz >= 1000) return `${(hz / 1000).toFixed(1)}K`;
@@ -166,6 +183,19 @@ export function popupText(kind, rx) {
         case 'step': return label('STEP', stepText(Number(r.stepHz) || 0));
         case 'mute': return r.muted ? 'MUTED' : 'UNMUTED';
         case 'lock': return r.locked ? 'LOCKED' : 'UNLOCKED';
+        // NR, whichever kind is in charge (nr_*_any in controls/functions.js):
+        // the receiver's where it has filters, the client's where it has none.
+        case 'nrany': return popupText(r.dspAvailable ? 'nr' : 'cnr', r);
+        // The client noise stage, under the names its segments carry: NB the
+        // blanker, NR2 the client NR (the receiver's is NR).
+        case 'nb': return r.nbEnabled ? 'NB     ON' : 'NB    OFF';
+        case 'nbthr': return label('NB TH', Math.round(Number(r.nbThresholdDb) || 0));
+        case 'nbwidth': return fixed3('NBW', r.nbWidthMs);
+        case 'cnr': return r.cnrEnabled ? label('NR2', CNR_SHORT[r.cnrType] || 'ON') : 'NR2   OFF';
+        case 'cnrstr': return label('STR', Math.round(Number(r.cnrStrength) || 0));
+        case 'cnrmakeup': return fixed3('MKUP', r.cnrMakeupDb);
+        case 'cnrfloor': return fixed3('FLR', r.cnrFloor);
+        case 'cnradapt': return fixed3('ADPT', r.cnrAdaptRate);
         default: return '';
     }
 }
@@ -182,6 +212,50 @@ export function changePopup(prev, rx) {
     if (!!prev.muted !== !!rx.muted) return 'mute';
     if (!!prev.locked !== !!rx.locked) return 'lock';
     if (!!prev.dspEnabled !== !!rx.dspEnabled || (rx.dspEnabled && prev.dspFilter !== rx.dspFilter)) return 'nr';
+    if (!!prev.nbEnabled !== !!rx.nbEnabled) return 'nb';
+    if (!!prev.cnrEnabled !== !!rx.cnrEnabled || (rx.cnrEnabled && prev.cnrType !== rx.cnrType)) return 'cnr';
+    return null;
+}
+
+// What a mapped function's popup is, so a small knob shows what it is actually
+// mapped to rather than what its page is called: E1's NR page remapped to the
+// blanker threshold says "NB TH 19", not the NR filter. A function with no
+// entry shows nothing — its page label is still lit, and a wrong number would
+// be worse than none.
+const FUNCTION_POPUP = {
+    volume_up: 'vol',
+    volume_down: 'vol',
+    volume_set: 'vol',
+    squelch_set: 'sql',
+    squelch_toggle: 'sql',
+    squelch_auto: 'sql',
+    dsp_toggle: 'nr',
+    dsp_next: 'nr',
+    dsp_prev: 'nr',
+    nr_toggle_any: 'nrany',
+    nr_next_any: 'nrany',
+    nr_prev_any: 'nrany',
+    bw_high: 'high',
+    bw_low: 'low',
+    bw_shift: 'shift',
+    filter_reset: 'high',
+    nb_toggle: 'nb',
+    nb_threshold: 'nbthr',
+    nb_width: 'nbwidth',
+    cnr_toggle: 'cnr',
+    cnr_next: 'cnr',
+    cnr_prev: 'cnr',
+    cnr_strength: 'cnrstr',
+    cnr_makeup: 'cnrmakeup',
+    cnr_floor: 'cnrfloor',
+    cnr_adapt: 'cnradapt',
+};
+
+export function functionPopup(fnId) {
+    const id = String(fnId || '');
+    if (FUNCTION_POPUP[id]) return FUNCTION_POPUP[id];
+    if (id.startsWith('dsp_select_')) return 'nr';
+    if (id.startsWith('cnr_select_')) return 'cnr';
     return null;
 }
 
@@ -223,7 +297,13 @@ const DIM = 0.25;
  *   muted, volume (0..1), locked
  *   bwLow, bwHigh                    passband edges, Hz
  *   vfo                              'A'..'D', the VFO in use
- *   dspEnabled, dspFilter            noise reduction on, and which filter
+ *   dspEnabled, dspFilter            the receiver's NR on, and which filter
+ *   dspAvailable                     the receiver offers NR filters at all
+ *   nbEnabled, nbThresholdDb, nbWidthMs
+ *                                    the client noise blanker
+ *   cnrEnabled, cnrType, cnrStrength, cnrMakeupDb, cnrFloor, cnrAdaptRate
+ *                                    the client NR ('lsa' | 'nr2' | 'rmn')
+ *   iq                               IQ mode, where the client stage is bypassed
  *
  * `ui` is the driver's: { e1Page, e2Page, popup, blinkOn }. The click bit is
  * the driver's too and is left 0 here.
@@ -239,6 +319,7 @@ export function renderTm2({ rx, settings, ui }) {
     // Main display: the frequency, or a popup over it.
     if (u.popup) {
         displayMainText(f, popupText(u.popup, r));
+        if (FIXED3.has(u.popup)) setField(f, 'dot2', 1);
     } else if (Number.isFinite(Number(r.frequency)) && r.frequency !== null) {
         displayMainNumber(f, Number(r.frequency));
         // TM-2 UNVERIFIED: the photograph shows "Hz" lit beside the digits;
@@ -286,6 +367,15 @@ export function renderTm2({ rx, settings, ui }) {
         setField(f, 'a', r.vfo === 'A' ? 1 : 0);
         setField(f, 'b', r.vfo === 'B' ? 1 : 0);
     }
+
+    // The client noise stage: NB the blanker, NR2 the client NR — "the second
+    // NR", beside the receiver's. Dark in IQ, where the player bypasses both
+    // (AudioPlayer.setIQ): lit would claim a cut nobody is getting.
+    // TM-2 UNVERIFIED: NB and NR2 are taken to be status labels. If the
+    // segment cycle shows NR, NB and AN are one row of them, NR is not E1's
+    // page label either and the page display wants another home.
+    setField(f, 'nb', r.nbEnabled && !r.iq ? 1 : 0);
+    setField(f, 'nr2', r.cnrEnabled && !r.iq ? 1 : 0);
 
     // The small knobs: both boxes, and the label of the page each is on. Volume
     // blinks while muted, so a dead knob says why.

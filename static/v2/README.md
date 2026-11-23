@@ -835,12 +835,29 @@ band is part guesswork, and which part matters.
   and not news. A manual Disconnect outranks the switch until the operator
   connects again or turns it back on, so a hotplug elsewhere cannot undo it.
   Mapping records and the export envelope are v1's byte for byte,
-  and v1's `localStorage` mappings are adopted on first run. `nb_toggle` has no
-  v2 equivalent and is listed in `RETIRED` so an imported file shows it struck
-  through rather than dropping it silently; `mode_cw` aliases to `mode_cwu`
-  since v2 splits the sidebands, and `vfo_ab_toggle` — retired while there was
-  only one VFO — now aliases to the A/B swap. Noise reduction entries are
-  generated from the server's DSP schema; nothing hardcodes nr2.
+  and v1's `localStorage` mappings are adopted on first run. A v1 function v2
+  cannot honour goes in `RETIRED`, so an imported file shows it struck through
+  rather than dropping it silently — none are, now: `nb_toggle` is the client
+  noise blanker again, and `nr2_toggle` aliases to `cnr_toggle`, the client NR
+  (v1's NR2 was that stage). `mode_cw` aliases to `mode_cwu` since v2 splits the
+  sidebands, and `vfo_ab_toggle` — retired while there was only one VFO — now
+  aliases to the A/B swap.
+  **Noise reduction is mappable in both of the Noise panel's halves.** The
+  client's — blanker on/off, threshold and width; client NR on/off, engine
+  (next, previous, or by name), strength, makeup, and NR2's floor and
+  adaptation — on every receiver, with the panel's ranges and steps
+  (`NB_*_STEP` in lib/noiseBlanker.js, `NR_RANGES` in lib/nr.js). The
+  receiver's are generated from its DSP schema, nothing hardcoded: on/off, next
+  and previous filter, each filter by name, a reset, and each filter's every
+  runtime setting (`dsp_param_<filter>_<param>`: a slider's range as a knob or
+  fader, an enumerated one stepped, a bool switched). Such a setting names its
+  filter and is stored for it whichever filter runs, sent live only when it is
+  that one (`applyDspParam`). And `nr_toggle_any` / `nr_next_any` /
+  `nr_prev_any` act on the receiver's NR where it has filters and the client's
+  where it has none, for a console that should have one NR button that works
+  everywhere. A blind walk of the client engines skips RM Noise where it cannot
+  run (no login, or not SSB/CW); picking it by name selects it, as the panel's
+  button does.
   **The catalogue reaches past the receiver.** The four VFOs are mappable, and
   a mapped switch is the same switch the Receiver panel's A B C D buttons make
   — the logic moved to `lib/vfos.js` so both make it, storing what is live into

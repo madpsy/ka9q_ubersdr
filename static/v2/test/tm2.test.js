@@ -521,12 +521,16 @@ at('tapping E1 or E2 steps its page and sends nothing to the mapping', async () 
     assert.deepStrictEqual(keys(ctx.inputs), ['e1_vol_up']);
 });
 
-at('holding E1 or E2 is a mappable hold, not a page step', async () => {
+at('holding E1 or E2 is a mappable hold of the page it is on, not a page step', async () => {
     const ctx = await connected();
     await press(ctx, 'e1', HOLD_MS + 10);
     await press(ctx, 'e2', HOLD_MS + 10);
-    assert.deepStrictEqual(keys(ctx.inputs), ['e1_hold', 'e2_hold']);
+    assert.deepStrictEqual(keys(ctx.inputs), ['e1_vol_hold', 'e2_high_hold']);
     assert.deepStrictEqual(ctx.tm2.pages, { e1: 'vol', e2: 'high' });
+    await press(ctx, 'e1', 100);
+    await press(ctx, 'e1', 100);
+    await press(ctx, 'e1', HOLD_MS + 10);
+    assert.strictEqual(keys(ctx.inputs)[2], 'e1_nr_hold', 'on NR, NR’s hold');
 });
 
 // --- what the display shows ---------------------------------------------------------
@@ -570,6 +574,8 @@ at('only a changed frame is written, and the whole frame again after a quiet sec
 at('turning a small knob shows its value over the frequency, then lets it go', async () => {
     const ctx = await connected();
     ctx.tm2.setReceiver(RX);
+    // What ran is reported back by the dispatcher — as ControlWatch wires it.
+    ctx.tm2.on('input', (e) => ctx.tm2.noteResult(e.key, TM2_DEFAULT_MAPPINGS[e.key].function, true));
     ctx.dev.fire(report({ e1: 2001 }));
     ctx.clock.advance(FLUSH_MS);
     await settle();
@@ -580,6 +586,23 @@ at('turning a small knob shows its value over the frequency, then lets it go', a
     ctx.clock.advance(POPUP_MS);
     await settle();
     assert.strictEqual(shown(ctx.dev, 'hz'), 1, 'the frequency is back');
+});
+
+at('the popup is the mapped function’s, not the page’s, and only for what ran', async () => {
+    const ctx = await connected();
+    ctx.tm2.setReceiver({ ...RX, nbThresholdDb: 19 });
+    await settle();
+    const main9 = (text) => F.getField(built((x) => F.displayMainText(x, text)), 'main_9l');
+    ctx.tm2.noteResult('e1_vol_up', 'nb_threshold', false);
+    await settle();
+    assert.strictEqual(shown(ctx.dev, 'hz'), 1, 'a refused control shows nothing');
+    ctx.tm2.noteResult('e1_vol_up', 'spectrum_center', true);
+    await settle();
+    assert.strictEqual(shown(ctx.dev, 'hz'), 1, 'nor one the display has no words for');
+    ctx.tm2.noteResult('e1_vol_up', 'nb_threshold', true);
+    await settle();
+    assert.strictEqual(shown(ctx.dev, 'hz'), 0);
+    assert.strictEqual(shown(ctx.dev, 'main_9l'), main9('NB TH  19'), 'the blanker, though the page is VOL');
 });
 
 at('changing the step, mute or lock elsewhere pops up on the display too', async () => {
@@ -738,7 +761,75 @@ t('a popup replaces the frequency, its dots and its unit', () => {
     assert.ok([1, 2, 3, 4, 5, 6, 7, 8, 9].every((d) => !on(f, `underline_${d}`)));
 });
 
+t('the client noise stage: NB the blanker, NR2 the client NR, both dark in IQ', () => {
+    const f = render({ nbEnabled: true, cnrEnabled: true }, {}, {});
+    assert.strictEqual(on(f, 'nb'), 1);
+    assert.strictEqual(on(f, 'nr2'), 1);
+    assert.strictEqual(on(render({ nbEnabled: true }, {}, {}), 'nr2'), 0, 'each its own');
+    assert.strictEqual(on(render({ cnrEnabled: true }, {}, {}), 'nb'), 0);
+    const iq = render({ nbEnabled: true, cnrEnabled: true, iq: true }, {}, {});
+    assert.strictEqual(on(iq, 'nb'), 0, 'bypassed in IQ');
+    assert.strictEqual(on(iq, 'nr2'), 0);
+    // Nothing in v2 means a second blanker or an auto-notch.
+    for (const name of ['nb2', 'an', 'an2']) {
+        assert.strictEqual(on(render({ nbEnabled: true, cnrEnabled: true, dspEnabled: true }, {}, {}), name), 0, name);
+    }
+    assert.strictEqual(on(render({ dspEnabled: true }, {}, {}), 'nr2'), 0, 'the receiver’s NR is not NR2');
+});
+
+t('the noise popups, in nine characters', () => {
+    const cases = [
+        ['nb', { nbEnabled: true }, 'NB     ON'],
+        ['nb', {}, 'NB    OFF'],
+        ['nbthr', { nbThresholdDb: 19 }, 'NB TH  19'],
+        ['nbwidth', { nbWidthMs: 4.5 }, 'NBW  4500'],
+        ['nbwidth', { nbWidthMs: 10 }, 'NBW 10000'],
+        ['cnr', {}, 'NR2   OFF'],
+        ['cnr', { cnrEnabled: true, cnrType: 'lsa' }, 'NR2   LSA'],
+        ['cnr', { cnrEnabled: true, cnrType: 'nr2' }, 'NR2    NR'],
+        ['cnr', { cnrEnabled: true, cnrType: 'rmn' }, 'NR2   RMN'],
+        ['cnrstr', { cnrStrength: 100 }, 'STR   100'],
+        ['cnrmakeup', { cnrMakeupDb: -3.5 }, 'MKUP-3500'],
+        ['cnrfloor', { cnrFloor: 2.5 }, 'FLR  2500'],
+        ['cnradapt', { cnrAdaptRate: 0.3 }, 'ADPT 0300'],
+        ['nrany', { dspAvailable: true, dspEnabled: true, dspFilter: 'rnnoise' }, 'NR RNNOIS'],
+        ['nrany', { dspAvailable: false, cnrEnabled: true, cnrType: 'lsa' }, 'NR2   LSA'],
+    ];
+    for (const [kind, rx, want] of cases) {
+        const got = D.popupText(kind, { ...RX, ...rx });
+        assert.strictEqual(got, want, kind);
+        assert.ok(got.length <= 9, `${kind} fits`);
+    }
+});
+
+t('a fractional popup lights the thousands dot, so 4500 reads 4.500', () => {
+    assert.strictEqual(on(render({ nbWidthMs: 4.5 }, {}, { popup: 'nbwidth' }), 'dot2'), 1);
+    assert.strictEqual(on(render({ cnrAdaptRate: 0.3 }, {}, { popup: 'cnradapt' }), 'dot2'), 1);
+    assert.strictEqual(on(render({ nbThresholdDb: 19 }, {}, { popup: 'nbthr' }), 'dot2'), 0, 'not a whole number');
+});
+
+t('each mapped function shows its own popup, and unknown ones none', () => {
+    assert.strictEqual(D.functionPopup('volume_up'), 'vol');
+    assert.strictEqual(D.functionPopup('squelch_set'), 'sql');
+    assert.strictEqual(D.functionPopup('nb_threshold'), 'nbthr');
+    assert.strictEqual(D.functionPopup('nr_next_any'), 'nrany');
+    assert.strictEqual(D.functionPopup('dsp_select_rnnoise'), 'nr');
+    assert.strictEqual(D.functionPopup('cnr_select_rmn'), 'cnr');
+    assert.strictEqual(D.functionPopup('freq_rx_step'), null);
+    assert.strictEqual(D.functionPopup(undefined), null);
+    // Every function the defaults map to a small knob has a popup.
+    for (const [key, m] of Object.entries(TM2_DEFAULT_MAPPINGS)) {
+        if (/^e[12]_.*_(up|down)$/.test(key)) assert.ok(D.functionPopup(m.function), `${key} → ${m.function}`);
+    }
+});
+
 t('the changes worth a popup, and the ones that are not', () => {
+    assert.strictEqual(D.changePopup(RX, { ...RX, nbEnabled: true }), 'nb');
+    assert.strictEqual(D.changePopup(RX, { ...RX, cnrEnabled: true, cnrType: 'lsa' }), 'cnr');
+    const cnr = { ...RX, cnrEnabled: true, cnrType: 'lsa' };
+    assert.strictEqual(D.changePopup(cnr, { ...cnr, cnrType: 'nr2' }), 'cnr', 'another engine');
+    assert.strictEqual(D.changePopup({ ...RX, cnrType: 'lsa' }, { ...RX, cnrType: 'nr2' }), null, 'not while it is off');
+    assert.strictEqual(D.changePopup(RX, { ...RX, nbThresholdDb: 12 }), null, 'a level moved elsewhere is not news');
     assert.strictEqual(D.changePopup(null, RX), null, 'not on the first snapshot');
     assert.strictEqual(D.changePopup(RX, { ...RX, stepHz: 100 }), 'step');
     assert.strictEqual(D.changePopup(RX, { ...RX, muted: true }), 'mute');
@@ -822,6 +913,19 @@ t('the defaults follow ELAD’s own layout', () => {
     assert.strictEqual(fn('f6_tap'), 'rx_step_next');
 });
 
+t('the noise defaults: F2 NR on any receiver and the blanker held; each E1 page its own hold', () => {
+    const fn = (k) => TM2_DEFAULT_MAPPINGS[k] && TM2_DEFAULT_MAPPINGS[k].function;
+    assert.strictEqual(fn('f2_tap'), 'nr_toggle_any');
+    assert.strictEqual(fn('f2_hold'), 'nb_toggle');
+    assert.strictEqual(fn('e1_vol_hold'), 'mute_toggle');
+    assert.strictEqual(fn('e1_sql_hold'), 'squelch_auto');
+    assert.strictEqual(fn('e1_nr_hold'), 'cnr_toggle');
+    assert.strictEqual(fn('e1_nr_up'), 'nr_next_any');
+    assert.strictEqual(fn('e1_nr_down'), 'nr_prev_any');
+    for (const page of ['high', 'low', 'shift']) assert.strictEqual(fn(`e2_${page}_hold`), 'filter_reset');
+    assert.strictEqual(fn('e1_hold'), undefined, 'no page-less hold any more');
+});
+
 t('the TM-2 is a mapped surface of this page’s own', () => {
     assert.ok(tm.SURFACES.includes('tm2'));
     assert.strictEqual(tm.isMappedSurface('tm2'), true);
@@ -846,6 +950,38 @@ function withStorage(saved, fn) {
     };
     try { return fn(); } finally { delete globalThis.localStorage; }
 }
+
+t('a table saved with the first defaults moves on; anything somebody chose stays', () => {
+    const m = (fn, extra = {}) => ({ function: fn, throttleMs: 0, mode: 'none', ...extra });
+    const saved = {
+        f2_tap: m('dsp_toggle'),            // as shipped → today's default
+        f2_hold: m('zoom_in'),              // changed → theirs
+        e1_nr_up: m('dsp_next'),
+        e1_nr_down: m('dsp_prev', { throttleMs: 40 }),  // a field changed → theirs
+        e1_hold: m('mute_toggle'),          // as shipped → each page's own default
+        e2_hold: m('band_next'),            // changed → on every E2 page
+        e2_low_hold: m('zoom_out'),         // a page's own, already there → kept
+        f3_tap: m('mode_prev'),
+    };
+    const state = withStorage({ tm2: { mappings: saved } }, () => tm.loadState());
+    const fn = (k) => state.tm2.mappings[k] && state.tm2.mappings[k].function;
+    assert.strictEqual(fn('f2_tap'), 'nr_toggle_any');
+    assert.strictEqual(fn('f2_hold'), 'zoom_in');
+    assert.strictEqual(fn('e1_nr_up'), 'nr_next_any');
+    assert.strictEqual(fn('e1_nr_down'), 'dsp_prev');
+    assert.strictEqual(fn('e1_vol_hold'), 'mute_toggle');
+    assert.strictEqual(fn('e1_sql_hold'), 'squelch_auto');
+    assert.strictEqual(fn('e1_nr_hold'), 'cnr_toggle');
+    assert.strictEqual(fn('e2_high_hold'), 'band_next');
+    assert.strictEqual(fn('e2_shift_hold'), 'band_next');
+    assert.strictEqual(fn('e2_low_hold'), 'zoom_out');
+    assert.strictEqual(fn('e1_hold'), undefined, 'the page-less keys are gone — nothing sends them');
+    assert.strictEqual(fn('e2_hold'), undefined);
+    assert.strictEqual(fn('f3_tap'), 'mode_prev');
+    assert.strictEqual(fn('f1_tap'), undefined, 'a row somebody deleted is not put back');
+    // Today's table is left exactly as it is.
+    assert.strictEqual(tm.upgradeTm2Mappings(TM2_DEFAULT_MAPPINGS), TM2_DEFAULT_MAPPINGS);
+});
 
 t('a saved state from before the TM-2 existed gets it mapped, with display defaults', () => {
     const state = withStorage({ surface: 'rc28', rc28: { mappings: {} } }, () => tm.loadState());

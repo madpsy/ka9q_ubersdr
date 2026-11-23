@@ -17,7 +17,7 @@ import { isCCKey } from './webmidi.js';
 import { RC28_DEFAULT_MAPPINGS, RC28_DIAL_MAPPING, RC28_OLD_DIAL_MAPPING } from './rc28.js';
 import { DEFAULT_LEDS, ledSettings } from './rc28leds.js';
 import { TM2_DEFAULT_MAPPINGS } from './tm2.js';
-import { DEFAULT_TM2_DISPLAY, tm2Settings } from './tm2display.js';
+import { DEFAULT_TM2_DISPLAY, E1_PAGES, E2_PAGES, tm2Settings } from './tm2display.js';
 import { DIAL_DEFAULT_MAPPINGS, upgradeDialTune } from './dial.js';
 import { GAMEPAD_DEFAULT_MAPPINGS, rumbleSettings } from './gamepad.js';
 import { saveFile } from '../lib/saveFile.js';
@@ -179,6 +179,53 @@ function upgradeRc28Dial(mappings) {
     return out;
 }
 
+// The TM-2's first defaults, before noise reduction was mappable and before a
+// small knob's hold was per page. Same rule as the RC-28's dial: a row still
+// exactly what shipped was never chosen by anybody, so it becomes today's
+// default; a row somebody changed is theirs and stays.
+const TM2_OLD_DEFAULTS = {
+    f2_tap: 'dsp_toggle',
+    f2_hold: 'squelch_toggle',
+    e1_nr_up: 'dsp_next',
+    e1_nr_down: 'dsp_prev',
+};
+const TM2_OLD_HOLDS = { e1: 'mute_toggle', e2: 'filter_reset' };
+
+function isPlainDefault(m, fn) {
+    return !!m && m.function === fn && m.throttleMs === 0 && m.mode === 'none' && Object.keys(m).length === 3;
+}
+
+// The page-less `e1_hold` and `e2_hold` are no longer sent — the driver sends
+// `e1_vol_hold` and so on — so a saved one would go dead. Still the old
+// default, it gives way to each page's new default; changed, it is copied to
+// every page of its knob, so it goes on doing what it did whichever page the
+// knob is on. A page's own hold already saved wins either way.
+export function upgradeTm2Mappings(mappings) {
+    if (!mappings || typeof mappings !== 'object') return mappings;
+    let out = mappings;
+    const set = (key, m) => {
+        if (out === mappings) out = { ...mappings };
+        out[key] = m;
+    };
+    for (const [key, fn] of Object.entries(TM2_OLD_DEFAULTS)) {
+        if (isPlainDefault(mappings[key], fn) && TM2_DEFAULT_MAPPINGS[key]) set(key, TM2_DEFAULT_MAPPINGS[key]);
+    }
+    for (const [knob, fn] of Object.entries(TM2_OLD_HOLDS)) {
+        const old = mappings[`${knob}_hold`];
+        if (!old) continue;
+        const keep = !isPlainDefault(old, fn);
+        for (const page of knob === 'e1' ? E1_PAGES : E2_PAGES) {
+            const key = `${knob}_${page}_hold`;
+            if (mappings[key]) continue;
+            const m = keep ? old : TM2_DEFAULT_MAPPINGS[key];
+            if (m) set(key, m);
+        }
+        if (out === mappings) out = { ...mappings };
+        delete out[`${knob}_hold`];
+    }
+    return out;
+}
+
 export function loadState() {
     const saved = readJSON(STORE_KEY);
     const state = {
@@ -214,6 +261,7 @@ export function loadState() {
     state.rc28.leds = ledSettings(state.rc28.leds);
     state.tm2.display = tm2Settings(state.tm2.display);
     state.rc28.mappings = upgradeRc28Dial(state.rc28.mappings);
+    state.tm2.mappings = upgradeTm2Mappings(state.tm2.mappings);
     state.gamepad.rumble = rumbleSettings(state.gamepad.rumble);
     state.dial.mappings = upgradeDialTune(state.dial.mappings);
     const out = saved ? state : adoptV1(state);

@@ -26,7 +26,7 @@ import { rc28Available } from '../controls/rc28.js';
 import { tm2Available } from '../controls/tm2.js';
 import { getVfos } from '../lib/vfos.js';
 import { indicatorLeds, ledSettings } from '../controls/rc28leds.js';
-import { MAX_FREQ, MIN_FREQ, squelchEnabled, squelchThreshold } from '../radio/constants.js';
+import { MAX_FREQ, MIN_FREQ, isIQ, squelchEnabled, squelchThreshold } from '../radio/constants.js';
 import { getRecorder } from '../lib/recorder.js';
 import { pushNotification } from '../lib/notifications.js';
 import { serialAvailable } from '../controls/radiosync.js';
@@ -326,6 +326,7 @@ export default function ControlWatch() {
         squelch: radio.squelch,
         meters: radio.meters,
         dsp: radio.dsp,
+        noise: radio.noise,
         audioUp: radio.audioState === 'open',
         locked: radio.locked,
         stepHz: ctx.state().tuneStep,
@@ -347,6 +348,8 @@ export default function ControlWatch() {
             const d = tm2Ref.current;
             const m = d.meters.current || {};
             const sqOn = squelchEnabled(d.squelch.value);
+            const nb = (d.noise && d.noise.nb) || {};
+            const nr = (d.noise && d.noise.nr) || {};
             // A new object only when the operator changes something.
             if (d.display !== settings) { settings = d.display; tm2.setSettings(settings); }
             tm2.setReceiver({
@@ -368,13 +371,29 @@ export default function ControlWatch() {
                 vfo: getVfos().active,
                 dspEnabled: !!(d.dsp && d.dsp.enabled),
                 dspFilter: (d.dsp && d.dsp.filter) || '',
+                dspAvailable: !!(d.dsp && Array.isArray(d.dsp.schemas) && d.dsp.schemas.length),
+                nbEnabled: !!nb.enabled,
+                nbThresholdDb: nb.thresholdDb,
+                nbWidthMs: nb.widthMs,
+                cnrEnabled: !!nr.enabled,
+                cnrType: nr.type,
+                cnrStrength: nr.strength,
+                cnrMakeupDb: nr.makeupDb,
+                cnrFloor: nr.floor,
+                cnrAdaptRate: nr.adaptRate,
+                iq: isIQ(d.tuning.mode),
             });
         };
         update();
         tm2UpdateRef.current = () => { if (performance.now() - lastSent >= TM2_POLL_MS) update(); };
         const t = setInterval(update, TM2_POLL_MS);
         const off = tm2.on('state', () => { settings = null; update(); });
-        return () => { clearInterval(t); off(); tm2UpdateRef.current = null; };
+        // What a control of the TM-2's just ran, so the display shows what it
+        // set: the knob's mapped function, not the name of its page.
+        const offResult = onControlResult((id, key, fn, ok) => {
+            if (id === 'tm2') tm2.noteResult(key, fn, ok);
+        });
+        return () => { clearInterval(t); off(); offResult(); tm2UpdateRef.current = null; };
     }, [surface, ctx]);
 
     useEffect(() => {

@@ -31,7 +31,7 @@ import {
     autoSquelchValue, squelchEnabled, squelchThreshold, clampMargin,
     marginForMode, MARGIN_IQ_START_DB } from './constants.js';
 import { clamp } from '../lib/format.js';
-import { defaultParams, toWire } from '../lib/dsp.js';
+import { applyDspParam, defaultParams } from '../lib/dsp.js';
 import { throttle } from '../lib/throttle.js';
 import { followCenter, resumeView, zoomCenter } from '../lib/zoom.js';
 import { PAN_MS } from '../lib/panPacing.js';
@@ -1684,19 +1684,16 @@ export function RadioProvider({ children }) {
                 audioConn.setDSP(filter, enabled, enabled ? params : {});
             },
 
-            setDspParam(name, value) {
-                const d = dspRef.current;
-                const filter = d.filter;
-                if (!filter) return;
-                const wire = toWire(value);
-                const next = {
-                    ...d,
-                    params: { ...d.params, [filter]: { ...(d.params[filter] || {}), [name]: wire } },
-                };
+            // `target` names the filter the value belongs to, for a mapped
+            // control that sets one filter's setting while another may be
+            // running (controls/functions.js, dspParamFunction). It is stored
+            // either way, and sent only if that filter is the one running.
+            setDspParam(name, value, target) {
+                const { next, send } = applyDspParam(dspRef.current, name, value, target);
+                if (next === dspRef.current) return;
                 dspRef.current = next;
                 setDsp(next);
-                // Live parameter updates are only valid while the insert runs.
-                if (d.enabled) sendDspParams({ [name]: wire });
+                if (send) sendDspParams(send);
             },
 
             resetDspParams() {

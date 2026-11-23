@@ -1155,8 +1155,9 @@ function TM2Display({ display, onChange }) {
             <div className="note note--tight">
                 Push E1 to switch it between {E1_PAGES.map((p) => PAGE_LABEL[p]).join(', ')}, and E2
                 between {E2_PAGES.map((p) => PAGE_LABEL[p]).join(', ')} — the display shows which, and each
-                position can be mapped on its own. Out of the box the main knob&rsquo;s push is the tuning lock,
-                as on ELAD&rsquo;s own software.
+                position&rsquo;s turn and hold can be mapped on its own. Out of the box the main knob&rsquo;s push
+                is the tuning lock, as on ELAD&rsquo;s own software; F2 is noise reduction and, held, the noise
+                blanker, which the display shows as NB (the client NR shows as NR2).
             </div>
             <Field label="Backlight">
                 <ColorPicker

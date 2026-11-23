@@ -81,7 +81,10 @@ t('with WebHID: Connect, the display settings, and the ELAD layout already mappe
     assert.match(m.text, /Main knob acceleration/);
     // The table pages; the first page is enough to show it arrived mapped.
     assert.match(m.text, /Volume up E1 \(VOL\) — clockwise/);
-    assert.match(m.text, /Passband shift E2 \(SHIFT\) — anticlockwise/);
+    assert.match(m.text, /Next NR — receiver filter, else client engine E1 \(NR\) — clockwise/);
+    // Each page's hold its own row, with its own default.
+    assert.match(m.text, /Auto squelch E1 \(SQL\) push — hold/);
+    assert.match(m.text, /Client NR on\/off E1 \(NR\) push — hold/);
     unmount(m);
 });
 

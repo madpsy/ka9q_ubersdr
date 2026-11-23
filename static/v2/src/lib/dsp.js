@@ -117,3 +117,21 @@ export function toWire(value) {
     if (typeof value === 'boolean') return value ? 'true' : 'false';
     return String(value);
 }
+
+// One param of one filter changed: the DSP state that results, and what to send
+// now — null when nothing should go to the receiver. `target` names the filter
+// the value belongs to (a mapped control names its own; the panel means the
+// selected one). Stored either way; sent only while that very filter is the one
+// running, because set_dsp_params is only valid for the live insert and would
+// otherwise retune whichever filter happens to be running.
+export function applyDspParam(d, name, value, target) {
+    const filter = target || d.filter;
+    if (!filter) return { next: d, send: null };
+    const wire = toWire(value);
+    const next = {
+        ...d,
+        params: { ...d.params, [filter]: { ...(d.params[filter] || {}), [name]: wire } },
+    };
+    const send = d.enabled && filter === d.filter ? { [name]: wire } : null;
+    return { next, send };
+}

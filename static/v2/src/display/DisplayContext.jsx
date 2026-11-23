@@ -443,6 +443,12 @@ export const DEFAULTS = {
     // Signal panel meters: 'bar' or the analogue 'needle'. Clicking a meter
     // switches both — see SignalPanel.
     meterStyle: 'bar',
+    // What each of the Signal panel's two meters reads, top then bottom: 's'
+    // (S-units), 'dbfs' (the signal power, on a scale fitted to recent
+    // readings) or 'snr'. Clicking a meter's numbers steps that one meter to
+    // the next; the two are independent, so either can show any of them.
+    signalMeterTop: 's',
+    signalMeterBottom: 'snr',
     // Which reading the top bar's meter shows: 'signal' (the S-meter, in dBFS)
     // or 'snr'. Clicking the meter swaps it. Signal by default because it is
     // the one that answers "is anything there".

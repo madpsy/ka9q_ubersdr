@@ -275,6 +275,59 @@ export function sUnitLabelAt(fraction) {
     return 'S9+' + Math.round((s - 9) * 10 + EPS);
 }
 
+// The dBFS a position on the S-meter stands for — dbfsToSUnits run backwards,
+// for the peak hold, which is carried as a position (see sUnitLabelAt) and has
+// to be printed in dBFS when the meter is.
+export function dbfsAtSFraction(fraction) {
+    const f = Number.isFinite(fraction) ? clamp(fraction, 0, 1) : 0;
+    const s = S_UNITS_MIN + f * (S_UNITS_MAX - S_UNITS_MIN);
+    return s <= 9 ? -121 + (s - 1) * 6 : -73 + (s - 9) * 10;
+}
+
+// A meter scale for raw dBFS, which unlike the S-meter and the SNR has no
+// natural ends: where the noise sits depends on the receiver's gain, the band
+// and the filter width, and a fixed -121..-13 — the dBFS the S-scale happens to
+// span — leaves the needle twitching in one corner of it. So the scale is
+// whatever the recent readings needed: their lowest and highest, rounded out to
+// the 10 dB lines, with room above for a signal to rise into. Rounding to whole
+// tens is what keeps it still — the ends only move when a reading crosses a
+// line — and the caller's window is what lets it shrink back again afterwards.
+//
+// `values` are the readings, dBFS; nothing in it (no readings yet) is null.
+// Returns { lo, hi, ticks } with ticks as [label, value], every 10 dB, or every
+// 20 once the span would crowd a narrow panel with labels.
+export const DBFS_SCALE_MIN_SPAN = 30;
+
+export function dbfsScale(values) {
+    let min = Infinity;
+    let max = -Infinity;
+    for (const v of values) {
+        if (v == null || !Number.isFinite(v) || v <= -998) continue;
+        if (v < min) min = v;
+        if (v > max) max = v;
+    }
+    if (min === Infinity) return null;
+    // The 10 dB line below the quietest reading and the one above the loudest;
+    // a reading sitting exactly on a line is pushed one further out, so it is
+    // never drawn pinned to the end stop.
+    const lo = Math.floor(min / 10) * 10 - (min % 10 === 0 ? 10 : 0);
+    let hi = Math.ceil(max / 10) * 10 + (max % 10 === 0 ? 10 : 0);
+    // Headroom goes on top: the noise floor is the steady end, and the thing
+    // that arrives is a signal.
+    if (hi - lo < DBFS_SCALE_MIN_SPAN) hi = lo + DBFS_SCALE_MIN_SPAN;
+    const step = hi - lo > 60 ? 20 : 10;
+    const ticks = [];
+    // From the top down so a 20 dB step keeps the strong end on a label, then
+    // back into low-to-high order for the scale.
+    for (let v = hi; v >= lo; v -= step) ticks.unshift([String(v), v]);
+    return { lo, hi, ticks };
+}
+
+export function dbfsScaleFraction(scale, dbfs) {
+    if (!scale || dbfs == null || !Number.isFinite(dbfs) || dbfs <= -998) return 0;
+    return clamp((dbfs - scale.lo) / (scale.hi - scale.lo), 0, 1);
+}
+
 // SNR meter.
 //
 // These used to be v1's scales — a 30–60 meter with a red-to-green ramp from 30

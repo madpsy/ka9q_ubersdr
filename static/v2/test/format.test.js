@@ -7,6 +7,8 @@
 const assert = require('assert');
 const {
     formatFilterWidth, formatFreqExact, formatFreqShort, formatHz, hzPlaces, padReading,
+    dbfsAtSFraction, dbfsScale, dbfsScaleFraction, dbfsToSUnits, sUnitFraction,
+    DBFS_SCALE_MIN_SPAN,
 } = require('./.build/format.cjs');
 
 let pass = 0;
@@ -168,6 +170,50 @@ t('a frequency below a megahertz still has its megahertz zero', () => {
     // how you get from long wave to anywhere else with the wheel.
     assert.strictEqual(chars(198000), '0.198.000');
     assert.deepStrictEqual(places(198000), [1e6, 1e5, 1e4, 1e3, 100, 10, 1]);
+});
+
+// The dBFS meter scale. dBFS has no natural ends, so the scale is fitted to the
+// readings it is given — see dbfsScale.
+
+t('a dBFS scale is the 10 dB lines around the readings, at least 30 dB wide', () => {
+    const sc = dbfsScale([-102, -97, -99]);
+    assert.strictEqual(sc.lo, -110);
+    assert.strictEqual(sc.hi, -80, 'headroom goes on top, where a signal arrives');
+    assert.deepStrictEqual(sc.ticks.map(([l]) => l), ['-110', '-100', '-90', '-80']);
+});
+
+t('a strong signal widens the scale to take it', () => {
+    const sc = dbfsScale([-104, -55]);
+    assert.strictEqual(sc.lo, -110);
+    assert.strictEqual(sc.hi, -50);
+    assert.ok(sc.hi - sc.lo >= DBFS_SCALE_MIN_SPAN);
+});
+
+t('a wide span labels every 20 dB, keeping the top end labelled', () => {
+    const sc = dbfsScale([-115, -22]);
+    assert.deepStrictEqual(sc.ticks.map(([, v]) => v), [-120, -100, -80, -60, -40, -20]);
+    assert.strictEqual(sc.ticks.at(-1)[1], sc.hi);
+});
+
+t('a reading on a 10 dB line is not pinned to the end stop', () => {
+    const sc = dbfsScale([-100, -70]);
+    assert.ok(dbfsScaleFraction(sc, -100) > 0);
+    assert.ok(dbfsScaleFraction(sc, -70) < 1);
+});
+
+t('no readings is no scale, and the "nothing yet" -999 is not a reading', () => {
+    assert.strictEqual(dbfsScale([]), null);
+    assert.strictEqual(dbfsScale([null, -999, NaN]), null);
+    assert.strictEqual(dbfsScale([-999, -90]).lo, -100);
+    assert.strictEqual(dbfsScaleFraction(null, -90), 0);
+});
+
+t('dbfsAtSFraction undoes sUnitFraction across the S scale', () => {
+    for (const db of [-121, -109, -90, -73, -60, -33, -13]) {
+        const back = dbfsAtSFraction(sUnitFraction(db));
+        assert.ok(Math.abs(back - db) < 1e-9, `${db} came back as ${back}`);
+    }
+    assert.strictEqual(dbfsToSUnits(dbfsAtSFraction(0.5)), 8);
 });
 
 console.log(`\n${pass} ok`);

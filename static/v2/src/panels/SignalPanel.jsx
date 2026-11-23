@@ -8,7 +8,8 @@ import { TOUCH_QUERY, useMediaQuery } from '../lib/useMediaQuery.js';
 import { SQUELCH_MAX, SQUELCH_MIN, SQUELCH_STEP, isIQ } from '../radio/constants.js';
 import { Bar, Field, Readout, Slider } from '../components/ui.jsx';
 import {
-    audioLevelPercent, padReading, sMeterColour, sMeterColourAt, snrColour, snrColourAt,
+    audioLevelPercent, dbfsAtSFraction, dbfsScale, dbfsScaleFraction, padReading,
+    sMeterColour, sMeterColourAt, snrColour, snrColourAt,
     snrFraction, sUnitFraction, sUnitLabel, sUnitLabelAt,
     SNR_MAX, SNR_MIN, S_UNITS_MAX, S_UNITS_MIN,
 } from '../lib/format.js';
@@ -202,6 +203,135 @@ function NeedleMeter({ ticks, fraction, peak, colourAt, title }) {
     });
 
     return <canvas ref={ref} className="needle" style={{ height: NEEDLE_H }} title={title} />;
+}
+
+// What a meter can read, in the order a click on its numbers steps through them.
+// Each of the two meters has its own, so either can be any of the three — the
+// S-meter on top and the SNR under it is only the default.
+const READING_NEXT = { s: 'dbfs', dbfs: 'snr', snr: 's' };
+const READING_NAME = { s: 'S-units', dbfs: 'dBFS', snr: 'SNR' };
+export const meterReading = (v, fallback) => (READING_NEXT[v] ? v : fallback);
+
+// How far back the dBFS scale looks for the readings it has to fit. Long enough
+// that a scale widened by one strong over does not shrink back between overs,
+// short enough that it settles on a new band without a retune of its own.
+export const DBFS_WINDOW_MS = 30_000;
+
+// One meter: the face — bar or needle — and the numbers under it, as two
+// buttons side by side rather than one inside the other, which HTML does not
+// allow. The face swaps the style of both meters; the numbers step this one to
+// its next reading.
+//
+// `held` is the S-meter's peak hold, as a position on the S scale — see the
+// panel. `scale` is the dBFS scale from dbfsScale, or null before a reading.
+function Meter({ reading, needle, onSwapStyle, styleHint, onNext, power, snr, held, scale }) {
+    let ticks;
+    let fraction;
+    let peak = null;
+    let colour;
+    let colourAt;
+    let value;
+
+    if (reading === 'snr') {
+        // SNR_MIN at the left to SNR_MAX at the right, in a red→green ramp. No
+        // longer v1's 30–60 scale: that was calibrated against the old S/N0
+        // figure in dB·Hz, and this is an SNR in dB. No peak hold, as in v1.
+        ticks = SNR_TICKS;
+        fraction = snrFraction(snr);
+        colour = snr == null ? undefined : snrColour(snr);
+        colourAt = snrColourAt;
+        // The S meter needs no unit — "S7" says what it is — but a bare
+        // "42.3 dB" does not: this panel has a squelch threshold in dB under
+        // it, and a number with a unit and no name is the one that gets
+        // misread. Small, unbolded and dimmed, so it reads as the label on the
+        // reading rather than part of it, and kept when there is nothing to
+        // show so the line does not change shape when a signal arrives.
+        //
+        // padReading, not toFixed: the slot is centred, so a reading that gains
+        // a minus sign gets a character wider and re-centres, shoving the whole
+        // line sideways — which on quiet air happens several times a second.
+        value = (
+            <span className="meter__num meter__num--snr">
+                {snr == null ? '--' : `${padReading(snr, 2)} dB`}
+                <span className="meter__unit">SNR</span>
+            </span>
+        );
+    } else if (reading === 'dbfs') {
+        // Linear in dB on a scale fitted to what has been heard — dBFS has no
+        // natural ends, see dbfsScale. The colour stays the S-meter's, which is
+        // the same reading's verdict on how strong it is.
+        const span = scale ? scale.hi - scale.lo : 1;
+        ticks = scale ? scale.ticks.map(([label, v]) => [label, dbfsScaleFraction(scale, v)]) : [];
+        fraction = dbfsScaleFraction(scale, power);
+        const heldDbfs = held == null ? null : dbfsAtSFraction(held);
+        peak = heldDbfs == null || !scale ? null : dbfsScaleFraction(scale, heldDbfs);
+        colour = sMeterColour(power);
+        colourAt = (f) => (scale ? sMeterColour(scale.lo + f * span) : sMeterColourAt(0));
+        const has = power != null && power > -998;
+        value = (
+            <>
+                <span className="meter__num">{has ? padReading(power, 3, 0) : '--'}</span>
+                <span className={`meter__num${heldDbfs == null ? ' is-blank' : ''}`}>
+                    {heldDbfs == null ? '' : padReading(heldDbfs, 3, 0)}
+                </span>
+                <span className="meter__unit">dBFS</span>
+            </>
+        );
+    } else {
+        // Plotted in S-units, not dBFS: the printed scale is 6 dB per step to
+        // S9 then 10 dB per step, so a linear dBFS bar — or needle — would not
+        // line up with it or with the S value below.
+        ticks = S_TICKS;
+        fraction = sUnitFraction(power);
+        peak = held;
+        colour = sMeterColour(power);
+        colourAt = sMeterColourAt;
+        // Live reading, then the peak hold — "S4   S6" — in the one size: they
+        // are the same measurement a moment apart, and shrinking the second
+        // makes it read as a footnote. The hold's slot is kept even with
+        // nothing in it, so the live value does not shift sideways the moment
+        // one appears — see .meter__num in the stylesheet.
+        value = (
+            <>
+                <span className="meter__num">{sUnitLabel(power)}</span>
+                <span className={`meter__num${held == null ? ' is-blank' : ''}`}>
+                    {held == null ? '' : sUnitLabelAt(held)}
+                </span>
+            </>
+        );
+    }
+
+    const next = READING_NAME[READING_NEXT[reading]];
+    return (
+        <div className="meter">
+            <button type="button" className="meter__face meter--swap" onClick={onSwapStyle} title={styleHint}>
+                {needle ? (
+                    <NeedleMeter
+                        ticks={ticks}
+                        fraction={fraction}
+                        peak={peak}
+                        colourAt={colourAt}
+                        title={styleHint}
+                    />
+                ) : (
+                    <>
+                        <MeterScale ticks={ticks} />
+                        <MeterTrack ticks={ticks}>
+                            <Bar value={fraction} min={0} max={1} peak={peak} color={colour} />
+                        </MeterTrack>
+                    </>
+                )}
+            </button>
+            <button
+                type="button"
+                className="meter__value meter--swap"
+                onClick={onNext}
+                title={`${READING_NAME[reading]} — click for ${next}`}
+            >
+                {value}
+            </button>
+        </div>
+    );
 }
 
 // The squelch, which lives here rather than in Audio because it is a threshold
@@ -408,6 +538,8 @@ export default function SignalPanel({ minimal }) {
     const m = useMeters(15);
     const canvasRef = useRef(null);
     const history = useRef([]);
+    // The signal's recent dBFS, for fitting a meter's scale to — see Meter.
+    const levels = useRef([]);
     const chart = CHARTS[display.signalChart] || CHARTS.snr;
     // Read by the frame loop, so a swap does not restart it.
     const chartRef = useRef(chart);
@@ -426,6 +558,9 @@ export default function SignalPanel({ minimal }) {
             dbfs: p == null || p <= -998 ? null : p,
         });
         trimBefore(h, performance.now() - SPAN_MS - KEEP_MS);
+        const lv = levels.current;
+        lv.push({ t: performance.now(), v: p == null || p <= -998 ? null : p });
+        trimBefore(lv, performance.now() - DBFS_WINDOW_MS);
         // Keyed on the whole snapshot rather than on the reading, so a sample
         // is taken on every tick of the meter clock and not only when the
         // number moves. A steady signal is a reading like any other: keyed on
@@ -486,89 +621,30 @@ export default function SignalPanel({ minimal }) {
     const swap = () => display.set({ meterStyle: needle ? 'bar' : 'needle' });
     const hint = needle ? 'Click for the bar meters' : 'Click for the needle meters';
 
+    // Which reading each meter shows. The dBFS scale is worked out only when one
+    // of them needs it, from the last DBFS_WINDOW_MS of readings and the one
+    // being shown now, so the live value is always on the scale.
+    const topReading = meterReading(display.signalMeterTop, 's');
+    const bottomReading = meterReading(display.signalMeterBottom, 'snr');
+    const scale = topReading === 'dbfs' || bottomReading === 'dbfs'
+        ? dbfsScale(levels.current.map((p) => p.v).concat(power))
+        : null;
+    const shared = { needle, onSwapStyle: swap, styleHint: hint, power, snr, held, scale };
+
     return (
         <div className="stack">
-            {/* Plotted in S-units, not dBFS: the printed scale is 6 dB per step
-                to S9 then 10 dB per step, so a linear dBFS bar — or needle —
-                would not line up with it or with the S value below. */}
-            <button type="button" className="meter meter--swap" onClick={swap} title={hint}>
-                {needle ? (
-                    <NeedleMeter
-                        ticks={S_TICKS}
-                        fraction={sFraction}
-                        peak={held}
-                        colourAt={sMeterColourAt}
-                        title={hint}
-                    />
-                ) : (
-                    <>
-                        <MeterScale ticks={S_TICKS} />
-                        <MeterTrack ticks={S_TICKS}>
-                            <Bar
-                                value={sFraction}
-                                min={0}
-                                max={1}
-                                peak={held}
-                                color={sMeterColour(power)}
-                            />
-                        </MeterTrack>
-                    </>
-                )}
-                {/* Live reading, then the peak hold — "S4   S6" — in the one
-                    size: they are the same measurement a moment apart, and
-                    shrinking the second one makes it read as a footnote. */}
-                <div className="meter__value">
-                    <span className="meter__num">{sUnitLabel(power)}</span>
-                    {/* Kept in the layout even with no hold to show, so the
-                        live value does not shift sideways the moment one
-                        appears — see .meter__num in the stylesheet. */}
-                    <span className={`meter__num${held == null ? ' is-blank' : ''}`}>
-                        {held == null ? '' : sUnitLabelAt(held)}
-                    </span>
-                </div>
-            </button>
-
-            {/* SNR from SNR_MIN at the left to SNR_MAX at the right, in a
-                red→green ramp. No longer v1's 30–60 scale: that was calibrated
-                against the old S/N0 figure in dB·Hz, and this is an SNR in dB.
-                No peak hold here, as in v1. */}
-            <button type="button" className="meter meter--swap" onClick={swap} title={hint}>
-                {needle ? (
-                    <NeedleMeter
-                        ticks={SNR_TICKS}
-                        fraction={snrFraction(snr)}
-                        colourAt={snrColourAt}
-                        title={hint}
-                    />
-                ) : (
-                    <>
-                        <MeterScale ticks={SNR_TICKS} />
-                        <MeterTrack ticks={SNR_TICKS}>
-                            <Bar value={snrFraction(snr)} min={0} max={1} color={snr == null ? undefined : snrColour(snr)} />
-                        </MeterTrack>
-                    </>
-                )}
-                <div className="meter__value">
-                    {/* The S meter above needs no unit — "S7" says what it is —
-                        but a bare "42.3 dB" does not: this panel has a squelch
-                        threshold in dB under it and a filter width in dB nowhere
-                        near it, and a number with a unit and no name is the one
-                        that gets misread. Small, unbolded and dimmed, so it reads
-                        as the label on the reading rather than part of it. Kept
-                        when there is nothing to show, so the line does not change
-                        shape the moment a signal arrives. */}
-                    {/* padReading, not toFixed: the slot is centred, so a
-                        reading that gains a minus sign gets a character wider
-                        and re-centres, shoving the whole line sideways. Now
-                        that the SNR crosses zero on ordinary quiet air that
-                        happens several times a second. Two integer digits
-                        covers the meter's -5..30 and then some. */}
-                    <span className="meter__num meter__num--snr">
-                        {snr == null ? '--' : `${padReading(snr, 2)} dB`}
-                        <span className="meter__unit">SNR</span>
-                    </span>
-                </div>
-            </button>
+            {/* Two meters, each reading whatever its numbers were last
+                clicked to — see Meter. */}
+            <Meter
+                reading={topReading}
+                onNext={() => display.set({ signalMeterTop: READING_NEXT[topReading] })}
+                {...shared}
+            />
+            <Meter
+                reading={bottomReading}
+                onNext={() => display.set({ signalMeterBottom: READING_NEXT[bottomReading] })}
+                {...shared}
+            />
 
             {/* In the minimal view too: the meters say what is there and this is
                 the one control you reach for while listening to it. */}

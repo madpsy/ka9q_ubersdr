@@ -26,6 +26,7 @@
 
 import {
     MODES, MODE_BY_ID, bandwidthLimits, isIQ, maxFilterWidth,
+    defaultEdges, edgesForShift, filterShift,
     SQUELCH_MIN, SQUELCH_MAX, SQUELCH_STEP, SQUELCH_DEFAULT_ON, squelchEnabled,
     MIN_FREQ, MAX_FREQ, TUNING_STEPS,
 } from '../radio/constants.js';
@@ -152,6 +153,22 @@ const FREQUENCY = group('Frequency', [
             ctx.setTuneStep(next, ctx.state().tuning.mode);
         },
     },
+    // The same walk a press at a time, for a pair of buttons — the TM-2's F5
+    // and F6, which ELAD's own software gives to the step. Stops at either end
+    // rather than wrapping: a step that jumps from 100 kHz back to 1 Hz on one
+    // press too many is a surprise in the middle of tuning.
+    {
+        id: 'rx_step_next',
+        label: 'Receiver step larger',
+        accepts: PRESS,
+        run: (ev, ctx) => stepTuneStep(ctx, +1),
+    },
+    {
+        id: 'rx_step_prev',
+        label: 'Receiver step smaller',
+        accepts: PRESS,
+        run: (ev, ctx) => stepTuneStep(ctx, -1),
+    },
     {
         id: 'freq_step_up',
         label: 'Step up',
@@ -209,6 +226,18 @@ const FREQUENCY = group('Frequency', [
     },
 ]);
 
+// One place along the Receiver panel's step list, from the step in force (or
+// the nearest one above it, if it is not on the list).
+function stepTuneStep(ctx, dir) {
+    if (!ctx.setTuneStep) return;
+    const cur = ctx.state().tuneStep;
+    let i = TUNING_STEPS.indexOf(cur);
+    if (i < 0) i = TUNING_STEPS.findIndex((s) => s >= cur);
+    if (i < 0) i = TUNING_STEPS.length - 1;
+    const next = TUNING_STEPS[clamp(i + dir, 0, TUNING_STEPS.length - 1)];
+    if (next !== cur) ctx.setTuneStep(next, ctx.state().tuning.mode);
+}
+
 const MODE = group('Mode', [
     ...MODES.map((m) => ({
         id: `mode_${m.id}`,
@@ -238,13 +267,59 @@ function cycleMode(ctx, dir) {
     ctx.actions.setMode(next);
 }
 
-const BAND = group('Band', Object.entries(BAND_FREQS).map(([id, hz]) => ({
-    id,
-    band: id.slice(5),
-    label: `${id.slice(5)} (${(hz / 1e6).toFixed(3)} MHz)`,
-    accepts: PRESS,
-    run: (ev, ctx) => ctx.actions.setFrequency(hz),
-})));
+const BAND = group('Band', [
+    ...Object.entries(BAND_FREQS).map(([id, hz]) => ({
+        id,
+        band: id.slice(5),
+        label: `${id.slice(5)} (${(hz / 1e6).toFixed(3)} MHz)`,
+        accepts: PRESS,
+        run: (ev, ctx) => ctx.actions.setFrequency(hz),
+    })),
+    // Up and down the bands this receiver reaches, landing where the band
+    // buttons above do. Wraps, like the mode cycle: a band list has no "far
+    // end" anyone is trying to reach.
+    {
+        id: 'band_next',
+        label: 'Next band',
+        accepts: PRESS,
+        run: (ev, ctx) => stepBand(ctx, +1),
+    },
+    {
+        id: 'band_prev',
+        label: 'Previous band',
+        accepts: PRESS,
+        run: (ev, ctx) => stepBand(ctx, -1),
+    },
+]);
+
+/**
+ * The band `dir` along from `hz`, among `bands` ([name, low, high], in order):
+ * from inside a band, the next one; from between two, the next one that way.
+ * Wraps at either end. Null with no bands at all.
+ */
+export function nextBand(bands, hz, dir) {
+    const n = bands.length;
+    if (!n) return null;
+    const inside = bands.findIndex(([, lo, hi]) => hz >= lo && hz <= hi);
+    let i;
+    if (inside >= 0) {
+        i = (inside + dir + n) % n;
+    } else if (dir > 0) {
+        i = bands.findIndex(([, lo]) => lo > hz);
+        if (i < 0) i = 0;
+    } else {
+        i = -1;
+        bands.forEach(([, , hi], k) => { if (hi < hz) i = k; });
+        if (i < 0) i = n - 1;
+    }
+    return bands[i][0];
+}
+
+function stepBand(ctx, dir) {
+    const name = nextBand(bandsInRange(MIN_FREQ, MAX_FREQ), ctx.state().tuning.frequency, dir);
+    const hz = name && BAND_FREQS[`band_${name}`];
+    if (hz) ctx.actions.setFrequency(hz);
+}
 
 const AUDIO = group('Audio', [
     {
@@ -348,6 +423,31 @@ const AUDIO = group('Audio', [
         label: 'Filter wider',
         accepts: PRESS,
         run: (ev, ctx) => nudgeWidth(ctx, 50),
+    },
+    {
+        // The Receiver panel's shift slider on a knob: the passband moves and
+        // keeps its width, by the same convention the slider uses
+        // (filterShift / edgesForShift), so the two never disagree. 50 Hz a
+        // detent, like the width functions above.
+        id: 'bw_shift',
+        label: 'Passband shift',
+        accepts: [REL],
+        encoder: true,
+        run: (ev, ctx) => {
+            const n = detents(ev);
+            if (!n) return;
+            const { tuning } = ctx.state();
+            const shift = filterShift(tuning.mode, tuning.bandwidthLow, tuning.bandwidthHigh) + 50 * n;
+            ctx.actions.setBandwidth(...edgesForShift(tuning.mode, shift, tuning).map(Math.round));
+        },
+    },
+    {
+        // The filter's reset button: the mode's own default edges.
+        id: 'filter_reset',
+        label: 'Filter reset',
+        hint: 'the mode’s default passband',
+        accepts: PRESS,
+        run: (ev, ctx) => ctx.actions.setBandwidth(...defaultEdges(ctx.state().tuning.mode)),
     },
     {
         id: 'squelch_auto',

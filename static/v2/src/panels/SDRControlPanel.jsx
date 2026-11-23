@@ -25,7 +25,7 @@
 // exactly the path a click takes.
 
 import React, { useEffect, useRef, useState } from '../react.js';
-import { Button, Empty, Field, Icon, Segmented, ShowMore, Switch } from '../components/ui.jsx';
+import { Button, ColorPicker, Empty, Field, Icon, Segmented, ShowMore, Switch } from '../components/ui.jsx';
 import { listSurfaces, onSurfaces } from '../controls/surfaces.js';
 import { SURFACES, isMappedSurface } from '../controls/mappings.js';
 import { useRadio } from '../radio/RadioContext.jsx';
@@ -41,6 +41,10 @@ import {
 } from '../controls/mappings.js';
 import { flexAvailable } from '../controls/flexcontrol.js';
 import { rc28Available } from '../controls/rc28.js';
+import { tm2Available } from '../controls/tm2.js';
+import {
+    ACCEL_OPTIONS, DEFAULT_TM2_DISPLAY, E1_PAGES, E2_PAGES, PAGE_LABEL, READOUTS, tm2Settings,
+} from '../controls/tm2display.js';
 import { dialAvailable } from '../controls/dial.js';
 import {
     bridgeSwitchHidden, dialLinkFor, dialLinksOffered, surfaceOffered,
@@ -62,6 +66,7 @@ const SURFACE_OPTIONS = [
     { value: 'off', label: 'Off' },
     { value: 'flexcontrol', label: 'FlexControl' },
     { value: 'rc28', label: 'RC-28' },
+    { value: 'tm2', label: 'TM-2', title: 'The ELAD TM-2 (TMate 2) — shows this receiver’s frequency, mode and S-meter on its own display' },
     { value: 'midi', label: 'MIDI' },
     { value: 'gamepad', label: 'Gamepad', title: 'A game controller — Xbox, PlayStation, Switch Pro, 8BitDo — over USB or Bluetooth' },
     { value: 'dial', label: 'Dial', title: 'The UberSDR Dial, over Bluetooth or USB — shows this receiver’s frequency, mode, SNR and squelch on its own screen' },
@@ -312,6 +317,7 @@ function BridgeSwitch({ minimal }) {
 function SurfaceControl({ id, cfg, update, dspSchemas, hw, onMessage, minimal }) {
     const isMidi = id === 'midi';
     const isRc28 = id === 'rc28';
+    const isTm2 = id === 'tm2';
     const isPad = id === 'gamepad';
     const isDial = id === 'dial';
     // The two that list their devices and remember one by name.
@@ -389,7 +395,8 @@ function SurfaceControl({ id, cfg, update, dspSchemas, hw, onMessage, minimal })
         // only drop the counts it gathered.
         // A pad paces itself as well: its sticks send at a rate, and a limit
         // would drop detents rather than slow them.
-        const record = { function: fn, ...(isRc28 || isPad ? { throttleMs: 0, mode: 'none' } : defaultThrottle(fn)) };
+        // The TM-2 paces its knobs the same way.
+        const record = { function: fn, ...(isRc28 || isTm2 || isPad ? { throttleMs: 0, mode: 'none' } : defaultThrottle(fn)) };
         // Learn cannot tell an encoder from a fader by watching one message, but
         // the function can: the frequency encoders and the zoom dial take
         // nothing else, so a CC landing on one is an encoder and is recorded as
@@ -542,7 +549,7 @@ function SurfaceControl({ id, cfg, update, dspSchemas, hw, onMessage, minimal })
     }, [isPad, connected, devices, deviceId, conf.device]);
 
     const available = isMidi ? midiAvailable()
-        : (isRc28 ? rc28Available() : (isPad ? gamepadAvailable() : (isDial ? dialAvailable(dialLink) : flexAvailable())));
+        : (isRc28 ? rc28Available() : isTm2 ? tm2Available() : (isPad ? gamepadAvailable() : (isDial ? dialAvailable(dialLink) : flexAvailable())));
 
     // Bluetooth or a USB cable. Ahead of the availability check, so a browser
     // with only one of the two can still be switched to the other.
@@ -572,7 +579,7 @@ function SurfaceControl({ id, cfg, update, dspSchemas, hw, onMessage, minimal })
                 <>
                 {linkPicker}
                 <div className="note note--warn">
-                    {isMidi ? 'MIDI devices' : (isRc28 ? 'The RC-28' : (isPad ? 'Game controllers' : (isDial && dialLink === 'bluetooth' ? 'Bluetooth devices' : 'Serial ports')))} need this receiver to be opened over https — browsers only offer them to secure pages.
+                    {isMidi ? 'MIDI devices' : (isRc28 ? 'The RC-28' : isTm2 ? 'The TM-2' : (isPad ? 'Game controllers' : (isDial && dialLink === 'bluetooth' ? 'Bluetooth devices' : 'Serial ports')))} need this receiver to be opened over https — browsers only offer them to secure pages.
                 </div>
                 </>
             );
@@ -582,11 +589,11 @@ function SurfaceControl({ id, cfg, update, dspSchemas, hw, onMessage, minimal })
             {linkPicker}
             <div className="note note--warn">
                 {isMidi && 'This browser has no Web MIDI API. Chrome or Edge is needed — Firefox has never shipped it.'}
-                {isRc28 && 'This browser has no WebHID API. Chrome or Edge is needed — Firefox and Safari have not shipped it.'}
+                {(isRc28 || isTm2) && 'This browser has no WebHID API. Chrome or Edge is needed — Firefox and Safari have not shipped it.'}
                 {isPad && 'This browser has no Gamepad API.'}
                 {isDial && dialLink === 'usb' && 'This browser has no Web Serial API. Chrome or Edge is needed, or the UberSDR desktop app.'}
                 {isDial && dialLink === 'bluetooth' && 'This browser has no Web Bluetooth. Chrome or Edge on Windows, macOS, ChromeOS or Android is needed — not Firefox, Safari or any iOS browser. On Linux, Chrome keeps it behind a flag: enable chrome://flags/#enable-experimental-web-platform-features and restart Chrome.'}
-                {!isMidi && !isRc28 && !isPad && !isDial && 'This browser has no Web Serial API. Chrome or Edge is needed.'}
+                {!isMidi && !isRc28 && !isTm2 && !isPad && !isDial && 'This browser has no Web Serial API. Chrome or Edge is needed.'}
             </div>
             </>
         );
@@ -599,7 +606,7 @@ function SurfaceControl({ id, cfg, update, dspSchemas, hw, onMessage, minimal })
                 {connected
                     ? (isMidi ? surface.deviceName
                         : (isPad ? padName(surface.deviceName)
-                            : (isDial ? `${surface.deviceName} connected${dialLink === 'usb' ? ' over USB' : ''}` : `${isRc28 ? 'RC-28' : 'FlexControl'} connected`)))
+                            : (isDial ? `${surface.deviceName} connected${dialLink === 'usb' ? ' over USB' : ''}` : `${isRc28 ? 'RC-28' : isTm2 ? 'TM-2' : 'FlexControl'} connected`)))
                     : (waiting ? 'Port open — on the dial, choose Controller · USB' : 'Not connected')}
             </span>
         </div>
@@ -639,8 +646,8 @@ function SurfaceControl({ id, cfg, update, dspSchemas, hw, onMessage, minimal })
     // none the switch is honest about having nothing to do yet.
     const autoHint = listed
         ? (conf.device ? `Reconnects to ${isPad ? padName(conf.device) : conf.device}` : 'Connect once first, so there is a device to remember')
-        : (isRc28
-            ? 'Reopens the dial once you have picked it here'
+        : (isRc28 || isTm2
+            ? `Reopens the ${isTm2 ? 'TM-2' : 'dial'} once you have picked it here`
             : (isDial && dialLink === 'bluetooth'
                 ? 'Reopens the dial once you have picked it here, where the browser supports remembering Bluetooth devices'
                 : 'Reopens the dial once you have picked its port here'));
@@ -742,6 +749,16 @@ function SurfaceControl({ id, cfg, update, dspSchemas, hw, onMessage, minimal })
                     onChange={(patch) => update((prev) => ({
                         ...prev,
                         gamepad: { ...prev.gamepad, rumble: { ...rumbleSettings(prev.gamepad.rumble), ...patch } },
+                    }))}
+                />
+            )}
+
+            {isTm2 && (
+                <TM2Display
+                    display={tm2Settings(conf.display)}
+                    onChange={(patch) => update((prev) => ({
+                        ...prev,
+                        tm2: { ...prev.tm2, display: { ...tm2Settings(prev.tm2.display), ...patch } },
                     }))}
                 />
             )}
@@ -1122,6 +1139,83 @@ function RC28Leds({ leds, onChange }) {
                     {TX_LED_SOURCES.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
                 </select>
             </Field>
+        </>
+    );
+}
+
+// The TM-2's display: backlight, contrast, the level beside the S-meter, the
+// main knob's acceleration. Usable before connecting, like the RC-28's LEDs.
+// What each element of the LCD shows is fixed (controls/tm2display.js) — the
+// settings are the things a matter of taste or of the unit in front of you.
+function TM2Display({ display, onChange }) {
+    return (
+        <>
+            <div className="divider" />
+            <span className="section-label">Display</span>
+            <div className="note note--tight">
+                Push E1 to switch it between {E1_PAGES.map((p) => PAGE_LABEL[p]).join(', ')}, and E2
+                between {E2_PAGES.map((p) => PAGE_LABEL[p]).join(', ')} — the display shows which, and each
+                position can be mapped on its own. Out of the box the main knob&rsquo;s push is the tuning lock,
+                as on ELAD&rsquo;s own software.
+            </div>
+            <Field label="Backlight">
+                <ColorPicker
+                    value={display.backlight}
+                    onChange={(v) => onChange({ backlight: v })}
+                    onClear={() => onChange({ backlight: DEFAULT_TM2_DISPLAY.backlight })}
+                    inherited={display.backlight === DEFAULT_TM2_DISPLAY.backlight}
+                    clearLabel="White"
+                    ariaLabel="TM-2 backlight colour"
+                />
+            </Field>
+            <Field label={`Contrast — ${display.contrast}`}>
+                <input
+                    type="range"
+                    min="0"
+                    max="255"
+                    value={display.contrast}
+                    onChange={(e) => onChange({ contrast: Number(e.target.value) })}
+                />
+            </Field>
+            <Field label="Beside the S-meter">
+                <select
+                    className="select"
+                    value={display.readout}
+                    onChange={(e) => onChange({ readout: e.target.value })}
+                >
+                    {READOUTS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                </select>
+            </Field>
+            <Field label="Main knob acceleration" hint="faster spins take bigger steps">
+                <select
+                    className="select"
+                    value={display.accel}
+                    onChange={(e) => onChange({ accel: e.target.value })}
+                >
+                    {ACCEL_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                </select>
+            </Field>
+            <Switch
+                checked={display.meterColour}
+                onChange={(v) => onChange({ meterColour: v })}
+                label="Backlight follows the S-meter colour"
+            />
+            <Switch
+                checked={display.dimWhenDown}
+                onChange={(v) => onChange({ dimWhenDown: v })}
+                label="Dim the backlight while the receiver is not streaming"
+            />
+            <Switch
+                checked={display.blinkWhenDown}
+                onChange={(v) => onChange({ blinkWhenDown: v })}
+                label="Blink the green LED and show ERR while the receiver is not streaming"
+            />
+            <Switch
+                checked={display.clickOnHold}
+                onChange={(v) => onChange({ clickOnHold: v })}
+                label="Click once a press counts as a hold"
+                title="Holds fire on release; the click says the moment letting go stops being a tap"
+            />
         </>
     );
 }

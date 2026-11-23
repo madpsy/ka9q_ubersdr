@@ -149,7 +149,8 @@
         "libpulse0"
       ],
       "fpm": [
-        "linux/70-ubersdr-rc28.rules=/usr/lib/udev/rules.d/70-ubersdr-rc28.rules"
+        "linux/70-ubersdr-rc28.rules=/usr/lib/udev/rules.d/70-ubersdr-rc28.rules",
+        "linux/70-ubersdr-tm2.rules=/usr/lib/udev/rules.d/70-ubersdr-tm2.rules"
       ]
     },
     "nsis": {

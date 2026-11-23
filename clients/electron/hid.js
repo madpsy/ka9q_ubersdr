@@ -5,8 +5,8 @@
 //
 // The page is content served by whichever instance was connected to, and WebHID
 // reaches raw USB devices, so the answer to "which ones" is a list rather than
-// "any": the RC-28 tuning dial (static/v2/src/controls/rc28.js) and nothing
-// else. A browser asks the operator about every device; here the picker asks
+// "any": the RC-28 tuning dial (static/v2/src/controls/rc28.js) and the
+// ELAD TM-2 console (static/v2/src/controls/tm2.js), and nothing else. A browser asks the operator about every device; here the picker asks
 // about the ones on this list, and the permission handler refuses the rest
 // outright — so a page that calls requestDevice() with no filter, or with
 // somebody's keyboard's IDs, is offered nothing.
@@ -19,6 +19,8 @@
 const ALLOWED_HID = [
     // Icom RC-28 REMOTE ENCODER — github.com/CerberusSolutions/FlexRC-28
     { vendorId: 0x0C26, productId: 0x001E, name: 'Icom RC-28' },
+    // ELAD TM-2 / TMate 2 — github.com/microenh/Tmate2_C
+    { vendorId: 0x1721, productId: 0x0614, name: 'ELAD TM-2' },
 ];
 
 function isAllowedHidDevice(device) {

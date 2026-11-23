@@ -365,7 +365,10 @@ export function radioControlSnapshot(src) {
 export function sdrControlSnapshot(src) {
     const cfg = src.controlSettings || {};
     const surface = cfg.surface || 'off';
-    const external = !['off', 'flexcontrol', 'rc28', 'midi', 'gamepad', 'dial'].includes(surface);
+    // The surfaces this page opens itself (mappings.js SURFACES), spelled out
+    // rather than imported so the bridge does not pull in the whole control
+    // catalogue. Anything else is somebody else's to run.
+    const external = !['off', 'flexcontrol', 'rc28', 'tm2', 'midi', 'gamepad', 'dial'].includes(surface);
     return {
         surface,
         // Whether this page is asking that surface to run. The built-in ones

@@ -16,6 +16,8 @@ import { isEncoderFunction, runFunction } from './functions.js';
 import { isCCKey } from './webmidi.js';
 import { RC28_DEFAULT_MAPPINGS, RC28_DIAL_MAPPING, RC28_OLD_DIAL_MAPPING } from './rc28.js';
 import { DEFAULT_LEDS, ledSettings } from './rc28leds.js';
+import { TM2_DEFAULT_MAPPINGS } from './tm2.js';
+import { DEFAULT_TM2_DISPLAY, tm2Settings } from './tm2display.js';
 import { DIAL_DEFAULT_MAPPINGS, upgradeDialTune } from './dial.js';
 import { GAMEPAD_DEFAULT_MAPPINGS, rumbleSettings } from './gamepad.js';
 import { saveFile } from '../lib/saveFile.js';
@@ -35,7 +37,7 @@ const V1_KEYS = {
 // Not the whole list any more. A surface may also be registered from outside
 // (controls/surfaces.js), and its id goes in the same setting, so anything
 // validating this must ask the registry rather than only this array.
-export const SURFACES = ['off', 'flexcontrol', 'rc28', 'midi', 'gamepad', 'dial'];
+export const SURFACES = ['off', 'flexcontrol', 'rc28', 'tm2', 'midi', 'gamepad', 'dial'];
 
 /**
  * Whether a chosen surface is one this page opens itself, and so has mappings,
@@ -49,7 +51,7 @@ export const SURFACES = ['off', 'flexcontrol', 'rc28', 'midi', 'gamepad', 'dial'
  * should ask this first.
  */
 export function isMappedSurface(id) {
-    return id === 'flexcontrol' || id === 'rc28' || id === 'midi' || id === 'gamepad' || id === 'dial';
+    return id === 'flexcontrol' || id === 'rc28' || id === 'tm2' || id === 'midi' || id === 'gamepad' || id === 'dial';
 }
 
 export const DEFAULT_STATE = {
@@ -66,6 +68,10 @@ export const DEFAULT_STATE = {
     // a default — a saved table, even an empty one somebody cleared, wins.
     // `leds` is what its four lamps show — see controls/rc28leds.js.
     rc28: { mappings: RC28_DEFAULT_MAPPINGS, autoConnect: false, leds: DEFAULT_LEDS },
+    // The ELAD TM-2. Arrives mapped the way ELAD's own software lays it out,
+    // and `display` is what its LCD and backlight do — see controls/tm2.js
+    // and controls/tm2display.js.
+    tm2: { mappings: TM2_DEFAULT_MAPPINGS, autoConnect: false, display: DEFAULT_TM2_DISPLAY },
     midi: { mappings: {}, device: '', autoConnect: false },
     // The UberSDR Dial (Bluetooth). Arrives mapped: each knob page does what
     // the dial's chip says it does. See controls/dial.js.
@@ -180,6 +186,7 @@ export function loadState() {
         ...(saved || {}),
         flexcontrol: { ...DEFAULT_STATE.flexcontrol, ...((saved && saved.flexcontrol) || {}) },
         rc28: { ...DEFAULT_STATE.rc28, ...((saved && saved.rc28) || {}) },
+        tm2: { ...DEFAULT_STATE.tm2, ...((saved && saved.tm2) || {}) },
         midi: { ...DEFAULT_STATE.midi, ...((saved && saved.midi) || {}) },
         gamepad: { ...DEFAULT_STATE.gamepad, ...((saved && saved.gamepad) || {}) },
         dial: { ...DEFAULT_STATE.dial, ...((saved && saved.dial) || {}) },
@@ -205,6 +212,7 @@ export function loadState() {
     // Its own merge, one level down: a blob saved before a setting existed has
     // a `leds` without it, and the spread above would take that whole.
     state.rc28.leds = ledSettings(state.rc28.leds);
+    state.tm2.display = tm2Settings(state.tm2.display);
     state.rc28.mappings = upgradeRc28Dial(state.rc28.mappings);
     state.gamepad.rumble = rumbleSettings(state.gamepad.rumble);
     state.dial.mappings = upgradeDialTune(state.dial.mappings);

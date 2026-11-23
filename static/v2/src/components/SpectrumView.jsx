@@ -65,7 +65,7 @@ import {
 } from '../lib/spectrumPeaks.js';
 import { PEAK_EMPTY, alignPeakHold, resamplePeak } from '../lib/peakHold.js';
 import { HOVER_QUERY, LANDSCAPE_QUERY, MOBILE_QUERY, TOUCH_QUERY, useMediaQuery } from '../lib/useMediaQuery.js';
-import { getFlex, getMidi, getRc28, getSync } from '../controls/sources.js';
+import { getFlex, getMidi, getRc28, getSync, getTm2 } from '../controls/sources.js';
 import { listSurfaces, onSurfaces } from '../controls/surfaces.js';
 import { providerStatus, onProviders } from '../controls/radioProviders.js';
 import { controlState, onControlState } from '../controls/mappings.js';
@@ -725,6 +725,7 @@ function ControlTags() {
     const mobile = useMediaQuery(MOBILE_QUERY);
     const flex = useSurface(getFlex, readConnected);
     const rc28 = useSurface(getRc28, readConnected);
+    const tm2 = useSurface(getTm2, readConnected);
     const midi = useSurface(getMidi, readMidi);
     const provided = useProvidedSurfaces();
     const rig = useRadioTag();
@@ -745,6 +746,11 @@ function ControlTags() {
             {rc28 && (
                 <span className="tag tag--accent" title="RC-28 connected — the dial is driving this receiver">
                     RC-28
+                </span>
+            )}
+            {tm2 && (
+                <span className="tag tag--accent" title="TM-2 connected — its knobs are driving this receiver and its display is showing it">
+                    TM-2
                 </span>
             )}
             {midi && (

@@ -2599,6 +2599,15 @@ t('hovering the picture reads out the frequency and the level there, live', () =
     const gcs = globalThis.getComputedStyle;
     globalThis.requestAnimationFrame = (fn) => { frames.push(fn); return frames.length; };
     globalThis.getComputedStyle = () => ({ getPropertyValue: () => '' });
+    // The picture smooths over real time — each frame moves its readings by
+    // however long it has been since the last (IQPanel's frame loop reads
+    // performance.now). Frames run back to back here, so on the host's clock
+    // they are microseconds apart, or milliseconds on a busy one, and how far
+    // the level had fallen after them depended on how loaded the machine was.
+    // So the frames get a clock of their own: 50 ms each, a display's pace.
+    const realNow = performance.now;
+    let clock = 1000;
+    performance.now = () => clock;
     try {
         const ctx = context();
         ctx.player.onAudio = (fn) => { taps.push(fn); return () => {}; };
@@ -2635,6 +2644,7 @@ t('hovering the picture reads out the frequency and the level there, live', () =
                 for (const tap of taps) tap([I, Q], n, 12000);
                 t0 += n;
             }
+            clock += 50;
             for (const fn of frames.splice(0)) fn();
         };
         const db = () => Number((tip.textContent.match(/(-?[\d.]+) dBFS/) || [])[1]);
@@ -2648,8 +2658,9 @@ t('hovering the picture reads out the frequency and the level there, live', () =
         assert.ok(Number.isFinite(loud), `no level: ${tip.textContent}`);
 
         // Quieter, and the figure follows on the frames after with the pointer
-        // still. Only so far here: the picture's smoothing runs on real time,
-        // and these frames come microseconds apart.
+        // still: 30 frames is a second and a half, and the picture closes more
+        // than half the gap every 50 ms (iqSpectrum.js SMOOTH_K), so the 40 dB
+        // drop has all but arrived — far past the 6 dB asked for.
         amp = 0.005;
         for (let i = 0; i < 30; i++) feed(2);
         const quiet = db();
@@ -2663,6 +2674,7 @@ t('hovering the picture reads out the frequency and the level there, live', () =
         assert.strictEqual(tip.hidden, true, 'a finger brought up the readout');
         for (const off of cleanups) off();
     } finally {
+        performance.now = realNow;
         globalThis.requestAnimationFrame = raf;
         globalThis.getComputedStyle = gcs;
         fresh();

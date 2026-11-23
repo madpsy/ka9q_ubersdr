@@ -38,6 +38,11 @@ t('the RC-28 is allowed, by the IDs FlexRC-28 documents', () => {
     assert.ok(ALLOWED_HID.some((d) => d.vendorId === 0x0C26 && d.productId === 0x001E));
 });
 
+t('the ELAD TM-2 is allowed, by the IDs Tmate2_C opens it with', () => {
+    assert.ok(isAllowedHidDevice({ vendorId: 0x1721, productId: 0x0614 }));
+    assert.strictEqual(isAllowedHidDevice({ vendorId: 0x1721, productId: 0x0615 }), false, 'same vendor, other product');
+});
+
 t('nothing else on the bus is', () => {
     assert.strictEqual(isAllowedHidDevice(KEYBOARD), false);
     assert.strictEqual(isAllowedHidDevice(YUBIKEY), false);
@@ -53,6 +58,11 @@ t('the IDs the page asks for and the IDs allowed here agree', () => {
     const vid = Number(/RC28_VENDOR_ID = (0x[0-9A-Fa-f]+)/.exec(src)[1]);
     const pid = Number(/RC28_PRODUCT_ID = (0x[0-9A-Fa-f]+)/.exec(src)[1]);
     assert.ok(isAllowedHidDevice({ vendorId: vid, productId: pid }));
+    const tm2 = fs.readFileSync(path.join(ROOT, '..', '..', 'static', 'v2', 'src', 'controls', 'tm2.js'), 'utf8');
+    assert.ok(isAllowedHidDevice({
+        vendorId: Number(/TM2_VENDOR_ID = (0x[0-9A-Fa-f]+)/.exec(tm2)[1]),
+        productId: Number(/TM2_PRODUCT_ID = (0x[0-9A-Fa-f]+)/.exec(tm2)[1]),
+    }), 'the TM-2 the page asks for');
 });
 
 // --- the device permission handler ------------------------------------------
@@ -247,6 +257,8 @@ t('an RC-28 unplugged while the picker is open leaves the list', () => {
 
 const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
 const RULE_FILE = 'linux/70-ubersdr-rc28.rules';
+// Every HID device the client allows has a rule of its own.
+const RULE_FILES = [RULE_FILE, 'linux/70-ubersdr-tm2.rules'];
 
 t('hid.js is packaged', () => {
     // build.files is an allowlist; a module left off it works under
@@ -254,12 +266,24 @@ t('hid.js is packaged', () => {
     assert.ok(pkg.build.files.includes('hid.js'));
 });
 
-t('the udev rule is mapped into the .deb where packages put them', () => {
+t('each udev rule is mapped into the .deb where packages put them', () => {
     const fpm = pkg.build.deb.fpm || [];
-    const mapping = fpm.find((a) => a.startsWith(`${RULE_FILE}=`));
-    assert.ok(mapping, `no fpm mapping for ${RULE_FILE}`);
-    assert.strictEqual(mapping.split('=')[1], '/usr/lib/udev/rules.d/70-ubersdr-rc28.rules');
-    assert.ok(fs.existsSync(path.join(ROOT, RULE_FILE)), 'the mapped file exists');
+    for (const file of RULE_FILES) {
+        const mapping = fpm.find((a) => a.startsWith(`${file}=`));
+        assert.ok(mapping, `no fpm mapping for ${file}`);
+        assert.strictEqual(mapping.split('=')[1], `/usr/lib/udev/rules.d/${path.basename(file)}`);
+        assert.ok(fs.existsSync(path.join(ROOT, file)), `${file} exists`);
+    }
+});
+
+t('every allowed HID device has a udev rule', () => {
+    const ruled = RULE_FILES.map((file) => fs.readFileSync(path.join(ROOT, file), 'utf8'));
+    for (const d of ALLOWED_HID) {
+        const vid = d.vendorId.toString(16).padStart(4, '0');
+        const pid = d.productId.toString(16).padStart(4, '0');
+        assert.ok(ruled.some((r) => r.includes(`ATTRS{idVendor}=="${vid}", ATTRS{idProduct}=="${pid}"`)),
+            `${d.name} (${vid}:${pid}) has no rule, so on Linux it never reaches the picker`);
+    }
 });
 
 t('the .deb keeps electron-builder’s own install scripts', () => {
@@ -269,8 +293,8 @@ t('the .deb keeps electron-builder’s own install scripts', () => {
     assert.strictEqual((pkg.build.linux || {}).afterInstall, undefined);
 });
 
-t('the udev rule matches the RC-28 on hidraw and tags it for the seat', () => {
-    const rules = fs.readFileSync(path.join(ROOT, RULE_FILE), 'utf8')
+for (const RULE of RULE_FILES) t(`${path.basename(RULE)} matches its device on hidraw and tags it for the seat`, () => {
+    const rules = fs.readFileSync(path.join(ROOT, RULE), 'utf8')
         .split('\n').filter((l) => l.trim() && !l.trim().startsWith('#'));
     assert.strictEqual(rules.length, 1);
     const rule = rules[0];
@@ -285,9 +309,11 @@ t('the udev rule matches the RC-28 on hidraw and tags it for the seat', () => {
     assert.match(rule, /TAG\+="uaccess"/);
 });
 
-t('the rule is numbered before 73-seat-late, which acts on uaccess', () => {
-    const n = Number(path.basename(RULE_FILE).split('-')[0]);
-    assert.ok(n < 73, `${n} sorts after 73-seat-late.rules and its tag would never be seen`);
+t('the rules are numbered before 73-seat-late, which acts on uaccess', () => {
+    for (const file of RULE_FILES) {
+        const n = Number(path.basename(file).split('-')[0]);
+        assert.ok(n < 73, `${file}: ${n} sorts after 73-seat-late.rules and its tag would never be seen`);
+    }
 });
 
 (async () => {

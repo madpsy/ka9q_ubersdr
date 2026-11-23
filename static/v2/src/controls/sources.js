@@ -12,7 +12,7 @@
 // or hidden panel keeps its connection, which is the behaviour you want from a
 // rig that is tracking your receiver.
 //
-// FlexControl, the RC-28, MIDI and a game controller are the mapped surfaces and exclude each
+// FlexControl, the RC-28, the TM-2, MIDI and a game controller are the mapped surfaces and exclude each
 // other — two of them mapped to frequency would fight. Radio Sync excludes neither: it is a
 // panel of its own and can run alongside whichever surface is chosen.
 
@@ -20,12 +20,14 @@ import { FlexControl, flexKeyLabel } from './flexcontrol.js';
 import { MIDIControl, midiKeyLabel } from './webmidi.js';
 import { GamepadControl, gamepadKeyLabel } from './gamepad.js';
 import { RC28Control, rc28KeyLabel } from './rc28.js';
+import { TM2Control, tm2KeyLabel } from './tm2.js';
 import { DialControl, dialKeyLabel } from './dial.js';
 import { RadioSync } from './radiosync.js';
 
 let flex = null;
 let midi = null;
 let rc28 = null;
+let tm2 = null;
 let gamepad = null;
 let dial = null;
 let sync = null;
@@ -38,6 +40,12 @@ export function getFlex() {
 export function getRc28() {
     if (!rc28) rc28 = new RC28Control();
     return rc28;
+}
+
+// The ELAD TM-2 over WebHID — see controls/tm2.js.
+export function getTm2() {
+    if (!tm2) tm2 = new TM2Control();
+    return tm2;
 }
 
 export function getGamepad() {
@@ -66,6 +74,7 @@ export function getSync() {
 export function getSurface(id) {
     if (id === 'midi') return getMidi();
     if (id === 'rc28') return getRc28();
+    if (id === 'tm2') return getTm2();
     if (id === 'gamepad') return getGamepad();
     if (id === 'dial') return getDial();
     return getFlex();
@@ -75,6 +84,7 @@ export function getSurface(id) {
 export function surfaceKeyLabel(id) {
     if (id === 'midi') return midiKeyLabel;
     if (id === 'rc28') return rc28KeyLabel;
+    if (id === 'tm2') return tm2KeyLabel;
     if (id === 'gamepad') return gamepadKeyLabel;
     if (id === 'dial') return dialKeyLabel;
     return flexKeyLabel;
@@ -88,6 +98,7 @@ export function releaseSurfaceExcept(keep) {
     if (keep !== 'flexcontrol' && flex) flex.disconnect();
     if (keep !== 'midi' && midi) midi.close();
     if (keep !== 'rc28' && rc28) rc28.disconnect();
+    if (keep !== 'tm2' && tm2) tm2.disconnect();
     if (keep !== 'gamepad' && gamepad) gamepad.close();
     if (keep !== 'dial' && dial) dial.disconnect();
 }

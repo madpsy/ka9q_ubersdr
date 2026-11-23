@@ -23,6 +23,8 @@ import { rumbleSettings } from '../controls/gamepad.js';
 import { isCCKey } from '../controls/webmidi.js';
 import { flexAvailable } from '../controls/flexcontrol.js';
 import { rc28Available } from '../controls/rc28.js';
+import { tm2Available } from '../controls/tm2.js';
+import { getVfos } from '../lib/vfos.js';
 import { indicatorLeds, ledSettings } from '../controls/rc28leds.js';
 import { MAX_FREQ, MIN_FREQ, squelchEnabled, squelchThreshold } from '../radio/constants.js';
 import { getRecorder } from '../lib/recorder.js';
@@ -31,7 +33,7 @@ import { serialAvailable } from '../controls/radiosync.js';
 import { onProviders, providerStatus } from '../controls/radioProviders.js';
 import { dialLinkFor } from '../lib/hostPanels.js';
 import {
-    getDial, getGamepad, getRc28, getSurface, getSync, releaseSurfaceExcept, surfaceKeyLabel,
+    getDial, getGamepad, getRc28, getSurface, getSync, getTm2, releaseSurfaceExcept, surfaceKeyLabel,
 } from '../controls/sources.js';
 
 // How often the RC-28's lamps are brought up to date. Polled rather than
@@ -45,6 +47,10 @@ const LED_POLL_MS = 250;
 // move, so faster than the RC-28's lamps; the driver sends only what changed,
 // and only one GATT write at a time, so a quiet receiver costs nothing.
 const DIAL_POLL_MS = 100;
+
+// The TM-2's LCD, at the Dial's pace for the same reason — its S-meter moves.
+// The driver writes only frames that differ, one at a time.
+const TM2_POLL_MS = 100;
 
 // The Dial's waterfall background: a steady, modest rate — the dial runs on a
 // battery, and every line is a full-screen redraw there. Each is ~170 bytes,
@@ -180,8 +186,8 @@ export default function ControlWatch() {
             return () => timers.forEach(clearTimeout);
         }
         // WebHID's own hotplug event, for the same reason as Web Serial's below.
-        if (surface === 'rc28') {
-            if (!rc28Available()) return undefined;
+        if (surface === 'rc28' || surface === 'tm2') {
+            if (surface === 'rc28' ? !rc28Available() : !tm2Available()) return undefined;
             navigator.hid.addEventListener('connect', attempt);
             return () => navigator.hid.removeEventListener('connect', attempt);
         }
@@ -307,6 +313,73 @@ export default function ControlWatch() {
             dial.setSpectrum(f.bins, Number(f.frequency), span);
         });
         return off;
+    }, [surface, spectrumConn]);
+
+    // The TM-2's LCD shows the receiver, as the Dial's screen does: the same
+    // state, read through a ref and polled for the same reason (the meter is a
+    // mutable object nothing re-renders for), plus what the TM-2's display
+    // has room for that the Dial's does not — the VFO and noise reduction.
+    const tm2Ref = useRef(null);
+    tm2Ref.current = {
+        tuning: radio.tuning,
+        audio: radio.audio,
+        squelch: radio.squelch,
+        meters: radio.meters,
+        dsp: radio.dsp,
+        audioUp: radio.audioState === 'open',
+        locked: radio.locked,
+        stepHz: ctx.state().tuneStep,
+        display: cfg.tm2 && cfg.tm2.display,
+    };
+    // Driven by spectrum frames as well as the timer, as the Dial's is (see
+    // dialUpdateRef): a hardware console is used with the page behind other
+    // windows, where Chrome slows timers to once a second and the LCD would
+    // trail its own knob.
+    const tm2UpdateRef = useRef(null);
+    useEffect(() => {
+        if (surface !== 'tm2') return undefined;
+        const tm2 = getTm2();
+        let settings = null;
+        let lastSent = 0;
+        const update = () => {
+            lastSent = performance.now();
+            if (!tm2.connected) { settings = null; return; }
+            const d = tm2Ref.current;
+            const m = d.meters.current || {};
+            const sqOn = squelchEnabled(d.squelch.value);
+            // A new object only when the operator changes something.
+            if (d.display !== settings) { settings = d.display; tm2.setSettings(settings); }
+            tm2.setReceiver({
+                frequency: d.tuning.frequency,
+                mode: d.tuning.mode,
+                stepHz: d.stepHz,
+                dbfs: m.basebandPower,
+                snr: m.snr,
+                audioUp: d.audioUp,
+                squelchOn: sqOn,
+                // Open with no threshold means nothing is gating, not a signal.
+                squelchOpen: sqOn && !!m.squelchOpen,
+                squelchDb: sqOn ? squelchThreshold(d.squelch.value) : null,
+                muted: !!d.audio.muted,
+                volume: d.audio.volume,
+                locked: !!d.locked,
+                bwLow: d.tuning.bandwidthLow,
+                bwHigh: d.tuning.bandwidthHigh,
+                vfo: getVfos().active,
+                dspEnabled: !!(d.dsp && d.dsp.enabled),
+                dspFilter: (d.dsp && d.dsp.filter) || '',
+            });
+        };
+        update();
+        tm2UpdateRef.current = () => { if (performance.now() - lastSent >= TM2_POLL_MS) update(); };
+        const t = setInterval(update, TM2_POLL_MS);
+        const off = tm2.on('state', () => { settings = null; update(); });
+        return () => { clearInterval(t); off(); tm2UpdateRef.current = null; };
+    }, [surface, ctx]);
+
+    useEffect(() => {
+        if (surface !== 'tm2' || !spectrumConn) return undefined;
+        return spectrumConn.on('frame', () => { if (tm2UpdateRef.current) tm2UpdateRef.current(); });
     }, [surface, spectrumConn]);
 
     // A game controller's rumble: what a press did, felt rather than seen.

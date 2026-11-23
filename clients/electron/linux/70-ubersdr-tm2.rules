@@ -1,0 +1,13 @@
+# ELAD TM-2 / TMate 2 (USB 1721:0614) for the UberSDR desktop client.
+#
+# The same as 70-ubersdr-rc28.rules, for the same reason: Chromium's WebHID
+# opens /dev/hidraw*, which is root's by default, so without this the console
+# is plugged in, visible to lsusb, and missing from the client's device picker.
+# `uaccess` hands the node to whoever is logged in at the seat.
+#
+# 70 rather than a later number: uaccess is acted on by 73-seat-late.rules, so a
+# tag added after that is never seen.
+#
+# Installed by the .deb to /usr/lib/udev/rules.d/. For the AppImage, copy it to
+# /etc/udev/rules.d/ and unplug and replug the TM-2.
+SUBSYSTEM=="hidraw", ATTRS{idVendor}=="1721", ATTRS{idProduct}=="0614", TAG+="uaccess"

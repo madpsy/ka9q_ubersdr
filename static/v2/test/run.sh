@@ -299,12 +299,16 @@ esbuild ../src/controls/webmidi.js --bundle --format=cjs --platform=node \
     --outfile=.build/webmidi.cjs --log-level=warning
 esbuild rc28.entry.js --bundle --format=cjs --platform=node \
     --outfile=.build/rc28.cjs --log-level=warning
+esbuild tm2.entry.js --bundle --format=cjs --platform=node \
+    --outfile=.build/tm2.cjs --log-level=warning
 esbuild dial.entry.js --bundle --format=cjs --platform=node \
     --outfile=.build/dial.cjs --log-level=warning
 esbuild gamepad.entry.js --bundle --format=cjs --platform=node \
     --outfile=.build/gamepad.cjs --log-level=warning
 esbuild gamepadpanel.entry.js --bundle --format=cjs --platform=node \
     --outfile=.build/gamepadpanel.cjs --log-level=warning
+esbuild tm2panel.entry.js --bundle --format=cjs --platform=node \
+    --outfile=.build/tm2panel.cjs --log-level=warning
 esbuild radiocontrolpanel.entry.js --bundle --format=cjs --platform=node \
     --outfile=.build/radiocontrolpanel.cjs --log-level=warning
 esbuild ../src/controls/hardware.js --bundle --format=cjs --platform=node \
@@ -615,9 +619,11 @@ node compat.test.js
 node recorder.test.js
 node controls.test.js
 node rc28.test.js
+node tm2.test.js
 node dial.test.js
 node gamepad.test.js
 node gamepadpanel.test.js
+node tm2panel.test.js
 node radiocontrolpanel.test.js
 node spots.test.js
 node spotspanel.test.js

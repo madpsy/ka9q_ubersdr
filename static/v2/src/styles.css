@@ -2821,8 +2821,11 @@ a.btn { text-decoration: none; }
     padding: 0;
     cursor: pointer;
 }
+/* A label long enough to wrap would otherwise shrink the track (flex items
+   shrink by default) until the thumb hangs off its end. */
 .switch__track {
     position: relative;
+    flex: none;
     width: 36px;
     height: 20px;
     border-radius: 99px;
@@ -2843,7 +2846,9 @@ a.btn { text-decoration: none; }
 .switch.is-on .switch__track { background: var(--accent); border-color: var(--accent); }
 .switch.is-on .switch__thumb { transform: translateX(16px); background: var(--accent-ink); }
 .switch:disabled { opacity: 0.45; cursor: not-allowed; }
-.switch__label { font-size: calc(12px * var(--ui-scale)); color: var(--text-dim); }
+/* text-align because a <button> centres its content, which only shows once
+   the label wraps. */
+.switch__label { font-size: calc(12px * var(--ui-scale)); color: var(--text-dim); text-align: left; }
 
 .input, .select {
     width: 100%;

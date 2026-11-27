@@ -72,16 +72,27 @@ export function arcAngle(fraction) {
 }
 
 /**
- * Peak hold, v1's rule in fractions rather than dB: rise at once, hold, then
- * fall away. `dt` is seconds since the last step, so a meter sampled at 8 Hz
- * decays at the same rate as one sampled at 30.
+ * Peak hold, in fractions of the scale rather than dB: rise at once, hold,
+ * then fall away. `dt` is seconds since the last step, so a meter sampled at
+ * 8 Hz decays at the same rate as one sampled at 30.
+ *
+ * Long enough to read. v1's 0.6 s hold and a fall of a third of the scale a
+ * second put the hold back on the live needle within a second of the last
+ * syllable, so on SSB it was barely slower than the reading it was meant to
+ * summarise. Three seconds spans the gaps between phrases, so the hold sits on
+ * the loudest of them; the fall is about 1.7 S-units, or 4 dB of SNR, a second,
+ * slow enough to watch it come down.
  */
-export const PEAK_HOLD_SEC = 0.6;
-export const PEAK_FALL_PER_SEC = 0.35;   // of full scale
+export const PEAK_HOLD_SEC = 3;
+export const PEAK_FALL_PER_SEC = 0.12;   // of full scale
 
-export function stepPeak(peak, value, dt) {
+// `fall` is per second in whatever units `value` is in. A scale position by
+// default; a reading carried in its own units — the SNR hold is kept in dB, so
+// that one above the top of the scale still prints what it was — passes the
+// same fall converted to them.
+export function stepPeak(peak, value, dt, fall = PEAK_FALL_PER_SEC) {
     if (!peak || value >= peak.value) return { value, held: PEAK_HOLD_SEC };
     const held = peak.held - dt;
     if (held > 0) return { value: peak.value, held };
-    return { value: Math.max(value, peak.value - PEAK_FALL_PER_SEC * dt), held: 0 };
+    return { value: Math.max(value, peak.value - fall * dt), held: 0 };
 }

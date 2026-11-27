@@ -18,10 +18,10 @@ import {
 import { cssVar } from '../lib/audioWaterfall.js';
 import {
     angleAt, arcAngle, geometry, pointAt, stepPeak,
-    LABEL_INSET, NEEDLE_GAP, TICK_IN, TICK_OUT,
+    LABEL_INSET, PEAK_FALL_PER_SEC, NEEDLE_GAP, TICK_IN, TICK_OUT,
 } from '../lib/needle.js';
 import {
-    chartPoints, chartSurface, strokeCurve, trimBefore, SPAN_MS,
+    chartPoints, chartScale, chartStats, chartSurface, strokeCurve, trimBefore, SPAN_MS,
 } from '../lib/rollingChart.js';
 import useHoldPress from '../lib/useHoldPress.js';
 import { haptic } from '../lib/haptics.js';
@@ -222,9 +222,10 @@ export const DBFS_WINDOW_MS = 30_000;
 // allow. The face swaps the style of both meters; the numbers step this one to
 // its next reading.
 //
-// `held` is the S-meter's peak hold, as a position on the S scale — see the
-// panel. `scale` is the dBFS scale from dbfsScale, or null before a reading.
-function Meter({ reading, needle, onSwapStyle, styleHint, onNext, power, snr, held, scale }) {
+// `held` is the S-meter's peak hold, as a position on the S scale, and
+// `snrHeld` the SNR meter's, in dB — see the panel.
+// `scale` is the dBFS scale from dbfsScale, or null before a reading.
+function Meter({ reading, needle, onSwapStyle, styleHint, onNext, power, snr, held, snrHeld, scale }) {
     let ticks;
     let fraction;
     let peak = null;
@@ -235,11 +236,17 @@ function Meter({ reading, needle, onSwapStyle, styleHint, onNext, power, snr, he
     if (reading === 'snr') {
         // SNR_MIN at the left to SNR_MAX at the right, in a red→green ramp. No
         // longer v1's 30–60 scale: that was calibrated against the old S/N0
-        // figure in dB·Hz, and this is an SNR in dB. No peak hold, as in v1.
+        // figure in dB·Hz, and this is an SNR in dB.
+        //
+        // With a peak hold, which v1 never had: on SSB the SNR swings between
+        // the words and the gaps several times a second, and the hold is what
+        // stays still long enough to be read. Same rule as the S-meter's.
         ticks = SNR_TICKS;
         fraction = snrFraction(snr);
+        peak = snrHeld == null ? null : snrFraction(snrHeld);
         colour = snr == null ? undefined : snrColour(snr);
         colourAt = snrColourAt;
+        const heldSnr = snrHeld;
         // The S meter needs no unit — "S7" says what it is — but a bare
         // "42.3 dB" does not: this panel has a squelch threshold in dB under
         // it, and a number with a unit and no name is the one that gets
@@ -250,11 +257,17 @@ function Meter({ reading, needle, onSwapStyle, styleHint, onNext, power, snr, he
         // padReading, not toFixed: the slot is centred, so a reading that gains
         // a minus sign gets a character wider and re-centres, shoving the whole
         // line sideways — which on quiet air happens several times a second.
+        //
+        // Live then held, as the other two readings are, with the unit once
+        // after the pair rather than on each.
         value = (
-            <span className="meter__num meter__num--snr">
-                {snr == null ? '--' : `${padReading(snr, 2)} dB`}
-                <span className="meter__unit">SNR</span>
-            </span>
+            <>
+                <span className="meter__num">{snr == null ? '--' : padReading(snr, 2)}</span>
+                <span className={`meter__num${heldSnr == null ? ' is-blank' : ''}`}>
+                    {heldSnr == null ? '' : padReading(heldSnr, 2)}
+                </span>
+                <span className="meter__unit">dB SNR</span>
+            </>
         );
     } else if (reading === 'dbfs') {
         // Linear in dB on a scale fitted to what has been heard — dBFS has no
@@ -468,43 +481,152 @@ function SquelchControl({ minimal }) {
 
 // The chart's two readings. Both are kept in the history all the time, so a
 // swap redraws the last ten seconds in the other unit rather than starting an
-// empty chart.
+// empty chart. `digits` is padReading's whole-number width for the figures
+// under it: an SNR is two, a dBFS three.
 const CHARTS = {
-    snr: { key: 'snr', colour: snrColour, label: 'SNR' },
-    dbfs: { key: 'dbfs', colour: sMeterColour, label: 'Signal dBFS' },
+    snr: { key: 'snr', colour: snrColour, label: 'SNR', unit: 'dB', digits: 2 },
+    dbfs: { key: 'dbfs', colour: sMeterColour, label: 'Signal', unit: 'dBFS', digits: 3 },
 };
 
-function drawChart(canvas, points, now, chart) {
+// The figures under the chart, over the same ten seconds it shows. The mean is
+// the one asked for: on SSB the live SNR and its digits change several times a
+// second, and the typical value of a signal — the one to compare two antennas
+// by — is what they average to, not any one of them. The lowest is the noise in
+// the gaps between words; the highest, the loudest of them.
+const CHART_STATS = [['min', 'Min'], ['mean', 'Avg'], ['max', 'Max']];
+
+// The figures under the chart, recomputed on every meter tick from the history
+// the chart is drawn from. Each figure is a fixed width (padReading and a
+// reserved slot), so the row does not shuffle as they change.
+function ChartStats({ points, chart }) {
+    const stats = chartStats(points, chart.key, performance.now() - SPAN_MS);
+    return (
+        <span className="sigchart__stats">
+            {CHART_STATS.map(([key, label]) => (
+                <span key={key} className="sigchart__stat">
+                    <span className={`sigchart__k sigchart__k--${key}`}>{label}</span>
+                    <span className="sigchart__v" style={{ minWidth: `${chart.digits + 3}ch` }}>
+                        {stats ? padReading(stats[key], chart.digits) : '—'}
+                    </span>
+                </span>
+            ))}
+        </span>
+    );
+}
+
+// Space inside the chart's canvas, CSS px. Above and below the plot so the top
+// and bottom grid labels, which are centred on their lines, are not cut in half;
+// and between the labels and the plot, so a number is not touching the line it
+// names.
+const CHART_PAD_Y = 6;
+const CHART_LABEL_GAP = 5;
+const CHART_FONT = 9;
+// A faint upright every two seconds, so "how long ago" can be read off the
+// chart as well as "how strong".
+const CHART_TIME_STEP_MS = 2000;
+
+// `squelch` is the threshold in dB SNR, or null when the gate is off. Exported
+// for the test, which draws it on a recording context.
+export function drawChart(canvas, points, now, chart, squelch) {
     const { key, colour } = chart;
     const value = (p) => p[key];
     const s = chartSurface(canvas);
     if (!s) return;
     const { ctx, w, ht, dpr } = s;
-    const vals = points.filter((p) => value(p) != null).map(value);
+    const since = now - SPAN_MS;
+    const vals = [];
+    for (const p of points) if (p.t >= since && value(p) != null) vals.push(value(p));
     if (vals.length < 2) return;
+    const scale = chartScale(vals);
+    const stats = chartStats(points, key, since);
 
-    // v1's rule (app.js drawSnrHistoryChart): pad by 10% of the span with a
-    // 2 dB floor, and always show at least 10 dB — so a quiet channel does not
-    // get magnified into a noise mountain.
-    //
-    // v1 also clamps the floor at 0 dB, which this deliberately does not. That
-    // clamp was safe while the figure was power over noise *density*, sitting
-    // around 30–60 dB·Hz and never negative. A real SNR is negative on an empty
-    // channel, and holding the axis at 0 would flatten the trace against the
-    // bottom of the chart exactly when someone is looking to see whether there
-    // is anything there at all.
-    let lo = Math.min(...vals);
-    let hi = Math.max(...vals);
-    const pad = Math.max(2, (hi - lo) * 0.1);
-    lo -= pad;
-    hi += pad;
-    if (hi - lo < 10) {
-        const mid = (hi + lo) / 2;
-        lo = mid - 5;
-        hi = mid + 5;
+    const faint = cssVar('--text-faint', '#5c6779');
+    const dim = cssVar('--text-dim', '#8d99ad');
+    const grid = cssVar('--border-strong', '#2f3b4e');
+    const accent = cssVar('--accent', '#08a2fb');
+    const ground = cssVar('--surface', '#0f141d');
+
+    // The labels down the left, in a gutter of their own: written over the
+    // plot, they would sit on the oldest stretch of the trace and on the
+    // average line exactly where it is read from.
+    ctx.font = `${CHART_FONT * dpr}px ui-monospace, SFMono-Regular, monospace`;
+    const labels = scale.ticks.map((v) => String(v));
+    let labelW = 0;
+    for (const l of labels) labelW = Math.max(labelW, ctx.measureText(l).width);
+    const x0 = Math.ceil(labelW + CHART_LABEL_GAP * dpr);
+    const pw = w - x0;
+    const top = CHART_PAD_Y * dpr;
+    const bottom = ht - CHART_PAD_Y * dpr;
+    if (pw <= 0 || bottom <= top) return;
+    const y = (v) => bottom - ((Math.max(scale.lo, Math.min(scale.hi, v)) - scale.lo) / (scale.hi - scale.lo)) * (bottom - top);
+    // On the pixel grid, so a one-pixel line is one pixel and not two at half.
+    const crisp = (v) => Math.round(v) + 0.5;
+    const hair = Math.max(1, Math.round(dpr));
+
+    // The grid: a rule at every step, labelled, and the time uprights between.
+    ctx.lineWidth = hair;
+    ctx.strokeStyle = grid;
+    ctx.fillStyle = faint;
+    ctx.textAlign = 'right';
+    ctx.textBaseline = 'middle';
+    scale.ticks.forEach((v, i) => {
+        const yy = crisp(y(v));
+        ctx.beginPath();
+        ctx.moveTo(x0, yy);
+        ctx.lineTo(w, yy);
+        ctx.stroke();
+        ctx.fillText(labels[i], x0 - CHART_LABEL_GAP * dpr, yy);
+    });
+    ctx.save();
+    ctx.globalAlpha = 0.55;
+    ctx.setLineDash([2 * dpr, 3 * dpr]);
+    for (let t = CHART_TIME_STEP_MS; t < SPAN_MS; t += CHART_TIME_STEP_MS) {
+        const xx = crisp(x0 + pw - (t / SPAN_MS) * pw);
+        ctx.beginPath();
+        ctx.moveTo(xx, top);
+        ctx.lineTo(xx, bottom);
+        ctx.stroke();
+    }
+    ctx.restore();
+
+    // Everything from here on is the plot's, and stays inside it.
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(x0, 0, pw, ht);
+    ctx.clip();
+
+    // The squelch threshold, on the SNR it gates: where the trace crosses it is
+    // where the audio opens. Not drawn when it is off the scale — stretching
+    // the axis to reach it would flatten the trace it is being judged against.
+    // Its label goes on last, over the trace.
+    let sqY = null;
+    if (squelch != null && key === 'snr' && squelch >= scale.lo && squelch <= scale.hi) {
+        const yy = crisp(y(squelch));
+        ctx.strokeStyle = accent;
+        ctx.lineWidth = hair;
+        ctx.setLineDash([5 * dpr, 3 * dpr]);
+        ctx.beginPath();
+        ctx.moveTo(x0, yy);
+        ctx.lineTo(w, yy);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        sqY = yy;
     }
 
-    const y = (v) => ht - ((Math.max(lo, Math.min(hi, v)) - lo) / (hi - lo)) * ht;
+    // The mean, under the trace: the figure the trace is wandering about, and
+    // the dashed line its key in the figures below is drawn as.
+    if (stats) {
+        const yy = crisp(y(stats.mean));
+        ctx.strokeStyle = dim;
+        ctx.lineWidth = hair;
+        ctx.setLineDash([4 * dpr, 3 * dpr]);
+        ctx.beginPath();
+        ctx.moveTo(x0, yy);
+        ctx.lineTo(w, yy);
+        ctx.stroke();
+        ctx.setLineDash([]);
+    }
+
     // A break in the readings is a break in the line: a null is the meter
     // saying it had nothing, and joining across it would draw a signal that was
     // never measured. Each unbroken run is its own curve.
@@ -516,14 +638,32 @@ function drawChart(canvas, points, now, chart) {
     }
     if (run.length) runs.push(run);
 
+    ctx.translate(x0, 0);
     ctx.lineWidth = 1.6 * dpr;
     ctx.lineJoin = 'round';
     ctx.lineCap = 'round';
     for (const r of runs) {
-        const pts = chartPoints(r, now, w, y, value);
+        const pts = chartPoints(r, now, pw, y, value);
         // Coloured per segment on the matching meter's ramp, so the trace says
         // how good the signal is and not just how it moved.
         strokeCurve(ctx, pts, (i) => colour(value(pts[i].p)));
+    }
+    ctx.restore();
+
+    // Above the line unless that would put it off the top, and haloed in the
+    // panel's own colour: it sits at the start of the plot, where the trace
+    // runs straight through it.
+    if (sqY != null) {
+        const above = sqY - (CHART_FONT + 3) * dpr >= 0;
+        const ly = above ? sqY - 2 * dpr : sqY + 2 * dpr;
+        ctx.textAlign = 'left';
+        ctx.textBaseline = above ? 'bottom' : 'top';
+        ctx.lineJoin = 'round';
+        ctx.lineWidth = 3 * dpr;
+        ctx.strokeStyle = ground;
+        ctx.strokeText('SQ', x0 + 3 * dpr, ly);
+        ctx.fillStyle = accent;
+        ctx.fillText('SQ', x0 + 3 * dpr, ly);
     }
 }
 
@@ -531,7 +671,7 @@ function drawChart(canvas, points, now, chart) {
 // ride — and drops the numeric readouts and the SNR trace. See the registry's
 // `minimal`.
 export default function SignalPanel({ minimal }) {
-    const { running } = useRadio();
+    const { running, squelch } = useRadio();
     const display = useDisplay();
     const touch = useMediaQuery(TOUCH_QUERY);
     const maxFps = resolveMaxFps(display.maxFps, touch);
@@ -544,6 +684,10 @@ export default function SignalPanel({ minimal }) {
     // Read by the frame loop, so a swap does not restart it.
     const chartRef = useRef(chart);
     chartRef.current = chart;
+    // The squelch threshold for the chart to draw against the SNR, in dB, or
+    // null while the gate is off. A ref for the same reason.
+    const squelchRef = useRef(null);
+    squelchRef.current = squelch && squelch.enabled ? squelch.value : null;
     const swapChart = () => display.set({ signalChart: chart === CHARTS.snr ? 'dbfs' : 'snr' });
 
     // Sampling only. The trace is drawn by the frame loop below, on the
@@ -582,7 +726,7 @@ export default function SignalPanel({ minimal }) {
         const capMs = maxFps > 0 ? 1000 / maxFps : 0;
 
         const frame = () => {
-            drawChart(canvasRef.current, history.current, performance.now(), chartRef.current);
+            drawChart(canvasRef.current, history.current, performance.now(), chartRef.current, squelchRef.current);
             if (capMs) timer = setTimeout(() => { raf = requestAnimationFrame(frame); }, capMs);
             else raf = requestAnimationFrame(frame);
         };
@@ -614,6 +758,23 @@ export default function SignalPanel({ minimal }) {
         ? peak.current.value
         : null;
 
+    // The SNR's own hold, on the same rule. Kept in dB rather than as a
+    // position, because the scale stops at SNR_MAX and a strong broadcast is
+    // well past it: a hold clamped to the end stop would print 30 dB beside a
+    // live 38. The fall is the S-meter's, converted to dB on this scale. No
+    // reading clears it, so a hold does not survive into the next signal.
+    const snrPeak = useRef(null);
+    const snrPeakAt = useRef(0);
+    useEffect(() => {
+        const now = performance.now();
+        const dt = snrPeakAt.current ? Math.min(0.5, (now - snrPeakAt.current) / 1000) : 0;
+        snrPeakAt.current = now;
+        snrPeak.current = snr == null || !Number.isFinite(snr)
+            ? null
+            : stepPeak(snrPeak.current, snr, dt, PEAK_FALL_PER_SEC * (SNR_MAX - SNR_MIN));
+    });
+    const snrHeld = snr != null && snrPeak.current ? snrPeak.current.value : null;
+
     // One style for both meters, and it is a display setting like any other, so
     // it survives a reload. Clicking either one switches both: they are a pair,
     // and a needle above a bar reads as a fault rather than a choice.
@@ -629,7 +790,7 @@ export default function SignalPanel({ minimal }) {
     const scale = topReading === 'dbfs' || bottomReading === 'dbfs'
         ? dbfsScale(levels.current.map((p) => p.v).concat(power))
         : null;
-    const shared = { needle, onSwapStyle: swap, styleHint: hint, power, snr, held, scale };
+    const shared = { needle, onSwapStyle: swap, styleHint: hint, power, snr, held, snrHeld, scale };
 
     return (
         <div className="stack">
@@ -697,15 +858,21 @@ export default function SignalPanel({ minimal }) {
 
                     {/* A button, as the NET chart in Stats is: a press swaps
                         SNR for the signal in dBFS, and it is a display setting
-                        so it survives a reload. */}
+                        so it survives a reload. The caption is above the plot
+                        and the figures below it rather than written over it,
+                        where they hid the trace they were describing. */}
                     <button
                         type="button"
-                        className="sparkline sparkline--press"
+                        className="sigchart"
                         onClick={swapChart}
                         title={chart === CHARTS.snr ? 'Click for the signal in dBFS' : 'Click for the SNR'}
                     >
-                        <canvas ref={canvasRef} />
-                        <span className="sparkline__label sparkline__label--bottom sparkline__label--left">{chart.label}, last 10 s</span>
+                        <span className="sigchart__head">
+                            <span>{chart.label} <span className="sigchart__unit">{chart.unit}</span></span>
+                            <span>Last 10 s</span>
+                        </span>
+                        <span className="sigchart__plot"><canvas ref={canvasRef} /></span>
+                        <ChartStats points={history.current} chart={chart} />
                     </button>
 
                     {!running && <div className="note note--tight">Meters are live once the receiver is started.</div>}

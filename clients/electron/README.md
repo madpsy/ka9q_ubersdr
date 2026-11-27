@@ -726,8 +726,9 @@ Asking that of everybody who downloads it is not a plan, so:
 ### Building the macOS dmg from somewhere else
 
 `./build-mac.sh` builds, signs and notarises on a Mac over ssh and brings the
-dmgs back into `dist/`, ready for `./build.sh --publish`. It exists because a
-dmg needs a Mac for exactly two steps — Apple's `codesign` and Apple's
+dmgs back into `dist/`; `./build-mac.sh --publish` uploads them. `./build.sh
+--publish` does not: it only uploads what its own run built, which from Linux
+is never a dmg. The script exists because a dmg needs a Mac for exactly two steps — Apple's `codesign` and Apple's
 notarisation service — while the rest of this client is plain JavaScript with no
 native module in it.
 
@@ -777,7 +778,7 @@ same convention `build.sh` uses for the Android keystore, and for the same
 reason — an environment variable is readable from every child process and ends
 up in a shell history.
 
-`--publish` will not upload a dmg unless `build-mac.sh` has confirmed with
+`build-mac.sh --publish` will not upload a dmg unless it has confirmed with
 `spctl` that Gatekeeper accepts it, and written the `.gatekeeper-ok` marker
 beside it. An un-notarised dmg does not warn the person who downloads it: it is
 reported as damaged.

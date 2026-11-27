@@ -110,37 +110,28 @@ WIN_IMAGE=electronuserland/builder:wine
 # and its name carries the version, so uploading it would leave a new copy on
 # the release every time rather than replacing the last.
 #
-# Not every one of these exists after any given build — a dmg needs a Mac, and
-# --linux skips the Windows half — so publishing uploads what is there and says
-# what is not. The dmgs come from build-mac.sh, which puts them here.
+# Not every one of these is built by any given run — a dmg needs a Mac, --linux
+# skips the Windows half, and the Windows installer is skipped with a note when
+# Docker is absent — so publishing uploads what *this run* wrote and says what
+# it left alone.
 #
-# Which is the trap in this list, and it is worth stating plainly because the
-# script cannot see it happening:
+# This run, not whatever is in dist/. The names never change, so dist/ always
+# holds the last copy of each, and uploading by name alone used to put old
+# files on the release under the new version: the previous release's dmgs on
+# every Linux --publish, and the previous installer on any run that skipped the
+# Windows half. publish_release now only takes a file modified since RUN_STAMP,
+# which is touched as packaging starts. The .gatekeeper-ok check could not have
+# caught this: that file says a dmg was notarised, not that it is this build's.
 #
-#   **A --publish from Linux uploads whatever dmgs are sitting in dist/, and
-#   they are as old as the last time build-mac.sh ran.**
-#
-# Nothing in a Linux run rebuilds them or can. So bumping the version, running
-# --publish here, and walking away puts the new version's Linux and Windows
-# artefacts on the release beside the *previous* version's macOS ones, all under
-# one rolling tag, with no warning louder than the sizes printed before the
-# upload. The .gatekeeper-ok check below does not catch it either: that file
-# says a dmg was notarised, not that it is this build's.
-#
-# So the order for a full release is the Mac first, or the publish split in two:
+# So the dmgs are build-mac.sh's to upload, and the order for a full release is
 #
 #     bump package.json
-#     ./build-mac.sh            # dmgs into dist/, signed and notarised
-#     ./build.sh --publish      # everything, now all of one version
+#     ./build.sh --publish      # Linux and Windows
+#     ./build-mac.sh --publish  # the dmgs, and only those two assets
 #
-# or, equivalently, ./build.sh --publish followed by ./build-mac.sh --publish,
-# which rebuilds the dmgs and replaces only those two assets.
-#
-# build-mac.sh already refuses this mistake at its own end: it uploads from
-# BUILT_DMGS — what that run actually produced — rather than from the directory,
-# precisely so an --arch=arm64 --publish cannot re-upload a leftover x64 dmg.
-# This script has no equivalent, because from Linux there is nothing to compare
-# a dmg against; the ordering above is the whole defence.
+# build-mac.sh does the same at its own end: it uploads from BUILT_DMGS — what
+# that run actually produced — rather than from the directory, so an
+# --arch=arm64 --publish cannot re-upload a leftover x64 dmg.
 #
 # What keeps this from reaching anybody is latest.json, and this is the case it
 # exists for: the release is not announced until that file moves, so a mismatched
@@ -318,10 +309,17 @@ publish_release() {
         return
     fi
 
+    # Built by this run, or not at all — see RELEASE_ASSETS. A file that is
+    # there but older than RUN_STAMP is last time's, and goes with the missing:
+    # the release keeps whatever it already has under that name.
     local found=() missing=()
     local asset
     for asset in "${RELEASE_ASSETS[@]}"; do
-        if [[ -f "$asset" ]]; then found+=("$asset"); else missing+=("$asset"); fi
+        if [[ -f "$asset" && "$asset" -nt "$RUN_STAMP" ]]; then
+            found+=("$asset")
+        else
+            missing+=("$asset")
+        fi
     done
     # A dmg nobody else can open is worse than no dmg.
     #
@@ -358,7 +356,7 @@ publish_release() {
     fi
 
     if [[ "${#found[@]}" -eq 0 ]]; then
-        echo "not published: none of the release artefacts are in dist/." >&2
+        echo "not published: this run built none of the release artefacts." >&2
         return
     fi
 
@@ -369,8 +367,14 @@ publish_release() {
     done
     if [[ "${#missing[@]}" -gt 0 ]]; then
         echo
-        echo "  Not built here, so left alone on the release:"
-        for asset in "${missing[@]}"; do echo "      $(basename "$asset")"; done
+        echo "  Not built by this run, so left alone on the release:"
+        for asset in "${missing[@]}"; do
+            if [[ -f "$asset" ]]; then
+                echo "      $(basename "$asset")   (dist/ has one from $(date -r "$asset" '+%Y-%m-%d %H:%M' 2>/dev/null || echo 'an earlier run'))"
+            else
+                echo "      $(basename "$asset")"
+            fi
+        done
     fi
     echo
 
@@ -653,6 +657,13 @@ if [[ ! -d node_modules ]]; then
 fi
 
 if [[ "$PACKAGE" -eq 1 ]]; then
+    # Everything packaged from here on is newer than this, and only that is
+    # published — see RELEASE_ASSETS. The second's wait is because `-nt`
+    # compares whole seconds in the bash here: an artefact written in the
+    # stamp's own second would otherwise count as last time's.
+    RUN_STAMP=$(mktemp)
+    trap 'rm -f "$RUN_STAMP"' EXIT
+    sleep 1
     if [[ "$LINUX_ONLY" -eq 1 ]]; then
         # An AppImage is a Linux binary with a Linux runtime concatenated onto
         # it, and electron-builder assembles it with the host's own tools. Asked

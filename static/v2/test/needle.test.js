@@ -8,7 +8,7 @@
 const assert = require('assert');
 const {
     SWEEP, PAD_TOP, PAD_BOTTOM, PAD_X, LABEL_INSET,
-    angleAt, arcAngle, geometry, pointAt, stepPeak,
+    angleAt, arcAngle, geometry, pointAt, stepPeak, PEAK_HOLD_SEC,
 } = require('./.build/needle.cjs');
 
 let pass = 0;
@@ -84,7 +84,10 @@ t('peak hold rises at once, holds, then falls', () => {
     // Still held a moment later, even though the reading has dropped.
     p = stepPeak(p, 0.2, 0.3);
     assert.strictEqual(p.value, 0.8);
-    // Past the hold it decays...
+    // Held through the whole of a gap between phrases...
+    p = stepPeak(p, 0.2, PEAK_HOLD_SEC - 0.4);
+    assert.strictEqual(p.value, 0.8);
+    // ...and past the hold it decays...
     p = stepPeak(p, 0.2, 0.5);
     assert.ok(p.value < 0.8 && p.value > 0.2, `decaying, got ${p.value}`);
     // ...and never below the live reading.

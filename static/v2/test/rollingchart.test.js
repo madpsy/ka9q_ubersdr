@@ -9,7 +9,7 @@
 
 const assert = require('assert');
 const {
-    curveControl, curveThrough, drawLag, medianGap, trimBefore, xAt, SPAN_MS,
+    chartScale, chartStats, curveControl, curveThrough, drawLag, medianGap, trimBefore, xAt, SPAN_MS,
 } = require('./.build/rollingchart.cjs');
 
 let pass = 0;
@@ -171,6 +171,62 @@ t('a single point is not a curve and draws nothing', () => {
     const ctx = recorder();
     curveThrough(ctx, [{ x: 0, y: 0 }]);
     assert.deepStrictEqual(ctx.calls, []);
+});
+
+t('a chart scale lands on whole grid steps around the readings', () => {
+    const s = chartScale([3.1, 17]);
+    assert.deepStrictEqual([s.lo, s.hi, s.step], [0, 20, 5]);
+    assert.deepStrictEqual(s.ticks, [0, 5, 10, 15, 20]);
+});
+
+t('a 10 dB grid sits on ends rounded only to 5', () => {
+    // An SNR wandering from -1 to 19: not -10..30 with a third of it empty.
+    const s = chartScale([-1, 19]);
+    assert.deepStrictEqual([s.lo, s.hi, s.step], [-5, 25, 10]);
+    assert.deepStrictEqual(s.ticks, [0, 10, 20]);
+});
+
+t('a chart scale never has more than four intervals', () => {
+    for (const vals of [[-95, -80], [-120, -20], [0, 3], [-5, 45], [-140, 10]]) {
+        const s = chartScale(vals);
+        assert.ok((s.hi - s.lo) / s.step <= 4, `${vals}: ${s.lo}..${s.hi} by ${s.step}`);
+        assert.ok(s.lo <= Math.min(...vals) && s.hi >= Math.max(...vals), `${vals} on the scale`);
+        assert.ok(s.ticks.length >= 2, `${vals}: at least two lines, got ${s.ticks}`);
+        assert.ok(s.ticks.every((v) => v % s.step === 0 && v >= s.lo && v <= s.hi), `${vals}: ${s.ticks}`);
+    }
+});
+
+t('a quiet channel is not magnified: the scale is at least 10 dB', () => {
+    const s = chartScale([-90.2, -90.1, -90.3]);
+    assert.ok(s.hi - s.lo >= 10);
+});
+
+t('the scale holds still while the readings move inside a step', () => {
+    const a = chartScale([3.2, 14.1]);
+    const b = chartScale([3.9, 15.2]);
+    assert.deepStrictEqual([a.lo, a.hi], [b.lo, b.hi]);
+});
+
+t('a scale that rounds up to zero prints 0, not -0', () => {
+    const s = chartScale([-12, -4]);
+    assert.ok(s.ticks.every((v) => !Object.is(v, -0)), String(s.ticks.map(String)));
+});
+
+t('no readings, no scale', () => {
+    assert.strictEqual(chartScale([]), null);
+    assert.strictEqual(chartScale([null, NaN]), null);
+});
+
+t('chart figures cover only the window, and skip gaps', () => {
+    const pts = [
+        { t: 0, snr: 99 },          // before the window
+        { t: 10, snr: 4 },
+        { t: 20, snr: null },
+        { t: 30, snr: 10 },
+        { t: 40, snr: 16 },
+    ];
+    assert.deepStrictEqual(chartStats(pts, 'snr', 5), { min: 4, mean: 10, max: 16, n: 3 });
+    assert.strictEqual(chartStats(pts, 'snr', 50), null);
 });
 
 console.log(`${pass} ok`);

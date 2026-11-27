@@ -3934,10 +3934,6 @@ a.btn { text-decoration: none; }
 /* Nothing held yet: the slot stays in the layout, so the live reading does not
    shift when the first peak arrives. */
 .meter__num.is-blank { visibility: hidden; }
-/* The SNR readout is padReading'd to a fixed five columns plus " dB", so every
-   value is this wide and the centring above cannot shift it. The reservation is
-   what holds the slot open while the reading is "--". */
-.meter__num--snr { min-width: 8ch; }
 /* The name of the reading, after its unit. Sized in `em` rather than px so it
    stays in proportion to the number whatever the text scale is — the global one
    and this panel's own — instead of needing its own calc(). Not bold and not the
@@ -4047,6 +4043,87 @@ a.btn { text-decoration: none; }
     font-variant-numeric: tabular-nums;
 }
 
+/* The Signal panel's chart: a caption, the plot with its dB grid, and the
+   lowest, mean and highest of the same ten seconds underneath. One button, so a
+   press anywhere on it swaps SNR for dBFS.
+
+   A column of explicit widths for the same WebKit reason the meters have one —
+   see .meter: a button lays its children out in an anonymous box that
+   shrink-wraps them, and the plot has no width of its own to be wrapped. */
+.sigchart {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 3px;
+    width: 100%;
+    padding: 0;
+    border: 0;
+    background: none;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+    -webkit-appearance: none;
+    appearance: none;
+}
+.sigchart:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: var(--radius-sm); }
+.sigchart__head, .sigchart__plot, .sigchart__stats { width: 100%; }
+.sigchart__head {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    font-size: calc(9.5px * var(--ui-scale));
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-dim);
+}
+/* The unit after the name, a step down: what the grid's numbers are in. */
+.sigchart__unit { color: var(--text-faint); text-transform: none; letter-spacing: 0.02em; }
+/* Eighty pixels: four grid intervals of twenty, which is as close as the
+   labels can sit and still be read. Not scaled with the text — the labels are
+   drawn into the canvas at a fixed size. */
+.sigchart__plot { display: block; height: 80px; }
+.sigchart__plot canvas { display: block; width: 100%; height: 100%; }
+/* Three equal columns, each a label over its figure. Side by side on one line
+   they need about 240px in dBFS, and a dock column gives this panel 200, so
+   they wrapped and left Max alone on a line of its own. */
+.sigchart__stats {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    column-gap: 6px;
+}
+.sigchart__stat {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 1px;
+    white-space: nowrap;
+    line-height: 1.2;
+}
+.sigchart__k {
+    font-size: calc(9px * var(--ui-scale));
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-faint);
+}
+/* The key to the dashed mean line on the plot, drawn the same way. */
+.sigchart__k--mean::before {
+    content: '';
+    display: inline-block;
+    width: 12px;
+    margin-right: 4px;
+    vertical-align: middle;
+    border-top: 1px dashed var(--text-dim);
+}
+.sigchart__v {
+    display: inline-block;
+    text-align: right;
+    font-family: var(--mono);
+    font-size: calc(11.5px * var(--ui-scale));
+    font-variant-numeric: tabular-nums;
+    color: var(--text);
+}
+
 .sparkline { position: relative; height: 46px; }
 .sparkline canvas { width: 100%; height: 100%; display: block; }
 .sparkline__label {
@@ -4119,12 +4196,6 @@ a.btn { text-decoration: none; }
    asked for — so a healthy trace sits just under that line, which is exactly
    where a top-right caption is. */
 .sparkline__label--bottom { top: auto; bottom: 0; }
-
-/* Pinned by its left edge instead. The SNR trace is scaled to its own data, so
-   it fills its box whatever the signal is doing and there is no corner it
-   never visits; the scrim on the base class is what keeps the caption legible
-   wherever it is put. */
-.sparkline__label--left { right: auto; left: 0; }
 
 /* A live number in a caption that is pinned by its right edge. Three figures
    covers any queue worth charting — a second of buffer is 1000 ms and the

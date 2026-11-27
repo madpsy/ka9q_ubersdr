@@ -198,3 +198,91 @@ export function chartPoints(points, now, w, y, value = (p) => p.v) {
     }
     return out;
 }
+
+/**
+ * The steps a chart's dB grid may take, finest first. Whole numbers a reading
+ * can be compared against at a glance; nothing finer than 5, because the
+ * narrowest chart is 10 dB tall and a 2 dB grid on it is a ruled page.
+ */
+export const CHART_STEPS = [5, 10, 20, 50, 100];
+
+/**
+ * The vertical scale for a trace of dB readings, with the grid lines it is
+ * drawn against: { lo, hi, step, ticks }, ticks being the dB of each line from
+ * the bottom up — the multiples of `step` from lo to hi. Null when there is nothing to scale to.
+ *
+ * Padded by a tenth of the span with a 2 dB floor and never less than
+ * `minSpan` tall, so a quiet channel is not magnified into a noise mountain —
+ * then rounded out. The rounding is what makes the scale usable: fitted exactly
+ * to the readings, the axis moved with every sample, so the same signal was a
+ * different height from one second to the next and a grid line drawn on it
+ * would have meant nothing. Rounded, the ends move only when a reading crosses
+ * one of the marks they are rounded to.
+ *
+ * The finest step that gives no more than four intervals: the chart is eighty
+ * pixels tall, and a label every twenty is as close as they can sit and still
+ * be read. The ends are rounded to half a step (5 dB at the least) rather than
+ * a whole one, and the lines are the whole steps inside them: rounded out to a
+ * whole 10 dB, an SNR wandering between -1 and 19 was drawn on -10..30 with the
+ * top third of the chart empty.
+ *
+ * Unlike v1 the floor is not clamped at 0 dB: an SNR is negative on an empty
+ * channel, and holding the axis at 0 would flatten the trace against the
+ * bottom exactly when someone is looking to see whether anything is there.
+ */
+export function chartScale(values, minSpan = 10) {
+    let min = Infinity;
+    let max = -Infinity;
+    for (const v of values) {
+        if (v == null || !Number.isFinite(v)) continue;
+        if (v < min) min = v;
+        if (v > max) max = v;
+    }
+    if (min === Infinity) return null;
+    const pad = Math.max(2, (max - min) * 0.1);
+    let lo = min - pad;
+    let hi = max + pad;
+    if (hi - lo < minSpan) {
+        const mid = (hi + lo) / 2;
+        lo = mid - minSpan / 2;
+        hi = mid + minSpan / 2;
+    }
+    let pick = null;
+    for (const step of CHART_STEPS) {
+        // `+ 0` folds a -0 from rounding a small negative up to the 0 line,
+        // which would otherwise print as "-0".
+        const unit = Math.max(5, step / 2);
+        pick = { lo: Math.floor(lo / unit) * unit + 0, hi: Math.ceil(hi / unit) * unit + 0, step };
+        if ((pick.hi - pick.lo) / step <= 4) break;
+    }
+    const ticks = [];
+    for (let v = Math.ceil(pick.lo / pick.step) * pick.step + 0; v <= pick.hi; v += pick.step) ticks.push(v);
+    return { ...pick, ticks };
+}
+
+/**
+ * The lowest, mean and highest of one reading over the points since `since`:
+ * { min, mean, max, n }, or null when none of them has the reading.
+ *
+ * The mean is of the dB figures, not of the power they stand for. A power mean
+ * on speech is the loudest syllables and little else — it lands within a dB or
+ * two of the peaks — and what this is for is the opposite: a figure that says
+ * what the signal typically is, steady enough to compare one antenna with
+ * another, where the live reading changes too fast to read.
+ */
+export function chartStats(points, key, since) {
+    let n = 0;
+    let sum = 0;
+    let min = Infinity;
+    let max = -Infinity;
+    for (const p of points) {
+        if (p.t < since) continue;
+        const v = p[key];
+        if (v == null || !Number.isFinite(v)) continue;
+        n += 1;
+        sum += v;
+        if (v < min) min = v;
+        if (v > max) max = v;
+    }
+    return n ? { min, mean: sum / n, max, n } : null;
+}
